@@ -1,9 +1,12 @@
 # ShadowScope 🛰️
 
 **ShadowScope** is a powerful, terminal-based IOC (Indicator of Compromise) enrichment and analysis tool. It aggregates data from multiple threat intelligence sources to provide a comprehensive risk assessment for IPs, Domains, URLs, and File Hashes.
-
-![ShadowScope Banner](https://via.placeholder.com/800x200.png?text=ShadowScope+Banner)
-
+   _____ __               __               _____                      
+  / ___// /_  ____ ______/ /___ _      __ / ___/_________  ____  ___ 
+  \__ \/ __ \/ __ `/ __  / __ \ | /| / / \__ \/ ___/ __ \/ __ \/ _ \
+ ___/ / / / / /_/ / /_/ / /_/ / |/ |/ / ___/ / /__/ /_/ / /_/ /  __/
+/____/_/ /_/\__,_/\__,_/\____/|__/|__/ /____/\___/\____/ .___/\___/ 
+                                                      /_/           
 ## 🚀 Features
 
 *   **Multi-Source Enrichment**:
