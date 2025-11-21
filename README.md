@@ -1,12 +1,8 @@
 # ShadowScope 🛰️
 
 **ShadowScope** is a powerful, terminal-based IOC (Indicator of Compromise) enrichment and analysis tool. It aggregates data from multiple threat intelligence sources to provide a comprehensive risk assessment for IPs, Domains, URLs, and File Hashes.
-   _____ __               __               _____                      
-  / ___// /_  ____ ______/ /___ _      __ / ___/_________  ____  ___ 
-  \__ \/ __ \/ __ `/ __  / __ \ | /| / / \__ \/ ___/ __ \/ __ \/ _ \
- ___/ / / / / /_/ / /_/ / /_/ / |/ |/ / ___/ / /__/ /_/ / /_/ /  __/
-/____/_/ /_/\__,_/\__,_/\____/|__/|__/ /____/\___/\____/ .___/\___/ 
-                                                      /_/           
+<img width="562" height="110" alt="image" src="https://github.com/user-attachments/assets/d356a536-f94d-4a9a-8c64-eabfbd54381b" />
+
 ## 🚀 Features
 
 *   **Multi-Source Enrichment**:
@@ -17,10 +13,15 @@
     *   **IPinfo**: Organization and ASN details.
     *   **Tor Detection**: Identifies active Tor exit nodes.
     *   **WHOIS**: Domain creation dates and registrar info.
+    <img width="1341" height="529" alt="image" src="https://github.com/user-attachments/assets/033a128a-68db-4fdd-8698-7d0f09439246" />
+    <img width="363" height="422" alt="image" src="https://github.com/user-attachments/assets/6d584762-5951-4ebb-98b4-25b9395feb10" />
+
 *   **Multi-Sandbox Analysis**:
     *   **FileScan.IO**: Full file/URL analysis with report links.
     *   **Hybrid Analysis**: (Optional) Automated malware analysis.
     *   **Joe Sandbox**: (Optional) Deep malware analysis.
+    <img width="1206" height="88" alt="image" src="https://github.com/user-attachments/assets/22f1c531-4fb1-4b20-af9b-bf52b6010282" />
+
 *   **Smart Risk Scoring**:
     *   Calculates a composite risk score (0-100).
     *   Color-coded risk levels: **Safe**, **Low**, **Medium**, **High**, **Critical**.
