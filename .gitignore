@@ -1,0 +1,31 @@
+# Secrets
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project specific
+test_filescan_api.py
+test_filescan_urls.py
+debug_sandbox.py
+heavy_test_iocs.txt
+test_iocs.txt
+eicar.com
+test_dummy.txt
