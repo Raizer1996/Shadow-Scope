@@ -18,8 +18,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ## v0.3 — Output + Bulk (analyst usability)
 
 ### Output formats
-- [ ] **JSON output** (`--json`) for SIEM ingest. **[issue]**
-- [ ] **CSV output** (`--csv`) for spreadsheet handoff. **[issue]**
 - [ ] **STIX 2.1 export** (`--stix`) for threat-intel sharing. **[issue]**
 - [ ] **Markdown report** (`--md`) for case documentation. **[issue]**
 - [ ] **PDF report** (`--pdf`) — exec-style with score banner, table, links. **[issue]**
@@ -202,3 +200,5 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] Pinned `requirements.txt` versions + added `requirements-dev.txt` (pytest, ruff, responses) (2026-05-14)
 - [x] IOC defang / refang — auto-refang input in parser, optional `--defang` flag for output (2026-05-14)
 - [x] Pytest mocking — `responses` lib intercepts every module HTTP call; tests run offline in <1 s (2026-05-14)
+- [x] JSON output (`--json`) for SIEM ingest (2026-05-14)
+- [x] CSV output (`--csv`) for spreadsheet handoff (2026-05-14)

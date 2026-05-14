@@ -1,8 +1,11 @@
 """Smoke tests — no live API calls. Verify imports and pure-logic helpers."""
 
+import json
+from datetime import datetime
+
 import pytest
 
-from ioc_tool.core import defang as defang_mod, parser as parser_mod, score
+from ioc_tool.core import defang as defang_mod, output as output_mod, parser as parser_mod, score
 from ioc_tool.ui import cli
 
 
@@ -182,3 +185,158 @@ def test_cli_defang_flag_parses():
     # default off
     args2 = parser.parse_args(['enrich', '8.8.8.8'])
     assert args2.defang is False
+
+
+# ---------------------------------------------------------------------------
+# JSON / CSV output formats
+# ---------------------------------------------------------------------------
+
+
+def _sample_ip_result() -> dict:
+    """Build a representative enrichment dict mirroring enrich_ioc()."""
+    return {
+        "ioc": "8.8.8.8",
+        "type": "ip",
+        "final_score": 42,
+        "modules": {
+            "VirusTotal": {
+                "score": 3,
+                "data": {
+                    "last_analysis_stats": {
+                        "malicious": 3,
+                        "suspicious": 0,
+                        "harmless": 60,
+                        "undetected": 30,
+                    }
+                },
+            },
+            "AbuseIPDB": {
+                "score": 50,
+                "data": {"abuseConfidenceScore": 50, "usageType": "Data Center"},
+            },
+            "Shodan": {
+                "score": 0,
+                "data": {"tags": ["vpn", "cloud"], "ports": [22, 80, 443]},
+            },
+            "IPQS": {
+                "score": 25,
+                "data": {"fraud_score": 25},
+            },
+            "IPinfo": {
+                "score": 0,
+                "data": {"org": "AS15169 Google LLC", "country": "US"},
+            },
+            "TOR": {"score": 100, "data": {"is_tor": True}},
+        },
+    }
+
+
+def _sample_domain_result() -> dict:
+    """Domain enrichment — no Shodan / IPinfo / Tor blocks present."""
+    return {
+        "ioc": "example.com",
+        "type": "domain",
+        "final_score": 10,
+        "modules": {
+            "VirusTotal": {
+                "score": 0,
+                "data": {
+                    "last_analysis_stats": {
+                        "malicious": 0,
+                        "suspicious": 0,
+                        "harmless": 80,
+                        "undetected": 10,
+                    }
+                },
+            },
+            "WHOIS": {
+                "score": 10,
+                "data": {"creation_date": "1995-08-14T04:00:00"},
+            },
+        },
+    }
+
+
+def test_to_json_serializes_all_fields():
+    """to_json returns parseable JSON and round-trips the IOC value."""
+    payload = output_mod.to_json([_sample_ip_result()])
+    parsed = json.loads(payload)
+    assert isinstance(parsed, list)
+    assert parsed[0]["ioc"] == "8.8.8.8"
+    assert parsed[0]["type"] == "ip"
+    assert parsed[0]["final_score"] == 42
+    # All module blocks must survive serialization
+    assert "VirusTotal" in parsed[0]["modules"]
+    assert "AbuseIPDB" in parsed[0]["modules"]
+    assert parsed[0]["modules"]["Shodan"]["data"]["ports"] == [22, 80, 443]
+
+
+def test_to_csv_has_expected_header():
+    """First CSV line is the documented header row."""
+    csv_str = output_mod.to_csv([_sample_ip_result()])
+    first_line = csv_str.splitlines()[0]
+    expected_header = ",".join(output_mod.CSV_COLUMNS)
+    assert first_line == expected_header
+
+
+def test_to_csv_handles_missing_modules():
+    """IOCs without Shodan/IPinfo/Tor produce empty cells, not crashes."""
+    csv_str = output_mod.to_csv([_sample_domain_result()])
+    lines = csv_str.splitlines()
+    assert len(lines) == 2  # header + 1 data row
+    header = lines[0].split(",")
+    row = lines[1].split(",")
+    record = dict(zip(header, row))
+    assert record["ioc"] == "example.com"
+    assert record["type"] == "domain"
+    assert record["shodan_tags"] == ""
+    assert record["shodan_ports"] == ""
+    assert record["ipinfo_org"] == ""
+    assert record["tor"] == ""
+    assert record["whois_creation_date"] == "1995-08-14T04:00:00"
+
+
+def test_to_json_handles_datetime():
+    """Datetime in the payload must serialize without TypeError."""
+    sample = _sample_domain_result()
+    sample["modules"]["WHOIS"]["data"]["creation_date"] = datetime(1995, 8, 14, 4, 0, 0)
+    payload = output_mod.to_json([sample])
+    parsed = json.loads(payload)
+    creation = parsed[0]["modules"]["WHOIS"]["data"]["creation_date"]
+    assert "1995-08-14" in creation
+
+
+def test_risk_tier_boundaries():
+    """Tier mapping aligns with docs/ARCHITECTURE.md."""
+    assert output_mod._risk_tier(0) == "Safe"
+    assert output_mod._risk_tier(19) == "Safe"
+    assert output_mod._risk_tier(20) == "Low"
+    assert output_mod._risk_tier(40) == "Medium"
+    assert output_mod._risk_tier(60) == "High"
+    assert output_mod._risk_tier(80) == "Critical"
+    assert output_mod._risk_tier(100) == "Critical"
+
+
+def test_cli_enrich_accepts_json_flag():
+    """`enrich <ioc> --json` sets args.json=True / args.csv=False."""
+    parser = cli.build_parser()
+    args = parser.parse_args(['enrich', '8.8.8.8', '--json'])
+    assert args.command == 'enrich'
+    assert args.json is True
+    assert args.csv is False
+
+
+def test_cli_enrich_accepts_csv_flag():
+    """`enrich <ioc> --csv` sets args.csv=True / args.json=False."""
+    parser = cli.build_parser()
+    args = parser.parse_args(['enrich', '8.8.8.8', '--csv'])
+    assert args.command == 'enrich'
+    assert args.csv is True
+    assert args.json is False
+
+
+def test_cli_json_and_csv_are_mutually_exclusive():
+    """Passing both --json and --csv exits the parser."""
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(['enrich', '8.8.8.8', '--json', '--csv'])

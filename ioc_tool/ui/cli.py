@@ -8,7 +8,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
-from ..core import database, defang as defang_mod, enrich, parser
+from ..core import database, defang as defang_mod, enrich, output as output_mod, parser
 from ..modules import (
     abuseipdb,  # noqa: F401  (imported for side-effect parity with previous CLI)
     filescan_io,
@@ -20,6 +20,9 @@ from ..modules import (
 from . import banner
 
 console = Console()
+# Separate console pinned to stderr — used when stdout must stay parse-clean
+# (e.g. `--json` / `--csv` output piping into SIEMs and spreadsheets).
+err_console = Console(stderr=True)
 
 
 def _display_ioc(value: str, should_defang: bool) -> str:
@@ -40,7 +43,13 @@ def _display_ioc(value: str, should_defang: bool) -> str:
 # ---------------------------------------------------------------------------
 
 
-def check_config() -> None:
+def check_config(quiet: bool = False) -> None:
+    """Print a warning panel for missing API keys.
+
+    When ``quiet`` is True, the panel is routed to stderr so that
+    callers piping ``--json`` / ``--csv`` to stdout still get a
+    parse-clean machine-readable payload.
+    """
     missing: List[str] = []
     if not os.getenv('VT_API_KEY'):
         missing.append("VT_API_KEY (VirusTotal)")
@@ -54,7 +63,8 @@ def check_config() -> None:
         missing.append("SHODAN_API_KEY (Shodan)")
 
     if missing:
-        console.print(
+        target = err_console if quiet else console
+        target.print(
             Panel(
                 f"[yellow]Warning: Missing API Keys for: {', '.join(missing)}.\n"
                 f"Some modules will be skipped. Configure .env to enable them.[/yellow]",
@@ -268,7 +278,19 @@ def print_aggregated_table(
 
 
 def handle_enrich(args: argparse.Namespace) -> None:
-    """Enrich one IOC (positional) and/or a newline-delimited file (-f)."""
+    """Enrich one IOC (positional) and/or a newline-delimited file (-f).
+
+    When ``--json`` or ``--csv`` is set, stdout is reserved for the
+    machine-readable payload and all decorative chatter (status
+    spinners, warnings, "skipping unknown IOC" notes) is routed to
+    stderr — pipelines can pipe stdout straight into a SIEM or
+    spreadsheet without scrubbing.
+    """
+    want_json = getattr(args, 'json', False)
+    want_csv = getattr(args, 'csv', False)
+    machine_readable = want_json or want_csv
+    msg_console = err_console if machine_readable else console
+
     iocs_to_process: List[str] = []
 
     if getattr(args, 'ioc', None):
@@ -283,29 +305,51 @@ def handle_enrich(args: argparse.Namespace) -> None:
                     if line:
                         iocs_to_process.append(line)
         except FileNotFoundError:
-            console.print(f"[red]Error: File {file_path} not found.[/red]")
+            msg_console.print(f"[red]Error: File {file_path} not found.[/red]")
             return
         except OSError as exc:
-            console.print(f"[red]Error reading {file_path}: {exc}[/red]")
+            msg_console.print(f"[red]Error reading {file_path}: {exc}[/red]")
             return
 
     if not iocs_to_process:
-        console.print("[yellow]No IOCs provided. Pass an IOC positional or -f FILE.[/yellow]")
+        msg_console.print("[yellow]No IOCs provided. Pass an IOC positional or -f FILE.[/yellow]")
         return
 
     results: List[Dict[str, Any]] = []
-    with console.status("[bold green]Enriching IOCs...[/bold green]"):
+    if machine_readable:
+        # No spinner — would leak escape codes to stdout via rich's redraw loop.
         for ioc in iocs_to_process:
             ioc_type = parser.detect_type(ioc)
             if ioc_type == 'unknown':
-                console.print(f"[yellow]Skipping unknown IOC type: {ioc}[/yellow]")
+                msg_console.print(f"[yellow]Skipping unknown IOC type: {ioc}[/yellow]")
                 continue
 
             result = enrich.enrich_ioc(ioc, ioc_type)
             results.append(result)
+    else:
+        with console.status("[bold green]Enriching IOCs...[/bold green]"):
+            for ioc in iocs_to_process:
+                ioc_type = parser.detect_type(ioc)
+                if ioc_type == 'unknown':
+                    console.print(f"[yellow]Skipping unknown IOC type: {ioc}[/yellow]")
+                    continue
 
-    if results:
-        print_aggregated_table(results, should_defang=getattr(args, 'defang', False))
+                result = enrich.enrich_ioc(ioc, ioc_type)
+                results.append(result)
+
+    if not results:
+        return
+
+    if want_json:
+        print(output_mod.to_json(results))
+        return
+    if want_csv:
+        # Use sys.stdout.write to preserve the trailing newline structure
+        # exactly as csv.writer emits it; print() would append an extra \n.
+        sys.stdout.write(output_mod.to_csv(results))
+        return
+
+    print_aggregated_table(results, should_defang=getattr(args, 'defang', False))
 
 
 def handle_show(args: argparse.Namespace) -> None:
@@ -555,6 +599,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help='Path to a file with one IOC per line',
     )
+    output_group = p_enrich.add_mutually_exclusive_group()
+    output_group.add_argument(
+        '--json',
+        action='store_true',
+        help='Output as JSON instead of rich table (stdout stays parse-clean)',
+    )
+    output_group.add_argument(
+        '--csv',
+        action='store_true',
+        help='Output as CSV instead of rich table (stdout stays parse-clean)',
+    )
 
     # analyze
     p_analyze = subparsers.add_parser(
@@ -610,11 +665,18 @@ def main() -> None:
         parser_arg.print_help()
         return
 
-    # Banner + DB init for any actual command invocation
-    if not banner.show():
-        pass
+    # When the user wants machine-readable output, stdout is reserved
+    # for the payload. Skip the banner entirely and send the missing-
+    # keys warning to stderr so JSON/CSV pipes stay parse-clean.
+    machine_readable = bool(
+        getattr(args, 'json', False) or getattr(args, 'csv', False)
+    )
+
+    if not machine_readable:
+        if not banner.show():
+            pass
     database.init_db()
-    check_config()
+    check_config(quiet=machine_readable)
 
     if args.command == 'enrich':
         handle_enrich(args)

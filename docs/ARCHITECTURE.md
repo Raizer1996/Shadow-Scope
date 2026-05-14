@@ -52,6 +52,7 @@ ShadowScope is a terminal-based IOC enrichment and risk-scoring tool. It accepts
 | `ioc_tool/core/enrich.py` | Orchestrate per-source enrichment + cache lookups |
 | `ioc_tool/core/database.py` | SQLite wrapper (IOCs + enrichments tables) |
 | `ioc_tool/core/score.py` | Per-source scoring + composite risk avg |
+| `ioc_tool/core/output.py` | JSON/CSV serializers for results |
 | `ioc_tool/modules/vt.py` | VirusTotal v3 API client |
 | `ioc_tool/modules/abuseipdb.py` | AbuseIPDB IP confidence lookup |
 | `ioc_tool/modules/shodan_mod.py` | Shodan host info |

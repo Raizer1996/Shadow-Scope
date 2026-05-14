@@ -103,6 +103,15 @@ python3 -m ioc_tool.main enrich 8.8.8.8
 python3 -m ioc_tool.main enrich -f iocs.txt
 ```
 
+**Machine-readable output** for SIEM / spreadsheet pipelines
+
+```bash
+python3 -m ioc_tool.main enrich 8.8.8.8 --json
+python3 -m ioc_tool.main enrich -f iocs.txt --csv > report.csv
+```
+
+`--json` emits the full result payload; `--csv` flattens to the key columns (IOC, type, final score, risk tier, per-source highlights). Both keep stdout parse-clean — banners and warnings are routed to stderr.
+
 **Sandbox analyze a file or URL** (file vs URL auto-detected)
 
 ```bash
