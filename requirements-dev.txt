@@ -1,0 +1,4 @@
+pytest==9.0.2
+ruff==0.15.13
+responses==0.26.0
+httpx==0.28.1
