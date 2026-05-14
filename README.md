@@ -80,23 +80,51 @@ python3 -m ioc_tool.main    # interactive mode
 
 ## 💻 Usage
 
+ShadowScope uses discoverable argparse subcommands. Run with no arguments for the
+interactive menu, or pass a subcommand for a one-shot operation.
+
 **Interactive mode**
 
 ```bash
 python3 -m ioc_tool.main
 ```
 
-**Quick shortcuts**
+**Enrich a single IOC** (IP / domain / URL / hash)
 
 ```bash
-# Enrich an IP / domain / hash
-python3 -m ioc_tool.main -1 8.8.8.8
+python3 -m ioc_tool.main enrich 8.8.8.8
+```
 
-# Analyze a file / URL
-python3 -m ioc_tool.main -2 sample.exe
+**Bulk enrich from a file** (one IOC per line)
 
-# Shodan scan
-python3 -m ioc_tool.main -3 1.1.1.1
+```bash
+python3 -m ioc_tool.main enrich -f iocs.txt
+```
+
+**Sandbox analyze a file or URL** (file vs URL auto-detected)
+
+```bash
+python3 -m ioc_tool.main analyze sample.exe
+python3 -m ioc_tool.main analyze https://example.com/bad
+```
+
+**Shodan-only host lookup**
+
+```bash
+python3 -m ioc_tool.main shodan 1.1.1.1
+```
+
+**Show cached enrichment** for a previously-enriched IOC
+
+```bash
+python3 -m ioc_tool.main show 8.8.8.8
+```
+
+**Help at any level**
+
+```bash
+python3 -m ioc_tool.main --help
+python3 -m ioc_tool.main enrich --help
 ```
 
 ## 📚 Documentation

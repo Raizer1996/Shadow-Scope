@@ -1,6 +1,9 @@
 """Smoke tests — no live API calls. Verify imports and pure-logic helpers."""
 
+import pytest
+
 from ioc_tool.core import score
+from ioc_tool.ui import cli
 
 
 def test_imports():
@@ -45,3 +48,39 @@ def test_final_risk_average():
 
 def test_whois_score_unknown_age():
     assert score.calculate_whois_score(None) == 50
+
+
+def test_cli_parser_builds_with_all_subcommands():
+    """The argparse parser exposes the four expected subcommands."""
+    parser = cli.build_parser()
+    # subparsers action is registered as 'command' dest
+    subparsers_action = next(
+        a for a in parser._actions if getattr(a, 'dest', None) == 'command'
+    )
+    assert set(subparsers_action.choices.keys()) == {'enrich', 'analyze', 'shodan', 'show'}
+
+
+def test_cli_enrich_help_exits_cleanly():
+    """`enrich --help` should raise SystemExit(0) — argparse's success path."""
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(['enrich', '--help'])
+    assert excinfo.value.code == 0
+
+
+def test_cli_enrich_parses_positional_ioc():
+    """Positional IOC routes to args.ioc with file defaulting to None."""
+    parser = cli.build_parser()
+    args = parser.parse_args(['enrich', '8.8.8.8'])
+    assert args.command == 'enrich'
+    assert args.ioc == '8.8.8.8'
+    assert args.file is None
+
+
+def test_cli_enrich_parses_file_flag():
+    """`enrich -f path` sets args.file and leaves ioc None."""
+    parser = cli.build_parser()
+    args = parser.parse_args(['enrich', '-f', 'iocs.txt'])
+    assert args.command == 'enrich'
+    assert args.ioc is None
+    assert args.file == 'iocs.txt'
