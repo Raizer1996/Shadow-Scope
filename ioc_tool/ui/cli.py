@@ -8,7 +8,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
-from ..core import database, enrich, parser
+from ..core import database, defang as defang_mod, enrich, parser
 from ..modules import (
     abuseipdb,  # noqa: F401  (imported for side-effect parity with previous CLI)
     filescan_io,
@@ -20,6 +20,19 @@ from ..modules import (
 from . import banner
 
 console = Console()
+
+
+def _display_ioc(value: str, should_defang: bool) -> str:
+    """Return the IOC string in the form expected by the user.
+
+    When ``--defang`` is active we route the value through
+    :func:`ioc_tool.core.defang.defang` so the rendered report is safe to
+    paste into mail/ticket systems. Otherwise the live value is returned
+    unchanged.
+    """
+    if should_defang and isinstance(value, str):
+        return defang_mod.defang(value)
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -59,9 +72,9 @@ def get_score_color(score: int) -> str:
     return "green"
 
 
-def print_single_result(result: Dict[str, Any]) -> None:
+def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> None:
     """Used for 'show' command - detailed view of a single IOC."""
-    ioc_value = result['ioc']
+    ioc_value = _display_ioc(result['ioc'], should_defang)
     ioc_type = result['type']
     final_score = result['final_score']
     color = get_score_color(final_score)
@@ -104,7 +117,10 @@ def print_single_result(result: Dict[str, Any]) -> None:
     console.print("-" * 40)
 
 
-def print_aggregated_table(results: List[Dict[str, Any]]) -> None:
+def print_aggregated_table(
+    results: List[Dict[str, Any]],
+    should_defang: bool = False,
+) -> None:
     """Used for 'enrich' command - summary table of all IOCs."""
     sorted_results = sorted(results, key=lambda x: (x['type'], -x['final_score']))
 
@@ -118,7 +134,7 @@ def print_aggregated_table(results: List[Dict[str, Any]]) -> None:
     for res in sorted_results:
         score = res['final_score']
         ioc_type = res['type'].upper()
-        ioc_value = res['ioc']
+        ioc_value = _display_ioc(res['ioc'], should_defang)
         modules = res.get('modules', {})
 
         summary_parts: List[str] = []
@@ -289,7 +305,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
             results.append(result)
 
     if results:
-        print_aggregated_table(results)
+        print_aggregated_table(results, should_defang=getattr(args, 'defang', False))
 
 
 def handle_show(args: argparse.Namespace) -> None:
@@ -301,7 +317,7 @@ def handle_show(args: argparse.Namespace) -> None:
 
     ioc_type = parser.detect_type(args.ioc)
     result = enrich.enrich_ioc(args.ioc, ioc_type)
-    print_single_result(result)
+    print_single_result(result, should_defang=getattr(args, 'defang', False))
 
 
 def handle_analyze(
@@ -513,6 +529,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser_arg = argparse.ArgumentParser(
         prog="shadowscope",
         description="ShadowScope — terminal IOC enrichment & sandbox CLI",
+    )
+    parser_arg.add_argument(
+        '--defang',
+        action='store_true',
+        default=False,
+        help='Defang IOCs in printed output (e.g. 1.2.3.4 → 1[.]2[.]3[.]4) so reports are safe to share',
     )
     subparsers = parser_arg.add_subparsers(dest='command', metavar='<command>')
 

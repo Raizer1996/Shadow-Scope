@@ -29,7 +29,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [ ] **Bulk mode** (`-f iocs.txt`) — one IOC per line, parallel enrich, combined report. **[issue]**
 - [ ] **Pipe support** (`echo 1.2.3.4 | shadowscope enrich -`). **[issue]**
 - [ ] **IOC extraction from text** — paste email body / log dump, auto-extract IPs/domains/hashes/URLs, enrich each. **[issue]**
-- [ ] **Defang / refang** — convert `1[.]2[.]3[.]4` ↔ `1.2.3.4` on input/output. **[issue]**
 - [ ] **Punycode decode** — catch IDN homograph attacks in domains. **[issue]**
 
 ### Cache / freshness
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] Full feature backlog brainstormed and structured (2026-05-14)
 - [x] Argparse subcommands — `enrich`, `analyze`, `shodan`, `show` replace `-1/-2/-3` (2026-05-14)
 - [x] Pinned `requirements.txt` versions + added `requirements-dev.txt` (pytest, ruff, responses) (2026-05-14)
+- [x] IOC defang / refang — auto-refang input in parser, optional `--defang` flag for output (2026-05-14)

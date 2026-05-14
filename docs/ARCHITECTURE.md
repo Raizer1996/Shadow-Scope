@@ -48,6 +48,7 @@ ShadowScope is a terminal-based IOC enrichment and risk-scoring tool. It accepts
 | `ioc_tool/ui/cli.py` | Interactive menu + arg-flag shortcuts (`-1/-2/-3`) |
 | `ioc_tool/ui/banner.py` | "Sniper Scope" ASCII art + colors |
 | `ioc_tool/core/parser.py` | Detect IOC type from string |
+| `ioc_tool/core/defang.py` | Defang/refang IOC strings |
 | `ioc_tool/core/enrich.py` | Orchestrate per-source enrichment + cache lookups |
 | `ioc_tool/core/database.py` | SQLite wrapper (IOCs + enrichments tables) |
 | `ioc_tool/core/score.py` | Per-source scoring + composite risk avg |

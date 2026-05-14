@@ -1,8 +1,11 @@
 import re
 import ipaddress
 
+from .defang import refang
+
+
 def detect_type(value):
-    value = value.strip()
+    value = refang(value.strip())
     
     # IP Address
     try:

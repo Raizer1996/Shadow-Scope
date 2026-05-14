@@ -2,7 +2,7 @@
 
 import pytest
 
-from ioc_tool.core import score
+from ioc_tool.core import defang as defang_mod, parser as parser_mod, score
 from ioc_tool.ui import cli
 
 
@@ -84,3 +84,101 @@ def test_cli_enrich_parses_file_flag():
     assert args.command == 'enrich'
     assert args.ioc is None
     assert args.file == 'iocs.txt'
+
+
+# ---------------------------------------------------------------------------
+# Defang / refang
+# ---------------------------------------------------------------------------
+
+
+def test_refang_basic():
+    """All conventional defang patterns get restored to their live form."""
+    assert defang_mod.refang("1[.]2[.]3[.]4") == "1.2.3.4"
+    assert defang_mod.refang("hxxp://evil[.]com/path") == "http://evil.com/path"
+    assert defang_mod.refang("hxxps://evil[.]com") == "https://evil.com"
+    # Case-preserving on the xx -> tt swap; the rest of the string is left alone.
+    assert defang_mod.refang("hXXp://EVIL[.]com") == "hTTp://EVIL.com"
+    assert defang_mod.refang("HXXP://EVIL[.]COM") == "HTTP://EVIL.COM"
+    assert defang_mod.refang("attacker[at]gmail[.]com") == "attacker@gmail.com"
+    assert defang_mod.refang("user[@]example[.]com") == "user@example.com"
+    assert defang_mod.refang("evil(.)example(.)com") == "evil.example.com"
+    assert defang_mod.refang("evil{.}example{.}com") == "evil.example.com"
+    assert defang_mod.refang("hxxp[:]//evil[.]com") == "http://evil.com"
+    assert defang_mod.refang("  hxxp://evil[.]com  ") == "http://evil.com"
+    assert defang_mod.refang("fxp://files[.]evil[.]com") == "ftp://files.evil.com"
+
+
+def test_defang_basic():
+    """Round-trip clean IOCs through defang."""
+    assert defang_mod.defang("1.2.3.4") == "1[.]2[.]3[.]4"
+    assert defang_mod.defang("http://evil.com/path") == "hxxp://evil[.]com/path"
+    assert defang_mod.defang("https://evil.com") == "hxxps://evil[.]com"
+    assert defang_mod.defang("attacker@gmail.com") == "attacker[@]gmail[.]com"
+    assert defang_mod.defang("bad.example.com") == "bad[.]example[.]com"
+
+
+def test_refang_idempotent():
+    """refang(refang(x)) == refang(x) for the common shapes."""
+    for sample in (
+        "1[.]2[.]3[.]4",
+        "hxxp://evil[.]com/path",
+        "attacker[at]gmail[.]com",
+        "8.8.8.8",
+        "https://already-live.example.com",
+    ):
+        once = defang_mod.refang(sample)
+        twice = defang_mod.refang(once)
+        assert once == twice, f"refang not idempotent for {sample!r}: {once!r} != {twice!r}"
+
+
+def test_defang_idempotent():
+    """defang(defang(x)) == defang(x) for the common shapes."""
+    for sample in (
+        "1.2.3.4",
+        "http://evil.com/path",
+        "attacker@gmail.com",
+        "bad.example.com",
+        # already-defanged input should remain stable
+        "1[.]2[.]3[.]4",
+        "hxxp://evil[.]com",
+    ):
+        once = defang_mod.defang(sample)
+        twice = defang_mod.defang(once)
+        assert once == twice, f"defang not idempotent for {sample!r}: {once!r} != {twice!r}"
+
+
+def test_refang_defang_roundtrip_common_case():
+    """For typical defanged input, refang then defang reproduces the original."""
+    samples = (
+        "1[.]2[.]3[.]4",
+        "hxxp://evil[.]com",
+        "hxxps://evil[.]com",
+        "bad[.]example[.]com",
+        "attacker[@]gmail[.]com",
+    )
+    for sample in samples:
+        assert defang_mod.defang(defang_mod.refang(sample)) == sample
+
+
+def test_parser_handles_defanged_input():
+    """parser.detect_type sees defanged IOCs and classifies them correctly."""
+    assert parser_mod.detect_type("1[.]2[.]3[.]4") == "ip"
+    assert parser_mod.detect_type("hxxp://evil[.]com") == "url"
+    assert parser_mod.detect_type("bad[.]example[.]com") == "domain"
+    assert parser_mod.detect_type("attacker[at]gmail[.]com") == "email"
+    # Live forms keep working unchanged
+    assert parser_mod.detect_type("8.8.8.8") == "ip"
+    assert parser_mod.detect_type("https://example.com") == "url"
+
+
+def test_cli_defang_flag_parses():
+    """The top-level --defang flag is accepted on any subcommand."""
+    parser = cli.build_parser()
+    args = parser.parse_args(['--defang', 'enrich', '8.8.8.8'])
+    assert args.defang is True
+    assert args.command == 'enrich'
+    assert args.ioc == '8.8.8.8'
+
+    # default off
+    args2 = parser.parse_args(['enrich', '8.8.8.8'])
+    assert args2.defang is False

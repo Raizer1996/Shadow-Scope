@@ -83,6 +83,8 @@ python3 -m ioc_tool.main    # interactive mode
 ShadowScope uses discoverable argparse subcommands. Run with no arguments for the
 interactive menu, or pass a subcommand for a one-shot operation.
 
+> Paste defanged IOCs (`1[.]2[.]3[.]4`, `hxxp://evil[.]com`, `user[at]example[.]com`) — they're auto-refanged on input. Use `--defang` to defang results on output so reports are safe to share.
+
 **Interactive mode**
 
 ```bash
