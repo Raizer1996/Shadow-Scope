@@ -10,7 +10,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ### Engineering
 - [ ] **Async enrichment** — `aiohttp` + `asyncio.gather()` in `core.enrich`; ~5–10× speedup on multi-source IP queries. **[issue]**
-- [ ] **Pin requirements** — lock versions in `requirements.txt` + add `requirements-dev.txt`. **[issue]**
 - [ ] **Pytest mocking** — `responses` lib; tests must not hit live APIs. **[issue]**
 - [ ] **Type hints + mypy clean** on public functions. **[issue]**
 - [ ] **GitHub Actions CI matrix** — ruff lint + pytest on py3.10/3.11/3.12 *(already scaffolded — needs ruff config + green run)*. **[issue]**
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] GitHub-ready docs scaffold — CLAUDE.md, docs/, LICENSE, CONTRIBUTING, CI workflow, smoke tests (2026-05-14)
 - [x] Full feature backlog brainstormed and structured (2026-05-14)
 - [x] Argparse subcommands — `enrich`, `analyze`, `shodan`, `show` replace `-1/-2/-3` (2026-05-14)
+- [x] Pinned `requirements.txt` versions + added `requirements-dev.txt` (pytest, ruff, responses) (2026-05-14)
