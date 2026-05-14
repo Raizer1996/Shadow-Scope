@@ -25,7 +25,24 @@ htmlcov/
 test_filescan_api.py
 test_filescan_urls.py
 debug_sandbox.py
+debug_endpoints.py
 heavy_test_iocs.txt
 test_iocs.txt
 eicar.com
 test_dummy.txt
+tor_test.txt
+user_test_ip.txt
+
+# Local cache / DB
+*.db
+ioc_tool/data/ioc.db
+
+# Malware samples (do not commit)
+*.exe
+*.dll
+*.bin
+sample_malware.*
+windows_malware_test_sample.*
+
+# Stray
+IOC Analyzer
