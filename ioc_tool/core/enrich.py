@@ -34,13 +34,16 @@ import json
 from datetime import datetime, timedelta
 from typing import Any, Callable, Optional, Tuple
 
-from . import database, score
+from . import database, parser, score
 from ..modules import (
     abuseipdb,
+    epss,
     greynoise,
     ipinfo_mod,
     ip_quality_score,
+    kev,
     malwarebazaar,
+    nvd,
     otx,
     shodan_mod,
     threatfox,
@@ -232,6 +235,11 @@ async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
     single-source crash is swallowed and that source is skipped, matching
     the historical "API failures return None — never crash the CLI" rule.
     """
+    # Canonicalise the value for types that require it (currently just
+    # CVE → uppercased) so the DB cache key, the per-source lookups,
+    # and the returned ``ioc`` field all agree on one shape.
+    value = parser.normalize_value(value, ioc_type)
+
     ioc_id = database.add_or_update_ioc(value, ioc_type)
     tasks: list = []
 
@@ -335,6 +343,28 @@ async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
             lambda: whois_mod.get_whois_data(value),
             None,
             post_process=_whois_post_process,
+        ))
+
+    # --- CVE enrichment fan-out: NVD + EPSS + CISA KEV ---
+    # All three share the per-source DB cache (24 h TTL via should_refresh)
+    # so a repeated query within the day doesn't refetch. KEV additionally
+    # caches the full catalog on disk at ioc_tool/data/cisa_kev.json
+    # (see ioc_tool.modules.kev) — that's a second layer below the DB row.
+    if ioc_type == 'cve':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'nvd', 'NVD',
+            lambda: nvd.enrich_cve(value),
+            score.calculate_nvd_score,
+        ))
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'epss', 'EPSS',
+            lambda: epss.enrich_cve(value),
+            score.calculate_epss_score,
+        ))
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'kev', 'KEV',
+            lambda: kev.get_kev_entry(value),
+            score.calculate_kev_score,
         ))
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)

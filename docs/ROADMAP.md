@@ -48,7 +48,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ### New IOC types
 - [ ] **Email** — EmailRep, HaveIBeenPwned breach check. **[issue]**
-- [ ] **CVE** — NVD + EPSS score + CISA KEV catalog flag. **[issue]**
 - [ ] **ASN** — BGP info, abuse history, prefix reputation. **[issue]**
 - [ ] **Bitcoin / crypto wallet** — OFAC sanctions list, basic chain analytics. **[issue]**
 - [ ] **TLS fingerprint** — JA3 / JA3S matching against known-bad lists. **[issue]**
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] Async enrichment — `core.enrich` now runs every applicable source in parallel. Implemented via `asyncio.to_thread()` — modules stay sync, parallelism via thread-pool gather (zero module rewrites, all 119 existing tests stay green). ~9× wall-clock speedup on multi-source IP queries (2026-05-14)
 - [x] REST API server — `shadowscope serve` exposes enrichment as HTTP via FastAPI + uvicorn. Endpoints: `/`, `/health`, `/enrich`, `/enrich/bulk` (concurrent), `/extract`, `/show`, `/sources`. Bearer-token auth via `SHADOWSCOPE_API_TOKEN` (off when unset), configurable CORS via `SHADOWSCOPE_CORS_ORIGINS`. Thin layer over `enrich_ioc_async` — zero core changes (2026-05-14)
 - [x] Web dashboard — minimal terminal-themed HTML/CSS/JS at `/ui`, served from `ioc_tool/web/static/`. Single-page, no SPA framework, no build step, no CDN deps. Auto-classifies input (single IOC / bulk list / prose blob → `/enrich`, `/enrich/bulk`, `/extract`). Drill-down per-source details, color-coded risk tiers, live `/sources` panel. Token via `?token=<v>` query string for iframe embeds — in-memory only, never persisted. Iframe-embeddable into homelab secops dashboard (2026-05-14)
+- [x] CVE IOC type — NVD CVSS v3.1 + EPSS exploit probability + CISA KEV (Known Exploited Vulnerabilities) catalog. New `cve` type in `parser.detect_type` (uppercase-canonicalised), three new modules (`nvd.py`, `epss.py`, `kev.py`), KEV catalog cached daily at `ioc_tool/data/cisa_kev.json`, six new CSV columns (`nvd_cvss`, `nvd_severity`, `epss_score`, `epss_percentile`, `kev_in_catalog`, `kev_ransomware`). No new API keys required (2026-05-14)

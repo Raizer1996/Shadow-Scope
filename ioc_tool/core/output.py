@@ -47,6 +47,12 @@ CSV_COLUMNS: List[str] = [
     "urlscan_first_result",
     "greynoise_classification",
     "greynoise_name",
+    "nvd_cvss",
+    "nvd_severity",
+    "epss_score",
+    "epss_percentile",
+    "kev_in_catalog",
+    "kev_ransomware",
 ]
 
 
@@ -243,6 +249,40 @@ def _flatten_result(result: Dict[str, Any]) -> Dict[str, str]:
         row["greynoise_classification"] = _s(greynoise_data.get("classification"))
     if greynoise_data.get("name"):
         row["greynoise_name"] = _s(greynoise_data.get("name"))
+
+    # NVD — CVSS v3.1 baseScore + severity
+    nvd = modules.get("NVD") or {}
+    nvd_data = nvd.get("data") or {}
+    nvd_metrics = nvd_data.get("metrics") or {}
+    cvss_v31 = nvd_metrics.get("cvssMetricV31") or []
+    if cvss_v31:
+        cvss_inner = (cvss_v31[0] or {}).get("cvssData") or {}
+        base_score = cvss_inner.get("baseScore")
+        if base_score is not None:
+            row["nvd_cvss"] = _s(base_score)
+        severity = cvss_inner.get("baseSeverity")
+        if severity:
+            row["nvd_severity"] = _s(severity)
+
+    # EPSS — exploit-probability score + percentile (as "NN.NNN%")
+    epss = modules.get("EPSS") or {}
+    epss_data = epss.get("data") or {}
+    if epss_data.get("epss") is not None:
+        row["epss_score"] = _s(epss_data.get("epss"))
+    if epss_data.get("percentile") is not None:
+        try:
+            pct_val = float(epss_data.get("percentile") or 0)
+            row["epss_percentile"] = f"{pct_val * 100:.3f}%"
+        except (TypeError, ValueError):
+            pass
+
+    # CISA KEV — catalog membership + ransomware-campaign flag
+    kev = modules.get("KEV") or {}
+    kev_data = kev.get("data") or {}
+    if kev_data:
+        row["kev_in_catalog"] = "yes"
+        if kev_data.get("knownRansomwareCampaignUse") == "Known":
+            row["kev_ransomware"] = "yes"
 
     # WHOIS
     whois = modules.get("WHOIS") or {}

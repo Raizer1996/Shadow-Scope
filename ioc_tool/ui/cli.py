@@ -198,6 +198,65 @@ def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> 
                         )
                     break
             details = " — ".join(parts)
+        elif source == 'NVD':
+            nvd_data = data['data'] or {}
+            metrics = nvd_data.get('metrics') or {}
+            cvss_v31 = metrics.get('cvssMetricV31') or []
+            base_score = None
+            severity = None
+            vector = None
+            if cvss_v31:
+                cvss_data = (cvss_v31[0] or {}).get('cvssData') or {}
+                base_score = cvss_data.get('baseScore')
+                severity = cvss_data.get('baseSeverity')
+                vector = cvss_data.get('vectorString')
+            descriptions = nvd_data.get('descriptions') or []
+            description = ''
+            for d in descriptions:
+                if isinstance(d, dict) and d.get('lang') == 'en':
+                    description = (d.get('value') or '').strip()
+                    break
+            parts = []
+            if base_score is not None:
+                parts.append(f"CVSS: {base_score}")
+            if severity:
+                parts.append(f"Severity: {severity}")
+            if vector:
+                parts.append(f"Vector: {vector}")
+            if description:
+                short = description if len(description) <= 120 else description[:117] + '...'
+                parts.append(short)
+            details = " — ".join(parts) if parts else "No CVSSv3.1 metric"
+        elif source == 'EPSS':
+            epss_data = data['data'] or {}
+            try:
+                epss_val = float(epss_data.get('epss', 0) or 0)
+            except (TypeError, ValueError):
+                epss_val = 0.0
+            try:
+                pct = float(epss_data.get('percentile', 0) or 0)
+            except (TypeError, ValueError):
+                pct = 0.0
+            details = (
+                f"EPSS: {epss_val:.5f} — Percentile: {pct * 100:.3f}%"
+            )
+        elif source == 'KEV':
+            kev_data = data['data'] or {}
+            vendor = kev_data.get('vendorProject', '')
+            product = kev_data.get('product', '')
+            date_added = kev_data.get('dateAdded', '')
+            due_date = kev_data.get('dueDate', '')
+            ransomware = kev_data.get('knownRansomwareCampaignUse', '')
+            parts = ["Known-Exploited"]
+            if vendor or product:
+                parts.append(f"{vendor} {product}".strip())
+            if date_added:
+                parts.append(f"Added: {date_added}")
+            if due_date:
+                parts.append(f"Due: {due_date}")
+            if ransomware == 'Known':
+                parts.append("[red](ransomware)[/red]")
+            details = " — ".join(parts)
         elif source == 'MalwareBazaar':
             mb_data = data['data']
             signature = mb_data.get('signature') or 'unknown'
@@ -376,6 +435,55 @@ def print_aggregated_table(
                     summary_parts.append(
                         f"[yellow]URLscan:{us_total} seen[/yellow]"
                     )
+
+        # NVD — CVSS base score colored by severity tier
+        if 'NVD' in modules:
+            nvd_data = modules['NVD']['data'] or {}
+            metrics = nvd_data.get('metrics') or {}
+            cvss_v31 = metrics.get('cvssMetricV31') or []
+            if cvss_v31:
+                cvss_data = (cvss_v31[0] or {}).get('cvssData') or {}
+                base_score = cvss_data.get('baseScore')
+                severity = cvss_data.get('baseSeverity') or ''
+                if isinstance(base_score, (int, float)):
+                    if base_score >= 9.0:
+                        nvd_color = 'red'
+                    elif base_score >= 7.0:
+                        nvd_color = 'orange1'
+                    elif base_score >= 4.0:
+                        nvd_color = 'yellow'
+                    else:
+                        nvd_color = 'green'
+                    sev_fragment = f" [{nvd_color}]{severity}[/{nvd_color}]" if severity else ""
+                    summary_parts.append(
+                        f"[{nvd_color}]CVSS:{base_score}[/{nvd_color}]{sev_fragment}"
+                    )
+
+        # EPSS — exploit-probability percentile
+        if 'EPSS' in modules:
+            epss_data = modules['EPSS']['data'] or {}
+            try:
+                pct = float(epss_data.get('percentile', 0) or 0)
+            except (TypeError, ValueError):
+                pct = 0.0
+            pct_display = pct * 100
+            if pct >= 0.99:
+                summary_parts.append("[red]EPSS:99%+[/red]")
+            elif pct >= 0.90:
+                summary_parts.append(f"[orange1]EPSS:{pct_display:.1f}%[/orange1]")
+            else:
+                summary_parts.append(f"[dim]EPSS:{pct_display:.1f}%[/dim]")
+
+        # CISA KEV — Known Exploited Vulnerabilities catalog hit
+        if 'KEV' in modules:
+            kev_data = modules['KEV']['data'] or {}
+            vendor = kev_data.get('vendorProject', '')
+            product = kev_data.get('product', '')
+            label = f"{vendor} {product}".strip() or "listed"
+            ransom_fragment = ""
+            if kev_data.get('knownRansomwareCampaignUse') == 'Known':
+                ransom_fragment = " [red](ransomware)[/red]"
+            summary_parts.append(f"[red]KEV: {label}[/red]{ransom_fragment}")
 
         # GreyNoise — internet background-noise classification
         if 'GreyNoise' in modules:

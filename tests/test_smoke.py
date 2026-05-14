@@ -470,6 +470,33 @@ def test_urlscan_csv_columns_present():
     assert 'urlscan_first_result' in output_mod.CSV_COLUMNS
 
 
+def test_cve_detected_as_type():
+    """parser.detect_type catches CVE identifiers in mixed case."""
+    assert parser_mod.detect_type("CVE-2024-1234") == "cve"
+    assert parser_mod.detect_type("cve-2024-1234") == "cve"
+    assert parser_mod.detect_type("CVE-2023-44487") == "cve"
+    # Non-CVE strings unaffected
+    assert parser_mod.detect_type("8.8.8.8") == "ip"
+
+
+def test_cve_normalize_value_uppercases():
+    """normalize_value uppercases the CVE- prefix for canonical storage."""
+    assert parser_mod.normalize_value("cve-2024-1234", "cve") == "CVE-2024-1234"
+    assert parser_mod.normalize_value("CVE-2024-1234", "cve") == "CVE-2024-1234"
+    # Non-CVE types unchanged
+    assert parser_mod.normalize_value("8.8.8.8", "ip") == "8.8.8.8"
+
+
+def test_cve_csv_columns_present():
+    """CSV exports include all six CVE source columns."""
+    assert 'nvd_cvss' in output_mod.CSV_COLUMNS
+    assert 'nvd_severity' in output_mod.CSV_COLUMNS
+    assert 'epss_score' in output_mod.CSV_COLUMNS
+    assert 'epss_percentile' in output_mod.CSV_COLUMNS
+    assert 'kev_in_catalog' in output_mod.CSV_COLUMNS
+    assert 'kev_ransomware' in output_mod.CSV_COLUMNS
+
+
 # ---------------------------------------------------------------------------
 # Async enrichment — parallel multi-source orchestrator
 # ---------------------------------------------------------------------------

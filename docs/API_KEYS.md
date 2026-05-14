@@ -53,6 +53,29 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 - **Scope**: hash (md5 / sha1 / sha256)
 - **Env var**: none required — module short-circuits on network errors and skips gracefully.
 
+### CVE enrichment — *no API keys required*
+
+ShadowScope's CVE pipeline pulls from three free, public sources. All three fire in parallel when an IOC matches the `CVE-YYYY-NNNN` shape.
+
+- **NVD (NIST National Vulnerability Database)** — *no API key*
+  - **Signup**: none — public API at https://services.nvd.nist.gov/rest/json/cves/2.0
+  - **Free tier**: public endpoint, low-volume use is unauthenticated. An optional `apiKey` header bumps the rate limit; we don't wire one in but the plumbing is trivial (set `NVD_API_KEY` and pass it as a header in `ioc_tool/modules/nvd.py`).
+  - **Used for**: canonical CVE metadata — CVSS v3.1 base score + severity, descriptions, configurations, references.
+  - **Scope**: CVE.
+
+- **EPSS (Exploit Prediction Scoring System, FIRST.org)** — *no API key*
+  - **Signup**: none — public API at https://api.first.org/data/v1/epss
+  - **Free tier**: free, no documented rate limit.
+  - **Used for**: probability (0.0–1.0) a CVE will be exploited in the wild over the next 30 days, plus percentile rank against all CVEs.
+  - **Scope**: CVE.
+
+- **CISA KEV (Known Exploited Vulnerabilities catalog)** — *no API key*
+  - **Signup**: none — JSON catalog at https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
+  - **Free tier**: free.
+  - **Used for**: membership test against CISA's catalog of CVEs known to be actively exploited. Hit surfaces `vendorProject`, `product`, `dateAdded`, `dueDate`, and the `knownRansomwareCampaignUse` flag.
+  - **Caching**: the full catalog is downloaded once and persisted at `ioc_tool/data/cisa_kev.json` (gitignored); refreshed when missing or older than 24 h. On network failure during refresh the previously-cached copy is used as a fallback.
+  - **Scope**: CVE.
+
 ## Enrichment (location / fraud context)
 
 ### URLscan.io — `URLSCAN_API_KEY` *(optional but recommended)*

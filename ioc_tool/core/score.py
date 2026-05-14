@@ -221,6 +221,50 @@ def calculate_urlscan_score(data: dict | None) -> int:
     return 30
 
 
+def calculate_nvd_score(data: dict | None) -> int:
+    """Map NVD CVSS v3.1 baseScore (0.0–10.0) onto 0–100 risk.
+
+    Returns 0 when the payload is missing or the CVSS v3.1 metric block
+    cannot be located (older CVEs sometimes only carry v2 — we don't
+    fall back, the EPSS and KEV signals cover those gaps).
+    """
+    if not data:
+        return 0
+    try:
+        cvss = data["metrics"]["cvssMetricV31"][0]["cvssData"]["baseScore"]
+        return int(round(cvss * 10))
+    except (KeyError, IndexError, TypeError):
+        return 0
+
+
+def calculate_epss_score(data: dict | None) -> int:
+    """Map EPSS exploit-probability (0.0–1.0) onto 0–100.
+
+    Top-percentile floor: when ``percentile >= 0.99`` we floor the
+    score at 70 even if the raw probability rounds lower — being in
+    the top 1% of CVEs by exploit likelihood is a strong signal in its
+    own right.
+    """
+    if not data:
+        return 0
+    try:
+        epss = float(data.get("epss", 0))
+        pct = float(data.get("percentile", 0))
+        result = int(round(epss * 100))
+        if pct >= 0.99:
+            result = max(result, 70)
+        return result
+    except (ValueError, TypeError):
+        return 0
+
+
+def calculate_kev_score(data: dict | None) -> int:
+    """CISA KEV listing = known-exploited. Hit → 100. Miss/None → 0."""
+    if not data:
+        return 0
+    return 100
+
+
 def calculate_final_risk(scores):
     """
     Average of all module scores

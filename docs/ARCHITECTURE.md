@@ -79,8 +79,12 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/modules/filescan_io.py` | FileScan.IO file/URL submission |
 | `ioc_tool/modules/hybrid_analysis.py` | Hybrid Analysis sandbox (optional) |
 | `ioc_tool/modules/joe_sandbox.py` | Joe Sandbox Cloud (optional) |
+| `ioc_tool/modules/nvd.py` | NIST NVD CVE metadata (CVSS v3.1 base score + severity) |
+| `ioc_tool/modules/epss.py` | FIRST.org EPSS exploit-prediction probability + percentile |
+| `ioc_tool/modules/kev.py` | CISA KEV (Known Exploited Vulnerabilities) catalog membership |
 | `ioc_tool/data/ioc.db` | SQLite cache (gitignored) |
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |
+| `ioc_tool/data/cisa_kev.json` | CISA KEV catalog snapshot (gitignored cache, refreshed daily) |
 | `ioc_tool/web/__init__.py` | REST API package marker |
 | `ioc_tool/web/api.py` | FastAPI app + routes — thin HTTP layer over `enrich_ioc_async` |
 | `ioc_tool/web/static/index.html` | Dashboard shell (terminal-dark theme, no framework) |
@@ -91,13 +95,14 @@ The CLI subcommand `shadowscope serve` (handled in `ui/cli.py::handle_serve`) la
 
 ## Source coverage matrix
 
-| IOC type | VT | AbuseIPDB | Shodan | IPQS | IPinfo | Tor | WHOIS | URLhaus | ThreatFox | MalwareBazaar | GreyNoise | OTX | URLscan | Sandbox |
-|----------|----|-----------|--------|------|--------|-----|-------|---------|-----------|---------------|-----------|-----|---------|---------|
-| IP       | ✅ | ✅        | ✅     | ✅   | ✅     | ✅  | —     | ✅      | ✅        | —             | ✅        | ✅  | ✅      | —       |
-| Domain   | ✅ | —         | —      | —    | —      | —   | ✅    | ✅      | ✅        | —             | —         | ✅  | ✅      | —       |
-| URL      | ✅ | —         | —      | —    | —      | —   | —     | ✅      | ✅        | —             | —         | ✅  | ✅      | ✅      |
-| Hash     | ✅ | —         | —      | —    | —      | —   | —     | —       | ✅        | ✅            | —         | ✅  | —       | ✅      |
-| File     | —  | —         | —      | —    | —      | —   | —     | —       | —         | —             | —         | —   | —       | ✅      |
+| IOC type | VT | AbuseIPDB | Shodan | IPQS | IPinfo | Tor | WHOIS | URLhaus | ThreatFox | MalwareBazaar | GreyNoise | OTX | URLscan | Sandbox | NVD | EPSS | KEV |
+|----------|----|-----------|--------|------|--------|-----|-------|---------|-----------|---------------|-----------|-----|---------|---------|-----|------|-----|
+| IP       | ✅ | ✅        | ✅     | ✅   | ✅     | ✅  | —     | ✅      | ✅        | —             | ✅        | ✅  | ✅      | —       | —   | —    | —   |
+| Domain   | ✅ | —         | —      | —    | —      | —   | ✅    | ✅      | ✅        | —             | —         | ✅  | ✅      | —       | —   | —    | —   |
+| URL      | ✅ | —         | —      | —    | —      | —   | —     | ✅      | ✅        | —             | —         | ✅  | ✅      | ✅      | —   | —    | —   |
+| Hash     | ✅ | —         | —      | —    | —      | —   | —     | —       | ✅        | ✅            | —         | ✅  | —       | ✅      | —   | —    | —   |
+| File     | —  | —         | —      | —    | —      | —   | —     | —       | —         | —             | —         | —   | —       | ✅      | —   | —    | —   |
+| CVE      | —  | —         | —      | —    | —      | —   | —     | —       | —         | —             | —         | —   | —       | —       | ✅  | ✅   | ✅  |
 
 ## Risk-scoring algorithm
 
@@ -118,6 +123,9 @@ Per-source raw scores → averaged → composite final score (0–100).
 | URLscan    | any result with malicious verdict → `90`; history exists, no malicious verdict → `30`; `total == 0` or no data → `0` |
 | Shodan     | `0` (informational only — tags/ports/vulns shown but not scored) |
 | IPinfo     | `0` (informational only — ASN/org/geo shown) |
+| NVD        | `int(round(CVSS v3.1 baseScore * 10))` — 0 if no v3.1 metric |
+| EPSS       | `int(round(epss * 100))`; floor at `70` when `percentile >= 0.99` |
+| KEV        | `100` if listed in CISA KEV catalog, else `0` |
 
 Final = `int(sum(scores) / len(scores))`.
 

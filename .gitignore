@@ -36,6 +36,7 @@ user_test_ip.txt
 # Local cache / DB
 *.db
 ioc_tool/data/ioc.db
+ioc_tool/data/cisa_kev.json
 
 # Malware samples (do not commit)
 *.exe

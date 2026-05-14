@@ -21,10 +21,13 @@ import responses
 
 from ioc_tool.modules import (
     abuseipdb,
+    epss,
     greynoise,
     ipinfo_mod,
     ip_quality_score,
+    kev,
     malwarebazaar,
+    nvd,
     otx,
     shodan_mod,
     threatfox,
@@ -1280,3 +1283,312 @@ class TestURLscan:
         """None / empty payload → 0."""
         assert score_mod.calculate_urlscan_score(None) == 0
         assert score_mod.calculate_urlscan_score({}) == 0
+
+
+# ---------------------------------------------------------------------------
+# NVD — NIST National Vulnerability Database (CVE → CVSS v3.1)
+# ---------------------------------------------------------------------------
+
+
+class TestNVD:
+    """Cover the NVD module: hit, miss, network error, and scoring."""
+
+    @responses.activate
+    def test_nvd_cve_hit_critical(self) -> None:
+        """A CVE with a CVSS v3.1 baseScore of 9.8 returns the `cve` dict."""
+        responses.add(
+            responses.GET,
+            "https://services.nvd.nist.gov/rest/json/cves/2.0",
+            json={
+                "vulnerabilities": [
+                    {
+                        "cve": {
+                            "id": "CVE-2024-1234",
+                            "descriptions": [
+                                {"lang": "en", "value": "Critical RCE in Foo."}
+                            ],
+                            "metrics": {
+                                "cvssMetricV31": [
+                                    {
+                                        "cvssData": {
+                                            "baseScore": 9.8,
+                                            "baseSeverity": "CRITICAL",
+                                            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                                        }
+                                    }
+                                ]
+                            },
+                        }
+                    }
+                ]
+            },
+            status=200,
+        )
+        result = nvd.enrich_cve("CVE-2024-1234")
+        assert result is not None
+        assert result["id"] == "CVE-2024-1234"
+        assert (
+            result["metrics"]["cvssMetricV31"][0]["cvssData"]["baseScore"] == 9.8
+        )
+
+    @responses.activate
+    def test_nvd_no_match(self) -> None:
+        """Empty ``vulnerabilities`` array is a clean miss → None."""
+        responses.add(
+            responses.GET,
+            "https://services.nvd.nist.gov/rest/json/cves/2.0",
+            json={"vulnerabilities": []},
+            status=200,
+        )
+        assert nvd.enrich_cve("CVE-9999-0000") is None
+
+    @responses.activate
+    def test_nvd_request_exception(self) -> None:
+        """Network errors return None without crashing."""
+        responses.add(
+            responses.GET,
+            "https://services.nvd.nist.gov/rest/json/cves/2.0",
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+        assert nvd.enrich_cve("CVE-2024-1234") is None
+
+    @responses.activate
+    def test_nvd_non_200(self) -> None:
+        """Non-200 status → None (e.g. 503 during NVD maintenance windows)."""
+        responses.add(
+            responses.GET,
+            "https://services.nvd.nist.gov/rest/json/cves/2.0",
+            json={"message": "Service Unavailable"},
+            status=503,
+        )
+        assert nvd.enrich_cve("CVE-2024-1234") is None
+
+    def test_calculate_nvd_score_critical(self) -> None:
+        """baseScore 9.8 → 98 (CVSS * 10, rounded)."""
+        data = {
+            "metrics": {
+                "cvssMetricV31": [
+                    {"cvssData": {"baseScore": 9.8, "baseSeverity": "CRITICAL"}}
+                ]
+            }
+        }
+        assert score_mod.calculate_nvd_score(data) == 98
+
+    def test_calculate_nvd_score_missing_metric(self) -> None:
+        """No cvssMetricV31 block → 0 (we don't fall back to v2)."""
+        assert score_mod.calculate_nvd_score({"metrics": {}}) == 0
+        assert score_mod.calculate_nvd_score({}) == 0
+
+    def test_calculate_nvd_score_none(self) -> None:
+        """None payload → 0."""
+        assert score_mod.calculate_nvd_score(None) == 0
+
+
+# ---------------------------------------------------------------------------
+# EPSS — FIRST.org Exploit Prediction Scoring System
+# ---------------------------------------------------------------------------
+
+
+class TestEPSS:
+    """Cover the EPSS module: hit, miss, network error, and scoring."""
+
+    @responses.activate
+    def test_epss_high_score(self) -> None:
+        """A CVE with a high EPSS returns the first ``data[]`` entry."""
+        responses.add(
+            responses.GET,
+            "https://api.first.org/data/v1/epss",
+            json={
+                "status": "OK",
+                "data": [
+                    {
+                        "cve": "CVE-2024-1234",
+                        "epss": "0.97412",
+                        "percentile": "0.99876",
+                        "date": "2024-05-01",
+                    }
+                ],
+            },
+            status=200,
+        )
+        result = epss.enrich_cve("CVE-2024-1234")
+        assert result is not None
+        assert result["cve"] == "CVE-2024-1234"
+        assert result["epss"] == "0.97412"
+        assert result["percentile"] == "0.99876"
+
+    @responses.activate
+    def test_epss_no_match(self) -> None:
+        """Empty ``data`` array is a clean miss → None."""
+        responses.add(
+            responses.GET,
+            "https://api.first.org/data/v1/epss",
+            json={"status": "OK", "data": []},
+            status=200,
+        )
+        assert epss.enrich_cve("CVE-9999-0000") is None
+
+    @responses.activate
+    def test_epss_request_exception(self) -> None:
+        """Network errors return None without crashing."""
+        responses.add(
+            responses.GET,
+            "https://api.first.org/data/v1/epss",
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+        assert epss.enrich_cve("CVE-2024-1234") is None
+
+    def test_calculate_epss_high(self) -> None:
+        """epss=0.97 → 97 (probability * 100, rounded)."""
+        data = {"epss": "0.97", "percentile": "0.95"}
+        assert score_mod.calculate_epss_score(data) == 97
+
+    def test_calculate_epss_top_percentile_floor(self) -> None:
+        """epss=0.30 percentile=0.995 → 70 (top-1% floor kicks in)."""
+        data = {"epss": "0.30", "percentile": "0.995"}
+        assert score_mod.calculate_epss_score(data) == 70
+
+    def test_calculate_epss_score_none(self) -> None:
+        """None / empty payload → 0."""
+        assert score_mod.calculate_epss_score(None) == 0
+        assert score_mod.calculate_epss_score({}) == 0
+
+
+# ---------------------------------------------------------------------------
+# CISA KEV — Known Exploited Vulnerabilities catalog
+# ---------------------------------------------------------------------------
+
+
+class TestKEV:
+    """Cover the KEV module: hit/miss, catalog refresh, fallback, scoring."""
+
+    _SAMPLE_CATALOG = {
+        "title": "CISA Catalog of Known Exploited Vulnerabilities",
+        "vulnerabilities": [
+            {
+                "cveID": "CVE-2024-1234",
+                "vendorProject": "Acme",
+                "product": "WidgetServer",
+                "vulnerabilityName": "Acme WidgetServer RCE",
+                "dateAdded": "2024-02-01",
+                "shortDescription": "Pre-auth RCE in Acme WidgetServer.",
+                "requiredAction": "Apply vendor patch.",
+                "dueDate": "2024-02-22",
+                "knownRansomwareCampaignUse": "Known",
+            },
+            {
+                "cveID": "CVE-2023-5678",
+                "vendorProject": "Beta",
+                "product": "Gizmo",
+                "vulnerabilityName": "Beta Gizmo auth bypass",
+                "dateAdded": "2023-12-15",
+                "requiredAction": "Apply patch.",
+                "dueDate": "2024-01-05",
+                "knownRansomwareCampaignUse": "Unknown",
+            },
+        ],
+    }
+
+    def test_kev_hit(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+        """A CVE present in the catalog returns its full entry dict."""
+        cache_file = tmp_path / "cisa_kev.json"
+        cache_file.write_text(__import__("json").dumps(self._SAMPLE_CATALOG))
+        monkeypatch.setattr(kev, "CACHE_FILE", str(cache_file))
+        entry = kev.get_kev_entry("CVE-2024-1234")
+        assert entry is not None
+        assert entry["vendorProject"] == "Acme"
+        assert entry["product"] == "WidgetServer"
+        assert entry["knownRansomwareCampaignUse"] == "Known"
+
+    def test_kev_miss(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """A CVE not in the catalog returns None."""
+        cache_file = tmp_path / "cisa_kev.json"
+        cache_file.write_text(__import__("json").dumps(self._SAMPLE_CATALOG))
+        monkeypatch.setattr(kev, "CACHE_FILE", str(cache_file))
+        assert kev.get_kev_entry("CVE-9999-0000") is None
+
+    @responses.activate
+    def test_kev_catalog_refresh_on_stale_cache(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """A cache file >24 h old triggers a redownload."""
+        import json as _json
+        import os as _os
+        import time as _time
+
+        cache_file = tmp_path / "cisa_kev.json"
+        # Write a stale cache (old content) then age the file.
+        cache_file.write_text(_json.dumps({"vulnerabilities": []}))
+        old_time = _time.time() - 25 * 3600
+        _os.utime(str(cache_file), (old_time, old_time))
+
+        monkeypatch.setattr(kev, "CACHE_FILE", str(cache_file))
+
+        responses.add(
+            responses.GET,
+            kev.CATALOG_URL,
+            json=self._SAMPLE_CATALOG,
+            status=200,
+        )
+        entry = kev.get_kev_entry("CVE-2024-1234")
+        assert entry is not None
+        assert entry["vendorProject"] == "Acme"
+        # Cache file should have been rewritten with the fresh catalog.
+        reread = _json.loads(cache_file.read_text())
+        assert any(
+            v.get("cveID") == "CVE-2024-1234"
+            for v in reread.get("vulnerabilities", [])
+        )
+
+    @responses.activate
+    def test_kev_catalog_falls_back_to_local_on_network_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """RequestException during refresh + cache present → use cached copy."""
+        import json as _json
+        import os as _os
+        import time as _time
+
+        cache_file = tmp_path / "cisa_kev.json"
+        cache_file.write_text(_json.dumps(self._SAMPLE_CATALOG))
+        # Make it stale to force the refresh path.
+        old_time = _time.time() - 25 * 3600
+        _os.utime(str(cache_file), (old_time, old_time))
+        monkeypatch.setattr(kev, "CACHE_FILE", str(cache_file))
+
+        responses.add(
+            responses.GET,
+            kev.CATALOG_URL,
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+
+        entry = kev.get_kev_entry("CVE-2024-1234")
+        assert entry is not None
+        assert entry["vendorProject"] == "Acme"
+
+    def test_kev_load_catalog_returns_set(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """load_catalog returns a set of CVE IDs."""
+        import json as _json
+
+        cache_file = tmp_path / "cisa_kev.json"
+        cache_file.write_text(_json.dumps(self._SAMPLE_CATALOG))
+        monkeypatch.setattr(kev, "CACHE_FILE", str(cache_file))
+
+        catalog = kev.load_catalog()
+        assert isinstance(catalog, set)
+        assert "CVE-2024-1234" in catalog
+        assert "CVE-2023-5678" in catalog
+        assert "CVE-9999-9999" not in catalog
+
+    def test_calculate_kev_score_hit(self) -> None:
+        """Any KEV entry → 100 (known-exploited is the strongest signal)."""
+        assert score_mod.calculate_kev_score({"cveID": "CVE-2024-1234"}) == 100
+
+    def test_calculate_kev_score_none(self) -> None:
+        """None / empty payload → 0."""
+        assert score_mod.calculate_kev_score(None) == 0
+        assert score_mod.calculate_kev_score({}) == 0
