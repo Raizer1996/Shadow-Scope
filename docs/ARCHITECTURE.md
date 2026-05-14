@@ -61,6 +61,7 @@ ShadowScope is a terminal-based IOC enrichment and risk-scoring tool. It accepts
 | `ioc_tool/modules/ipinfo_mod.py` | IPinfo ASN/org/geo |
 | `ioc_tool/modules/tor.py` | Match against Tor exit-node list |
 | `ioc_tool/modules/whois_mod.py` | Domain WHOIS lookup |
+| `ioc_tool/modules/urlhaus.py` | abuse.ch URLhaus malicious URL / host lookup (no API key) |
 | `ioc_tool/modules/filescan_io.py` | FileScan.IO file/URL submission |
 | `ioc_tool/modules/hybrid_analysis.py` | Hybrid Analysis sandbox (optional) |
 | `ioc_tool/modules/joe_sandbox.py` | Joe Sandbox Cloud (optional) |
@@ -69,13 +70,13 @@ ShadowScope is a terminal-based IOC enrichment and risk-scoring tool. It accepts
 
 ## Source coverage matrix
 
-| IOC type | VT | AbuseIPDB | Shodan | IPQS | IPinfo | Tor | WHOIS | Sandbox |
-|----------|----|-----------|--------|------|--------|-----|-------|---------|
-| IP       | ✅ | ✅        | ✅     | ✅   | ✅     | ✅  | —     | —       |
-| Domain   | ✅ | —         | —      | —    | —      | —   | ✅    | —       |
-| URL      | ✅ | —         | —      | —    | —      | —   | —     | ✅      |
-| Hash     | ✅ | —         | —      | —    | —      | —   | —     | ✅      |
-| File     | —  | —         | —      | —    | —      | —   | —     | ✅      |
+| IOC type | VT | AbuseIPDB | Shodan | IPQS | IPinfo | Tor | WHOIS | URLhaus | Sandbox |
+|----------|----|-----------|--------|------|--------|-----|-------|---------|---------|
+| IP       | ✅ | ✅        | ✅     | ✅   | ✅     | ✅  | —     | ✅      | —       |
+| Domain   | ✅ | —         | —      | —    | —      | —   | ✅    | ✅      | —       |
+| URL      | ✅ | —         | —      | —    | —      | —   | —     | ✅      | ✅      |
+| Hash     | ✅ | —         | —      | —    | —      | —   | —     | —       | ✅      |
+| File     | —  | —         | —      | —    | —      | —   | —     | —       | ✅      |
 
 ## Risk-scoring algorithm
 
@@ -88,6 +89,7 @@ Per-source raw scores → averaged → composite final score (0–100).
 | IPQS       | `fraud_score` (already 0–100) |
 | Tor        | `100` if on exit-node list else `0` |
 | WHOIS age  | `<30d → 90`, `30–180d → 60`, `>180d → 10`, unknown → `50` |
+| URLhaus    | `95` if online hit, `70` if offline hit, `80` otherwise hit, `0` if no data |
 | Shodan     | `0` (informational only — tags/ports/vulns shown but not scored) |
 | IPinfo     | `0` (informational only — ASN/org/geo shown) |
 

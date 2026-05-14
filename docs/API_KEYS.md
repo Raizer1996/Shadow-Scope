@@ -24,6 +24,15 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 - **Used for**: open ports, banners, vulnerabilities, host tags (VPN/proxy/Tor)
 - **Scope**: IP only
 
+## Free / freemium
+
+### URLhaus (abuse.ch) — *no API key*
+- **Signup**: none — public API at https://urlhaus-api.abuse.ch/
+- **Free tier**: free, no rate limit beyond reasonable use (be polite)
+- **Used for**: URL / domain / IP lookups against abuse.ch's community-maintained malicious-URL database (phishing, malware drops, C2 panels). Returns threat type, tags, payload metadata, and a `url_status` (online / offline).
+- **Scope**: URL, domain, IP
+- **Env var**: none required — module short-circuits on network errors and skips gracefully.
+
 ## Enrichment (location / fraud context)
 
 ### IPQualityScore — `IPQS_API_KEY`

@@ -34,6 +34,7 @@ CSV_COLUMNS: List[str] = [
     "ipinfo_country",
     "tor",
     "whois_creation_date",
+    "urlhaus_threat",
 ]
 
 
@@ -158,6 +159,13 @@ def _flatten_result(result: Dict[str, Any]) -> Dict[str, str]:
     # TOR — presence of the module key signals a hit
     if "TOR" in modules:
         row["tor"] = "true"
+
+    # URLhaus (abuse.ch) — threat type if hit
+    urlhaus = modules.get("URLhaus") or {}
+    urlhaus_data = urlhaus.get("data") or {}
+    threat = urlhaus_data.get("threat")
+    if threat:
+        row["urlhaus_threat"] = _s(threat)
 
     # WHOIS
     whois = modules.get("WHOIS") or {}

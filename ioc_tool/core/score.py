@@ -58,6 +58,24 @@ def calculate_whois_score(creation_date):
     else:
         return 10
 
+def calculate_urlhaus_score(data):
+    """
+    URLhaus presence = strong malicious signal.
+
+    - None / no data -> 0
+    - Hit with url_status='online' -> 95
+    - Hit with url_status='offline' -> 70
+    - Otherwise hit -> 80
+    """
+    if not data:
+        return 0
+    status = data.get('url_status')
+    if status == 'online':
+        return 95
+    if status == 'offline':
+        return 70
+    return 80
+
 def calculate_final_risk(scores):
     """
     Average of all module scores

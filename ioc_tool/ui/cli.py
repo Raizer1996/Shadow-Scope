@@ -124,6 +124,12 @@ def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> 
             details = f"Created: {creation}"
         elif source == 'TOR':
             details = "Tor Exit Node Detected"
+        elif source == 'URLhaus':
+            urlhaus_data = data['data']
+            threat = urlhaus_data.get('threat', 'unknown')
+            tags = urlhaus_data.get('tags') or []
+            tag_str = f" [{', '.join(str(t) for t in tags)}]" if tags else ""
+            details = f"Threat: {threat}{tag_str}"
 
         table.add_row(source, f"[{score_color}]{score_val}[/{score_color}]", str(details))
 
@@ -202,6 +208,17 @@ def print_aggregated_table(
             summary_parts.append("[yellow]VPN:True[/yellow]")
         if is_proxy:
             summary_parts.append("[yellow]Proxy:True[/yellow]")
+
+        # URLhaus (abuse.ch)
+        if 'URLhaus' in modules:
+            urlhaus_score = modules['URLhaus']['score']
+            if urlhaus_score > 0:
+                urlhaus_data = modules['URLhaus']['data']
+                tags = urlhaus_data.get('tags') or []
+                tag_fragment = (
+                    " " + ",".join(str(t) for t in tags[:2]) if tags else ""
+                )
+                summary_parts.append(f"[red]URLhaus:HIT[/red]{tag_fragment}")
 
         # IPQualityScore
         if 'IPQS' in modules:

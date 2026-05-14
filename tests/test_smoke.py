@@ -431,3 +431,8 @@ def test_cli_stdin_dash_parses():
     assert args.ioc == '-'
     assert args.file is None
     assert args.text is None
+
+
+def test_urlhaus_csv_column_present():
+    """The CSV column list includes urlhaus_threat for downstream pipelines."""
+    assert 'urlhaus_threat' in output_mod.CSV_COLUMNS

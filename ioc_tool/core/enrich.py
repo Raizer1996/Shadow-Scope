@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import json
 from . import database
 from . import score
-from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod
+from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus
 
 def should_refresh(timestamp_str):
     if not timestamp_str:
@@ -132,6 +132,29 @@ def enrich_ioc(value, ioc_type):
         if ipinfo_data:
             results['IPinfo'] = {'score': 0, 'data': ipinfo_data}
 
+
+    # --- URLhaus (abuse.ch) — URL / domain / IP (no API key) ---
+    if ioc_type in ('url', 'domain', 'ip'):
+        cached_urlhaus = database.get_latest_enrichment(ioc_id, 'urlhaus')
+        urlhaus_data = None
+        urlhaus_score = 0
+
+        if cached_urlhaus and not should_refresh(cached_urlhaus['timestamp']):
+            urlhaus_data = json.loads(cached_urlhaus['data'])
+            urlhaus_score = cached_urlhaus['score']
+        else:
+            if ioc_type == 'url':
+                urlhaus_data = urlhaus.enrich_url(value)
+            else:
+                urlhaus_data = urlhaus.enrich_host(value)
+
+            if urlhaus_data:
+                urlhaus_score = score.calculate_urlhaus_score(urlhaus_data)
+                database.add_enrichment(ioc_id, 'urlhaus', urlhaus_data, urlhaus_score)
+
+        if urlhaus_data:
+            results['URLhaus'] = {'score': urlhaus_score, 'data': urlhaus_data}
+            scores.append(urlhaus_score)
 
     # --- WHOIS (Domain Only) ---
     if ioc_type == 'domain':

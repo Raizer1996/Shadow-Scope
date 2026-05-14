@@ -19,6 +19,7 @@
   - **IPinfo** — Organization and ASN details
   - **Tor Detection** — Identifies active Tor exit nodes
   - **WHOIS** — Domain creation dates and registrar info
+  - **URLhaus** — abuse.ch malicious URL database (no API key)
 
   <img width="1341" height="529" alt="enrich result" src="https://github.com/user-attachments/assets/033a128a-68db-4fdd-8698-7d0f09439246" />
   <img width="363" height="422" alt="risk score" src="https://github.com/user-attachments/assets/6d584762-5951-4ebb-98b4-25b9395feb10" />

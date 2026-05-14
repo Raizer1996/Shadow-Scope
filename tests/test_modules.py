@@ -25,9 +25,12 @@ from ioc_tool.modules import (
     ip_quality_score,
     shodan_mod,
     tor,
+    urlhaus,
     vt,
     whois_mod,
 )
+from ioc_tool.core import score as score_mod
+import requests
 
 
 # ---------------------------------------------------------------------------
@@ -381,3 +384,130 @@ def test_whois_get_whois_data_returns_none_on_exception() -> None:
     ):
         result = whois_mod.get_whois_data("example.com")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# URLhaus (abuse.ch) — no API key required
+# ---------------------------------------------------------------------------
+
+
+class TestURLhaus:
+    """Cover the URLhaus module: hit, miss, network error, and scoring."""
+
+    @responses.activate
+    def test_urlhaus_url_hit(self) -> None:
+        """A malicious URL lookup returns the parsed payload."""
+        responses.add(
+            responses.POST,
+            "https://urlhaus-api.abuse.ch/v1/url/",
+            json={
+                "query_status": "ok",
+                "id": "12345",
+                "url": "http://malicious.example/payload.exe",
+                "url_status": "online",
+                "threat": "malware_download",
+                "tags": ["emotet", "cobaltstrike"],
+                "date_added": "2024-01-15 12:34:56",
+                "host": "malicious.example",
+                "payloads": [
+                    {
+                        "filename": "payload.exe",
+                        "response_md5": "deadbeef",
+                        "response_sha256": "cafe1234",
+                        "file_type": "exe",
+                    }
+                ],
+            },
+            status=200,
+        )
+        result = urlhaus.enrich_url("http://malicious.example/payload.exe")
+        assert result is not None
+        assert result["query_status"] == "ok"
+        assert result["url_status"] == "online"
+        assert result["threat"] == "malware_download"
+        assert "emotet" in result["tags"]
+
+    @responses.activate
+    def test_urlhaus_url_no_result(self) -> None:
+        """query_status != 'ok' is treated as a miss → None."""
+        responses.add(
+            responses.POST,
+            "https://urlhaus-api.abuse.ch/v1/url/",
+            json={"query_status": "no_results"},
+            status=200,
+        )
+        assert urlhaus.enrich_url("http://benign.example/index.html") is None
+
+    @responses.activate
+    def test_urlhaus_host_hit(self) -> None:
+        """Host lookup returns the parsed payload with url history."""
+        responses.add(
+            responses.POST,
+            "https://urlhaus-api.abuse.ch/v1/host/",
+            json={
+                "query_status": "ok",
+                "host": "evil.example.com",
+                "url_count": "3",
+                "urls": [
+                    {
+                        "id": "1",
+                        "url": "http://evil.example.com/a.exe",
+                        "url_status": "online",
+                        "threat": "malware_download",
+                    }
+                ],
+            },
+            status=200,
+        )
+        result = urlhaus.enrich_host("evil.example.com")
+        assert result is not None
+        assert result["host"] == "evil.example.com"
+        assert result["url_count"] == "3"
+        assert len(result["urls"]) == 1
+
+    @responses.activate
+    def test_urlhaus_request_exception(self) -> None:
+        """Network/connection errors return None without crashing."""
+        responses.add(
+            responses.POST,
+            "https://urlhaus-api.abuse.ch/v1/url/",
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+        assert urlhaus.enrich_url("http://anything.example/x") is None
+
+    @responses.activate
+    def test_urlhaus_host_request_exception(self) -> None:
+        """ConnectionError on the host endpoint also returns None cleanly."""
+        responses.add(
+            responses.POST,
+            "https://urlhaus-api.abuse.ch/v1/host/",
+            body=requests.exceptions.ConnectionError("network down"),
+        )
+        assert urlhaus.enrich_host("evil.example.com") is None
+
+    def test_calculate_urlhaus_score_online(self) -> None:
+        """url_status='online' is the strongest signal → 95."""
+        assert (
+            score_mod.calculate_urlhaus_score(
+                {"query_status": "ok", "url_status": "online"}
+            )
+            == 95
+        )
+
+    def test_calculate_urlhaus_score_offline(self) -> None:
+        """url_status='offline' = 70 (less severe than live infrastructure)."""
+        assert (
+            score_mod.calculate_urlhaus_score(
+                {"query_status": "ok", "url_status": "offline"}
+            )
+            == 70
+        )
+
+    def test_calculate_urlhaus_score_other_hit(self) -> None:
+        """A hit with no url_status (e.g. host-level) defaults to 80."""
+        assert score_mod.calculate_urlhaus_score({"query_status": "ok"}) == 80
+
+    def test_calculate_urlhaus_score_none(self) -> None:
+        """None / empty payload → score 0."""
+        assert score_mod.calculate_urlhaus_score(None) == 0
+        assert score_mod.calculate_urlhaus_score({}) == 0
