@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,28 @@ from ioc_tool.core import (
     score,
 )
 from ioc_tool.ui import cli
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_dockerfile_exists_and_pins_python_version():
+    """Dockerfile must exist and pin a Python version (no 'latest')."""
+    df = REPO_ROOT / "Dockerfile"
+    assert df.exists(), "Dockerfile missing at repo root"
+    content = df.read_text()
+    assert "python:3" in content, "Python base image not pinned"
+    assert ":latest" not in content, "Avoid :latest tags"
+    assert "USER shadowscope" in content, "Container must drop to non-root"
+
+
+def test_compose_file_exists_and_mounts_data_volume():
+    """docker-compose.yml must persist the cache volume and reach host Ollama."""
+    compose = REPO_ROOT / "docker-compose.yml"
+    assert compose.exists()
+    content = compose.read_text()
+    assert "shadowscope-data:/app/ioc_tool/data" in content
+    assert "host.docker.internal" in content  # Ollama reachability
 
 
 def test_imports():

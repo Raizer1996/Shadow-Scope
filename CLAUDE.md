@@ -44,6 +44,9 @@ ioc_tool/data/ioc.db          — SQLite cache (gitignored)
 docs/                         — architecture, roadmap, API keys
 tests/                        — pytest (scaffolded)
 .github/workflows/ci.yml      — CI (lint + test)
+Dockerfile                    — multi-stage python:3.12-slim, non-root, /health healthcheck
+docker-compose.yml            — single-service compose stack (named volume for cache)
+.env.example                  — compose-style env template (root); see ioc_tool/.env.example for CLI users
 ```
 
 ## Workflow

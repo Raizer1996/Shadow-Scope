@@ -201,6 +201,20 @@ Add `?defang=true` to any enrichment endpoint to defang the returned `ioc` field
 
 <!-- TODO: dashboard screenshot -->
 
+## 🐳 Docker
+
+ShadowScope ships with a multi-stage `Dockerfile` and a single-service `docker-compose.yml` so it can be dropped straight into a homelab compose stack as another containerised service.
+
+```bash
+cp .env.example .env       # fill in your API keys + (optional) bearer token
+docker compose up -d
+curl http://localhost:8765/health
+```
+
+Then open the dashboard at `http://localhost:8765/ui`.
+
+The image runs as a non-root `shadowscope` user, exposes `8765`, and uses the FastAPI `/health` route for its container healthcheck. The compose stack mounts a named `shadowscope-data` volume at `/app/ioc_tool/data` to persist the SQLite cache and CISA KEV snapshot across restarts. On Linux Docker the container reaches the host's Ollama at `host.docker.internal:11434` via the `host-gateway` extra_host. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#container-deployment) for the full breakdown.
+
 ## 📚 Documentation
 
 | Doc | Purpose |

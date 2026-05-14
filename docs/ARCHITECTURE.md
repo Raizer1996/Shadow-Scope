@@ -250,6 +250,24 @@ The dashboard (`GET /ui`) is a single-page UI served from `ioc_tool/web/static/`
 
 The dashboard reads `?token=<v>` from `window.location.search` on load and injects it into every fetch as `Authorization: Bearer <v>`. The HTML sets `<meta name="referrer" content="no-referrer">` and ShadowScope does not emit `X-Frame-Options` / `Content-Security-Policy: frame-ancestors`, so embedding works out of the box. Lock down CORS (`SHADOWSCOPE_CORS_ORIGINS`) to the embedding dashboard's origin in production.
 
+## Container deployment
+
+ShadowScope is packaged for drop-in use inside a docker-compose homelab stack.
+
+* **Dockerfile** — multi-stage build on `python:3.12-slim`. Stage 1 installs `requirements.txt` into `/opt/venv`; stage 2 copies the venv + `ioc_tool/` package, drops to a non-root `shadowscope` user, exposes `8765`, and HEALTHCHECKs the FastAPI `/health` route with a stdlib `urllib.request` probe. Default CMD is `python -m ioc_tool.main serve --host 0.0.0.0 --port 8765`.
+* **docker-compose.yml** — single `shadowscope` service. Mounts a named `shadowscope-data` volume at `/app/ioc_tool/data` so the SQLite cache (`ioc.db`) and CISA KEV snapshot (`cisa_kev.json`) survive container restarts. Pulls all secrets + tuneables from a sibling `.env` file (`VT_API_KEY`, `ABUSEIPDB_API_KEY`, …, `SHADOWSCOPE_API_TOKEN`, `SHADOWSCOPE_CORS_ORIGINS`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`). Adds `extra_hosts: ["host.docker.internal:host-gateway"]` so the container can reach the host's Ollama on Linux Docker.
+
+**Run it**
+
+```bash
+cp .env.example .env
+# fill in keys
+docker compose up -d
+curl http://localhost:8765/health
+```
+
+Consumers (e.g. the homelab secops web service) point at `http://shadowscope:8765/...` when sharing a compose network, or `http://localhost:8765/...` when binding to the host.
+
 ## Open work
 
 See [`ROADMAP.md`](ROADMAP.md) for the active backlog.

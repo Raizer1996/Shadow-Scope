@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  shadowscope:
+    image: shadowscope:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shadowscope
+    restart: unless-stopped
+    ports:
+      - "${SHADOWSCOPE_HOST_PORT:-8765}:8765"
+    environment:
+      # API keys — sourced from .env at the same level
+      VT_API_KEY: "${VT_API_KEY:-}"
+      ABUSEIPDB_API_KEY: "${ABUSEIPDB_API_KEY:-}"
+      SHODAN_API_KEY: "${SHODAN_API_KEY:-}"
+      IPQS_API_KEY: "${IPQS_API_KEY:-}"
+      IPINFO_API_KEY: "${IPINFO_API_KEY:-}"
+      HYBRID_ANALYSIS_API_KEY: "${HYBRID_ANALYSIS_API_KEY:-}"
+      JOE_SANDBOX_CLOUD_API_KEY: "${JOE_SANDBOX_CLOUD_API_KEY:-}"
+      FILE_SCAN_IO: "${FILE_SCAN_IO:-}"
+      GREYNOISE_API_KEY: "${GREYNOISE_API_KEY:-}"
+      URLSCAN_API_KEY: "${URLSCAN_API_KEY:-}"
+      OTX_API_KEY: "${OTX_API_KEY:-}"
+      # REST API auth + CORS
+      SHADOWSCOPE_API_TOKEN: "${SHADOWSCOPE_API_TOKEN:-}"
+      SHADOWSCOPE_CORS_ORIGINS: "${SHADOWSCOPE_CORS_ORIGINS:-*}"
+      # Optional LLM summary — defaults to host Ollama via host-gateway bridge
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2}"
+    extra_hosts:
+      # Lets the container reach the host's Ollama at host.docker.internal
+      # (Linux Docker 20.10+ resolves this via the special host-gateway value)
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Persist SQLite cache + KEV catalog across container restarts
+      - shadowscope-data:/app/ioc_tool/data
+
+volumes:
+  shadowscope-data:
+    driver: local

@@ -136,8 +136,8 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 - [ ] **PyPI package** — `pip install shadowscope` + `shadowscope` entry point. **[issue]**
 - [ ] **pipx install** docs. **[issue]**
-- [ ] **Docker image** — minimal Alpine, `.env` mount pattern. **[issue]**
-- [ ] **Docker Compose** stack — ShadowScope + Redis + dashboard. **[issue]**
+<!-- Moved to Done 2026-05-14 — Docker image (multi-stage python:3.12-slim, non-root, healthcheck) -->
+<!-- Moved to Done 2026-05-14 — Docker Compose stack (Redis backend deferred — single-container SQLite is sufficient for current scale) -->
 - [ ] **Kubernetes Helm chart**. **[issue]**
 - [ ] **Demo GIF / asciinema** in README. **[issue]**
 - [ ] **SemVer + CHANGELOG.md** (Keep-a-Changelog format). **[issue]**
@@ -204,3 +204,5 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] Web dashboard — minimal terminal-themed HTML/CSS/JS at `/ui`, served from `ioc_tool/web/static/`. Single-page, no SPA framework, no build step, no CDN deps. Auto-classifies input (single IOC / bulk list / prose blob → `/enrich`, `/enrich/bulk`, `/extract`). Drill-down per-source details, color-coded risk tiers, live `/sources` panel. Token via `?token=<v>` query string for iframe embeds — in-memory only, never persisted. Iframe-embeddable into homelab secops dashboard (2026-05-14)
 - [x] CVE IOC type — NVD CVSS v3.1 + EPSS exploit probability + CISA KEV (Known Exploited Vulnerabilities) catalog. New `cve` type in `parser.detect_type` (uppercase-canonicalised), three new modules (`nvd.py`, `epss.py`, `kev.py`), KEV catalog cached daily at `ioc_tool/data/cisa_kev.json`, six new CSV columns (`nvd_cvss`, `nvd_severity`, `epss_score`, `epss_percentile`, `kev_in_catalog`, `kev_ransomware`). No new API keys required (2026-05-14)
 - [x] **LLM summary** — natural-language 2-3 sentence verdict via local Ollama. New `ioc_tool/core/llm.py` (model-agnostic `_build_prompt` + `summarize`), top-level `--summary` CLI flag (works on `enrich` and `show`, plus JSON/CSV output), `?summary=true` query param on `/enrich`, `/enrich/bulk`, `/extract`. Bulk summarisation parallelised via `asyncio.to_thread`. Configurable via env `OLLAMA_BASE_URL` (default `http://localhost:11434`) + `OLLAMA_MODEL` (default `llama3.2`). Optional feature — Ollama unreachable → `summarize()` returns `None`, ShadowScope keeps working. Dashboard exposes a global "Include LLM verdict" checkbox; verdicts render below each row (2026-05-14)
+- [x] **Docker image** — multi-stage `python:3.12-slim` Dockerfile at repo root, runs as non-root `shadowscope` user, stdlib `/health` healthcheck, EXPOSE 8765. `.dockerignore` ships only `ioc_tool/` + `requirements.txt`. Default `CMD` launches the FastAPI server (2026-05-14)
+- [x] **Docker Compose stack** — `docker-compose.yml` at repo root with a single `shadowscope` service, `shadowscope-data` named volume persisting `/app/ioc_tool/data` (SQLite cache + CISA KEV snapshot), env passthrough for every API key + auth/CORS, `host.docker.internal:host-gateway` extra_host so the container reaches the host's Ollama on Linux. Redis backend deferred — single-container SQLite is sufficient for current scale (2026-05-14)
