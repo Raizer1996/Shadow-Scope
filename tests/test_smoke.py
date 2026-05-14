@@ -436,3 +436,9 @@ def test_cli_stdin_dash_parses():
 def test_urlhaus_csv_column_present():
     """The CSV column list includes urlhaus_threat for downstream pipelines."""
     assert 'urlhaus_threat' in output_mod.CSV_COLUMNS
+
+
+def test_greynoise_csv_columns_present():
+    """CSV exports include the GreyNoise classification + name columns."""
+    assert 'greynoise_classification' in output_mod.CSV_COLUMNS
+    assert 'greynoise_name' in output_mod.CSV_COLUMNS

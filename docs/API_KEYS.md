@@ -24,6 +24,12 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 - **Used for**: open ports, banners, vulnerabilities, host tags (VPN/proxy/Tor)
 - **Scope**: IP only
 
+### GreyNoise — `GREYNOISE_API_KEY`
+- **Signup**: https://www.greynoise.io/viz/signup
+- **Free tier**: Community API — 50 lookups/day per key
+- **Used for**: classifying IPs as internet background noise (mass scanners like Censys, Shodan, Project Sonar, Mirai) vs targeted activity. Major false-positive killer in SOC IP triage.
+- **Scope**: IP only
+
 ## Free / freemium
 
 ### URLhaus (abuse.ch) — *no API key*

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import json
 from . import database
 from . import score
-from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus
+from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus, greynoise
 
 def should_refresh(timestamp_str):
     if not timestamp_str:
@@ -132,6 +132,25 @@ def enrich_ioc(value, ioc_type):
         if ipinfo_data:
             results['IPinfo'] = {'score': 0, 'data': ipinfo_data}
 
+
+    # --- GreyNoise (IP Only) ---
+    if ioc_type == 'ip':
+        cached_gn = database.get_latest_enrichment(ioc_id, 'greynoise')
+        gn_data = None
+        gn_score = 0
+
+        if cached_gn and not should_refresh(cached_gn['timestamp']):
+            gn_data = json.loads(cached_gn['data'])
+            gn_score = cached_gn['score']
+        else:
+            gn_data = greynoise.enrich_ip(value)
+            if gn_data:
+                gn_score = score.calculate_greynoise_score(gn_data)
+                database.add_enrichment(ioc_id, 'greynoise', gn_data, gn_score)
+
+        if gn_data:
+            results['GreyNoise'] = {'score': gn_score, 'data': gn_data}
+            scores.append(gn_score)
 
     # --- URLhaus (abuse.ch) — URL / domain / IP (no API key) ---
     if ioc_type in ('url', 'domain', 'ip'):

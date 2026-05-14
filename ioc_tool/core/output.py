@@ -35,6 +35,8 @@ CSV_COLUMNS: List[str] = [
     "tor",
     "whois_creation_date",
     "urlhaus_threat",
+    "greynoise_classification",
+    "greynoise_name",
 ]
 
 
@@ -166,6 +168,14 @@ def _flatten_result(result: Dict[str, Any]) -> Dict[str, str]:
     threat = urlhaus_data.get("threat")
     if threat:
         row["urlhaus_threat"] = _s(threat)
+
+    # GreyNoise — classification + name (Censys, Shodan, Mirai, ...)
+    greynoise = modules.get("GreyNoise") or {}
+    greynoise_data = greynoise.get("data") or {}
+    if greynoise_data.get("classification"):
+        row["greynoise_classification"] = _s(greynoise_data.get("classification"))
+    if greynoise_data.get("name"):
+        row["greynoise_name"] = _s(greynoise_data.get("name"))
 
     # WHOIS
     whois = modules.get("WHOIS") or {}

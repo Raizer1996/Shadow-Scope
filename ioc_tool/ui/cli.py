@@ -130,6 +130,14 @@ def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> 
             tags = urlhaus_data.get('tags') or []
             tag_str = f" [{', '.join(str(t) for t in tags)}]" if tags else ""
             details = f"Threat: {threat}{tag_str}"
+        elif source == 'GreyNoise':
+            gn_data = data['data']
+            classification = gn_data.get('classification', 'unknown')
+            name = gn_data.get('name')
+            details = (
+                f"Class: {classification}"
+                + (f" — {name}" if name else "")
+            )
 
         table.add_row(source, f"[{score_color}]{score_val}[/{score_color}]", str(details))
 
@@ -219,6 +227,21 @@ def print_aggregated_table(
                     " " + ",".join(str(t) for t in tags[:2]) if tags else ""
                 )
                 summary_parts.append(f"[red]URLhaus:HIT[/red]{tag_fragment}")
+
+        # GreyNoise — internet background-noise classification
+        if 'GreyNoise' in modules:
+            gn_data = modules['GreyNoise']['data']
+            classification = gn_data.get('classification')
+            is_noise = bool(gn_data.get('noise'))
+            is_riot = bool(gn_data.get('riot'))
+            if classification == 'benign' and is_noise:
+                summary_parts.append("[green]GN:Noise/Benign[/green]")
+            elif classification == 'benign' and is_riot:
+                summary_parts.append("[green]GN:RIOT[/green]")
+            elif classification == 'malicious':
+                summary_parts.append("[red]GN:Malicious[/red]")
+            # classification == 'unknown' -> deliberately omitted to
+            # avoid polluting the table with non-signal cells.
 
         # IPQualityScore
         if 'IPQS' in modules:

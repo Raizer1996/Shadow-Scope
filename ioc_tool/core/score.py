@@ -76,6 +76,25 @@ def calculate_urlhaus_score(data):
         return 70
     return 80
 
+def calculate_greynoise_score(data: dict | None) -> int:
+    """GreyNoise: malicious=90, benign/riot=0, unknown=0, none=0.
+
+    Mapping:
+    - ``classification == 'malicious'`` -> 90 (known-bad scanner / actor)
+    - ``classification == 'benign'`` (noise=True or riot=True) -> 0
+      (intentional false-positive dampener: known benign scanners +
+      Real Internet Observation Trust services pull the average down)
+    - ``classification == 'unknown'`` -> 0 (no observation, no signal)
+    - missing / ``None`` -> 0
+    """
+    if not data:
+        return 0
+    classification = data.get("classification")
+    if classification == "malicious":
+        return 90
+    return 0
+
+
 def calculate_final_risk(scores):
     """
     Average of all module scores

@@ -21,6 +21,7 @@ import responses
 
 from ioc_tool.modules import (
     abuseipdb,
+    greynoise,
     ipinfo_mod,
     ip_quality_score,
     shodan_mod,
@@ -511,3 +512,149 @@ class TestURLhaus:
         """None / empty payload → score 0."""
         assert score_mod.calculate_urlhaus_score(None) == 0
         assert score_mod.calculate_urlhaus_score({}) == 0
+
+
+# ---------------------------------------------------------------------------
+# GreyNoise (Community API) — IP-only background-noise classification
+# ---------------------------------------------------------------------------
+
+
+class TestGreyNoise:
+    """Cover the GreyNoise module: hit, miss, errors, and scoring."""
+
+    @responses.activate
+    def test_greynoise_benign_noise_hit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Benign noise hit (e.g. Censys scanner) returns the full payload."""
+        monkeypatch.setenv("GREYNOISE_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://api.greynoise.io/v3/community/1.2.3.4",
+            json={
+                "ip": "1.2.3.4",
+                "noise": True,
+                "riot": False,
+                "classification": "benign",
+                "name": "Censys",
+                "link": "https://viz.greynoise.io/ip/1.2.3.4",
+                "last_seen": "2024-12-01",
+                "message": "Success",
+            },
+            status=200,
+        )
+        result = greynoise.enrich_ip("1.2.3.4")
+        assert result is not None
+        assert result["classification"] == "benign"
+        assert result["noise"] is True
+        assert result["name"] == "Censys"
+
+    @responses.activate
+    def test_greynoise_malicious_hit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Malicious classification surfaces as-is for scoring."""
+        monkeypatch.setenv("GREYNOISE_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://api.greynoise.io/v3/community/5.6.7.8",
+            json={
+                "ip": "5.6.7.8",
+                "noise": True,
+                "riot": False,
+                "classification": "malicious",
+                "name": "Mirai",
+                "message": "Success",
+            },
+            status=200,
+        )
+        result = greynoise.enrich_ip("5.6.7.8")
+        assert result is not None
+        assert result["classification"] == "malicious"
+        assert result["name"] == "Mirai"
+
+    @responses.activate
+    def test_greynoise_unknown_response(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """classification='unknown' still returns the dict — not filtered out."""
+        monkeypatch.setenv("GREYNOISE_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://api.greynoise.io/v3/community/9.9.9.9",
+            json={
+                "ip": "9.9.9.9",
+                "noise": False,
+                "riot": False,
+                "classification": "unknown",
+                "message": (
+                    "IP not observed scanning the internet or contained in "
+                    "RIOT data set"
+                ),
+            },
+            status=200,
+        )
+        result = greynoise.enrich_ip("9.9.9.9")
+        assert result is not None
+        assert result["classification"] == "unknown"
+
+    def test_greynoise_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing GREYNOISE_API_KEY → returns None without an HTTP call."""
+        monkeypatch.delenv("GREYNOISE_API_KEY", raising=False)
+        # No responses.add() — if a request were attempted under
+        # @responses.activate it would error. Plain call here is enough
+        # since we short-circuit before requests.get is invoked.
+        assert greynoise.enrich_ip("1.2.3.4") is None
+
+    @responses.activate
+    def test_greynoise_unauthorized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A 401 from a bad/expired key returns None."""
+        monkeypatch.setenv("GREYNOISE_API_KEY", "bad-key")
+        responses.add(
+            responses.GET,
+            "https://api.greynoise.io/v3/community/1.2.3.4",
+            json={"message": "forbidden"},
+            status=401,
+        )
+        assert greynoise.enrich_ip("1.2.3.4") is None
+
+    @responses.activate
+    def test_greynoise_request_exception(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Network/connection error returns None cleanly (never raises)."""
+        monkeypatch.setenv("GREYNOISE_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://api.greynoise.io/v3/community/1.2.3.4",
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+        assert greynoise.enrich_ip("1.2.3.4") is None
+
+    def test_calculate_greynoise_score_malicious(self) -> None:
+        """classification='malicious' → 90."""
+        assert (
+            score_mod.calculate_greynoise_score(
+                {"classification": "malicious", "noise": True}
+            )
+            == 90
+        )
+
+    def test_calculate_greynoise_score_benign(self) -> None:
+        """benign noise scanners + RIOT trusted services both score 0."""
+        assert (
+            score_mod.calculate_greynoise_score(
+                {"classification": "benign", "noise": True}
+            )
+            == 0
+        )
+        assert (
+            score_mod.calculate_greynoise_score(
+                {"classification": "benign", "riot": True}
+            )
+            == 0
+        )
+
+    def test_calculate_greynoise_score_none(self) -> None:
+        """None / empty payload / unknown classification all score 0."""
+        assert score_mod.calculate_greynoise_score(None) == 0
+        assert score_mod.calculate_greynoise_score({}) == 0
+        assert (
+            score_mod.calculate_greynoise_score({"classification": "unknown"}) == 0
+        )

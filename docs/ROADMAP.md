@@ -37,7 +37,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ## v0.4 — New Sources (intel breadth)
 
 ### Free / freemium IOC sources
-- [ ] **GreyNoise** — flags internet-scanner noise vs targeted activity (huge FP killer). **[issue]**
 - [ ] **AlienVault OTX** — community pulses, broad coverage. **[issue]**
 - [ ] **URLscan.io** — URL screenshot + sibling domains + behavior (phishing gold). **[issue]**
 - [ ] **abuse.ch ThreatFox** — fresh IOC feed, no API key. **[issue]**
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] CSV output (`--csv`) for spreadsheet handoff (2026-05-14)
 - [x] IOC extraction from text — `enrich --text "blob"` / `enrich -` pipe-mode pulls IPs/domains/URLs/hashes/emails from prose and enriches each (2026-05-14)
 - [x] abuse.ch URLhaus — malicious URL / host enrichment, no API key required (2026-05-14)
+- [x] GreyNoise — Community API IP classification (noise vs targeted, huge SOC FP killer) (2026-05-14)
