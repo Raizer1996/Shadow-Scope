@@ -42,6 +42,9 @@ CSV_COLUMNS: List[str] = [
     "otx_pulse_count",
     "otx_first_pulse",
     "otx_adversary",
+    "urlscan_total",
+    "urlscan_malicious",
+    "urlscan_first_result",
     "greynoise_classification",
     "greynoise_name",
 ]
@@ -205,6 +208,33 @@ def _flatten_result(result: Dict[str, Any]) -> Dict[str, str]:
             row["otx_first_pulse"] = _s(first_pulse.get("name"))
         if first_pulse.get("adversary"):
             row["otx_adversary"] = _s(first_pulse.get("adversary"))
+
+    # URLscan.io — total hits + first result link + malicious flag
+    urlscan = modules.get("URLscan") or {}
+    urlscan_data = urlscan.get("data") or {}
+    if urlscan_data:
+        try:
+            us_total = int(urlscan_data.get("total", 0) or 0)
+        except (TypeError, ValueError):
+            us_total = 0
+        row["urlscan_total"] = _s(us_total)
+        us_results = urlscan_data.get("results") or []
+        if us_results:
+            first = us_results[0] if isinstance(us_results[0], dict) else {}
+            link = first.get("result")
+            if link:
+                row["urlscan_first_result"] = _s(link)
+        is_malicious = False
+        for entry in us_results:
+            if not isinstance(entry, dict):
+                continue
+            verdicts = entry.get("verdicts") or {}
+            overall = verdicts.get("overall") or {}
+            if overall.get("malicious") is True:
+                is_malicious = True
+                break
+        if is_malicious:
+            row["urlscan_malicious"] = "yes"
 
     # GreyNoise — classification + name (Censys, Shodan, Mirai, ...)
     greynoise = modules.get("GreyNoise") or {}

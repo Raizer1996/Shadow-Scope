@@ -24,6 +24,7 @@
   - **MalwareBazaar (abuse.ch)** — hash → malware family + sample metadata (no API key)
   - **GreyNoise** — classifies internet background noise vs targeted activity (kills SOC false positives)
   - **AlienVault OTX** — community pulse / threat-actor reports (free key)
+  - **URLscan.io** — historical scan search, screenshots + verdicts (free key, optional)
 
   <img width="1341" height="529" alt="enrich result" src="https://github.com/user-attachments/assets/033a128a-68db-4fdd-8698-7d0f09439246" />
   <img width="363" height="422" alt="risk score" src="https://github.com/user-attachments/assets/6d584762-5951-4ebb-98b4-25b9395feb10" />

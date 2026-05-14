@@ -66,6 +66,7 @@ ShadowScope is a terminal-based IOC enrichment and risk-scoring tool. It accepts
 | `ioc_tool/modules/malwarebazaar.py` | abuse.ch MalwareBazaar hash lookup (sample + family, no API key) |
 | `ioc_tool/modules/greynoise.py` | GreyNoise community classification — noise vs targeted |
 | `ioc_tool/modules/otx.py` | AlienVault OTX pulse lookup — community / threat-actor reports |
+| `ioc_tool/modules/urlscan.py` | URLscan.io historical scan search (IP / domain / URL — screenshots + verdicts) |
 | `ioc_tool/modules/filescan_io.py` | FileScan.IO file/URL submission |
 | `ioc_tool/modules/hybrid_analysis.py` | Hybrid Analysis sandbox (optional) |
 | `ioc_tool/modules/joe_sandbox.py` | Joe Sandbox Cloud (optional) |
@@ -74,13 +75,13 @@ ShadowScope is a terminal-based IOC enrichment and risk-scoring tool. It accepts
 
 ## Source coverage matrix
 
-| IOC type | VT | AbuseIPDB | Shodan | IPQS | IPinfo | Tor | WHOIS | URLhaus | ThreatFox | MalwareBazaar | GreyNoise | OTX | Sandbox |
-|----------|----|-----------|--------|------|--------|-----|-------|---------|-----------|---------------|-----------|-----|---------|
-| IP       | ✅ | ✅        | ✅     | ✅   | ✅     | ✅  | —     | ✅      | ✅        | —             | ✅        | ✅  | —       |
-| Domain   | ✅ | —         | —      | —    | —      | —   | ✅    | ✅      | ✅        | —             | —         | ✅  | —       |
-| URL      | ✅ | —         | —      | —    | —      | —   | —     | ✅      | ✅        | —             | —         | ✅  | ✅      |
-| Hash     | ✅ | —         | —      | —    | —      | —   | —     | —       | ✅        | ✅            | —         | ✅  | ✅      |
-| File     | —  | —         | —      | —    | —      | —   | —     | —       | —         | —             | —         | —   | ✅      |
+| IOC type | VT | AbuseIPDB | Shodan | IPQS | IPinfo | Tor | WHOIS | URLhaus | ThreatFox | MalwareBazaar | GreyNoise | OTX | URLscan | Sandbox |
+|----------|----|-----------|--------|------|--------|-----|-------|---------|-----------|---------------|-----------|-----|---------|---------|
+| IP       | ✅ | ✅        | ✅     | ✅   | ✅     | ✅  | —     | ✅      | ✅        | —             | ✅        | ✅  | ✅      | —       |
+| Domain   | ✅ | —         | —      | —    | —      | —   | ✅    | ✅      | ✅        | —             | —         | ✅  | ✅      | —       |
+| URL      | ✅ | —         | —      | —    | —      | —   | —     | ✅      | ✅        | —             | —         | ✅  | ✅      | ✅      |
+| Hash     | ✅ | —         | —      | —    | —      | —   | —     | —       | ✅        | ✅            | —         | ✅  | —       | ✅      |
+| File     | —  | —         | —      | —    | —      | —   | —     | —       | —         | —             | —         | —   | —       | ✅      |
 
 ## Risk-scoring algorithm
 
@@ -98,6 +99,7 @@ Per-source raw scores → averaged → composite final score (0–100).
 | MalwareBazaar | `95` on any hit (sample known to abuse.ch), `0` if no data |
 | GreyNoise  | `malicious=90`, `benign/riot=0`, `unknown=0`, none=`0` |
 | OTX        | pulses 1–2 → `50`, 3–9 → `75`, ≥10 → `90`; `reputation < 0` adds `+10` (cap `100`); no pulses + `reputation >= 0` → `0` |
+| URLscan    | any result with malicious verdict → `90`; history exists, no malicious verdict → `30`; `total == 0` or no data → `0` |
 | Shodan     | `0` (informational only — tags/ports/vulns shown but not scored) |
 | IPinfo     | `0` (informational only — ASN/org/geo shown) |
 

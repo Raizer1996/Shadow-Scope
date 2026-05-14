@@ -55,6 +55,13 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 
 ## Enrichment (location / fraud context)
 
+### URLscan.io — `URLSCAN_API_KEY` *(optional but recommended)*
+- **Signup**: https://urlscan.io/user/signup
+- **Free tier**: 100 unauthenticated + 200 authenticated scans/day; search API allowance is generous in practice
+- **Used for**: historical URL-scan search — finds known malicious URLs + screenshots + sibling domains. Each result links to the full URLscan report (HTTP transaction tree, screenshot, certificates, page content) so analysts can click through for phishing triage. ShadowScope uses the **search** API only (read-only / historical) — submitting fresh scans takes 10+ seconds and is out of scope here.
+- **Scope**: IP, domain, URL (hash is unsupported — URLscan indexes URLs, not files)
+- **Env var**: `URLSCAN_API_KEY` is optional; missing key still works at the lower anon quota.
+
 ### AlienVault OTX — `OTX_API_KEY`
 - **Signup**: https://otx.alienvault.com/
 - **Free tier**: generous — no documented daily quota (be polite)

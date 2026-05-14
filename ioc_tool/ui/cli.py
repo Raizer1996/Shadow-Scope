@@ -169,6 +169,35 @@ def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> 
             if adversary:
                 parts.append(f"Adversary: {adversary}")
             details = " — ".join(parts)
+        elif source == 'URLscan':
+            us_data = data['data'] or {}
+            try:
+                total = int(us_data.get('total', 0) or 0)
+            except (TypeError, ValueError):
+                total = 0
+            us_results = us_data.get('results') or []
+            parts = [f"Scans: {total}"]
+            # First few result links (analysts click through for screenshots).
+            for entry in us_results[:3]:
+                if not isinstance(entry, dict):
+                    continue
+                link = entry.get('result')
+                if link:
+                    parts.append(f"[dim]{link}[/dim]")
+            # If any malicious verdict, surface tags from the first one.
+            for entry in us_results:
+                if not isinstance(entry, dict):
+                    continue
+                verdicts = entry.get('verdicts') or {}
+                overall = verdicts.get('overall') or {}
+                if overall.get('malicious') is True:
+                    tags = overall.get('tags') or []
+                    if tags:
+                        parts.append(
+                            "Tags: " + ", ".join(str(t) for t in tags[:3])
+                        )
+                    break
+            details = " — ".join(parts)
         elif source == 'MalwareBazaar':
             mb_data = data['data']
             signature = mb_data.get('signature') or 'unknown'
@@ -315,6 +344,38 @@ def print_aggregated_table(
                 summary_parts.append(
                     f"[{color}]OTX:{pulse_count} pulses[/{color}]{adversary_fragment}"
                 )
+
+        # URLscan.io — historical scan-archive search
+        if 'URLscan' in modules:
+            us_data = modules['URLscan']['data'] or {}
+            try:
+                us_total = int(us_data.get('total', 0) or 0)
+            except (TypeError, ValueError):
+                us_total = 0
+            if us_total >= 1:
+                us_results = us_data.get('results') or []
+                malicious_entry = None
+                for entry in us_results:
+                    if not isinstance(entry, dict):
+                        continue
+                    verdicts = entry.get('verdicts') or {}
+                    overall = verdicts.get('overall') or {}
+                    if overall.get('malicious') is True:
+                        malicious_entry = entry
+                        break
+                if malicious_entry:
+                    tags = (
+                        ((malicious_entry.get('verdicts') or {}).get('overall') or {}).get('tags')
+                        or []
+                    )
+                    tag_fragment = f" [dim]({tags[0]})[/dim]" if tags else ""
+                    summary_parts.append(
+                        f"[red]URLscan:Malicious[/red]{tag_fragment}"
+                    )
+                else:
+                    summary_parts.append(
+                        f"[yellow]URLscan:{us_total} seen[/yellow]"
+                    )
 
         # GreyNoise — internet background-noise classification
         if 'GreyNoise' in modules:

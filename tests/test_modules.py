@@ -30,6 +30,7 @@ from ioc_tool.modules import (
     threatfox,
     tor,
     urlhaus,
+    urlscan,
     vt,
     whois_mod,
 )
@@ -1067,3 +1068,215 @@ class TestOTX:
         """None / empty payload → 0."""
         assert score_mod.calculate_otx_score(None) == 0
         assert score_mod.calculate_otx_score({}) == 0
+
+
+# ---------------------------------------------------------------------------
+# URLscan.io — historical scan-archive search (IP / domain / URL)
+# ---------------------------------------------------------------------------
+
+
+class TestURLscan:
+    """Cover the URLscan.io module: hits (malicious + clean), misses, scoring."""
+
+    @responses.activate
+    def test_urlscan_url_hit_with_malicious(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A URL with a malicious-verdict result returns the full search dict."""
+        monkeypatch.setenv("URLSCAN_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://urlscan.io/api/v1/search/",
+            json={
+                "total": 5,
+                "results": [
+                    {
+                        "task": {
+                            "uuid": "abc-123",
+                            "url": "http://malicious.example/payload",
+                            "time": "2024-01-15T12:00:00Z",
+                            "method": "manual",
+                            "visibility": "public",
+                        },
+                        "page": {
+                            "url": "http://malicious.example/payload",
+                            "domain": "malicious.example",
+                            "ip": "1.2.3.4",
+                            "country": "US",
+                            "asn": "AS15169",
+                        },
+                        "verdicts": {
+                            "overall": {
+                                "malicious": True,
+                                "score": 75,
+                                "tags": ["phishing"],
+                            }
+                        },
+                        "result": "https://urlscan.io/result/abc-123/",
+                    },
+                    {
+                        "task": {"uuid": "def-456"},
+                        "verdicts": {"overall": {"malicious": False}},
+                        "result": "https://urlscan.io/result/def-456/",
+                    },
+                ],
+            },
+            status=200,
+        )
+        result = urlscan.enrich("http://malicious.example/payload", "url")
+        assert result is not None
+        assert result["total"] == 5
+        assert result["results"][0]["verdicts"]["overall"]["malicious"] is True
+        assert (
+            result["results"][0]["result"]
+            == "https://urlscan.io/result/abc-123/"
+        )
+
+    @responses.activate
+    def test_urlscan_domain_hit_no_malicious(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A domain with history but no malicious verdict still returns a dict."""
+        monkeypatch.setenv("URLSCAN_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://urlscan.io/api/v1/search/",
+            json={
+                "total": 2,
+                "results": [
+                    {
+                        "task": {"uuid": "x1"},
+                        "page": {"domain": "example.com"},
+                        "verdicts": {"overall": {"malicious": False, "score": 0}},
+                        "result": "https://urlscan.io/result/x1/",
+                    },
+                    {
+                        "task": {"uuid": "x2"},
+                        "verdicts": {"overall": {"malicious": False}},
+                        "result": "https://urlscan.io/result/x2/",
+                    },
+                ],
+            },
+            status=200,
+        )
+        result = urlscan.enrich("example.com", "domain")
+        assert result is not None
+        assert result["total"] == 2
+        # Confirm no malicious verdict present
+        assert not any(
+            (r.get("verdicts") or {}).get("overall", {}).get("malicious")
+            for r in result["results"]
+        )
+
+    @responses.activate
+    def test_urlscan_ip_lookup_query_format(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """IP lookups must use the ``page.ip:"<value>"`` Lucene query."""
+        monkeypatch.setenv("URLSCAN_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://urlscan.io/api/v1/search/",
+            json={"total": 0, "results": []},
+            status=200,
+        )
+        result = urlscan.enrich("1.2.3.4", "ip")
+        assert result is not None
+        # Confirm the request was built with the expected page.ip:"..." query.
+        assert len(responses.calls) == 1
+        request_url = responses.calls[0].request.url
+        assert 'page.ip%3A%221.2.3.4%22' in request_url or 'page.ip:"1.2.3.4"' in request_url
+
+    @responses.activate
+    def test_urlscan_no_history(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``total == 0`` is a successful 200 → dict returned, NOT None."""
+        monkeypatch.setenv("URLSCAN_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://urlscan.io/api/v1/search/",
+            json={"total": 0, "results": []},
+            status=200,
+        )
+        result = urlscan.enrich("clean.example", "domain")
+        assert result is not None
+        assert result["total"] == 0
+        assert result["results"] == []
+
+    def test_urlscan_hash_unsupported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``ioc_type='hash'`` short-circuits to None — no HTTP call made."""
+        monkeypatch.setenv("URLSCAN_API_KEY", "fake-key-for-test")
+        # No responses.add() — a request here would explode under @responses.activate.
+        assert (
+            urlscan.enrich(
+                "d3486ae9136e7856bc42212385ea797094475802bcc9b2a8b6f23f5a1f5f4b6c",
+                "hash",
+            )
+            is None
+        )
+
+    @responses.activate
+    def test_urlscan_no_api_key_still_works(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing URLSCAN_API_KEY → request still made, no auth header sent."""
+        monkeypatch.delenv("URLSCAN_API_KEY", raising=False)
+        responses.add(
+            responses.GET,
+            "https://urlscan.io/api/v1/search/",
+            json={"total": 1, "results": [{"task": {"uuid": "anon"}}]},
+            status=200,
+        )
+        result = urlscan.enrich("1.2.3.4", "ip")
+        assert result is not None
+        assert result["total"] == 1
+        # The request must have gone out without the API-Key header.
+        assert len(responses.calls) == 1
+        assert "API-Key" not in responses.calls[0].request.headers
+
+    @responses.activate
+    def test_urlscan_request_exception(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Network / connection errors return None without crashing."""
+        monkeypatch.setenv("URLSCAN_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://urlscan.io/api/v1/search/",
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+        assert urlscan.enrich("1.2.3.4", "ip") is None
+
+    def test_urlscan_score_malicious(self) -> None:
+        """Any malicious-verdict result → 90."""
+        data = {
+            "total": 3,
+            "results": [
+                {"verdicts": {"overall": {"malicious": False}}},
+                {"verdicts": {"overall": {"malicious": True, "tags": ["phishing"]}}},
+            ],
+        }
+        assert score_mod.calculate_urlscan_score(data) == 90
+
+    def test_urlscan_score_history_only(self) -> None:
+        """History exists but no malicious verdict → 30 (mild signal)."""
+        data = {
+            "total": 2,
+            "results": [
+                {"verdicts": {"overall": {"malicious": False}}},
+                {"verdicts": {"overall": {"malicious": False}}},
+            ],
+        }
+        assert score_mod.calculate_urlscan_score(data) == 30
+
+    def test_urlscan_score_zero_total(self) -> None:
+        """total == 0 → 0 (we looked, nothing was there)."""
+        assert (
+            score_mod.calculate_urlscan_score({"total": 0, "results": []}) == 0
+        )
+
+    def test_urlscan_score_none(self) -> None:
+        """None / empty payload → 0."""
+        assert score_mod.calculate_urlscan_score(None) == 0
+        assert score_mod.calculate_urlscan_score({}) == 0

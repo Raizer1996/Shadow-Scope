@@ -182,6 +182,45 @@ def calculate_otx_score(data: dict | None) -> int:
     return min(base, 100)
 
 
+def calculate_urlscan_score(data: dict | None) -> int:
+    """URLscan.io historical search → risk signal.
+
+    URLscan indexes URL scans (page visits, redirects, screenshots) and
+    surfaces a per-result ``verdicts.overall.malicious`` boolean plus
+    tags. Presence of *any* malicious-verdict result is a strong signal.
+    Bare presence in the public archive — even without a malicious
+    verdict — is a mild signal: public submissions often happen because
+    someone was suspicious of the URL.
+
+    Mapping:
+
+    - ``None`` / no data → ``0``
+    - ``total == 0`` → ``0`` (we looked and found nothing — neutral)
+    - any result with ``verdicts.overall.malicious == True`` → ``90``
+    - otherwise (history exists, no malicious verdict) → ``30``
+    """
+    if not data:
+        return 0
+
+    try:
+        total = int(data.get("total", 0) or 0)
+    except (TypeError, ValueError):
+        total = 0
+    if total == 0:
+        return 0
+
+    results = data.get("results") or []
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
+        verdicts = entry.get("verdicts") or {}
+        overall = verdicts.get("overall") or {}
+        if overall.get("malicious") is True:
+            return 90
+
+    return 30
+
+
 def calculate_final_risk(scores):
     """
     Average of all module scores

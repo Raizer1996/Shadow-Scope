@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import json
 from . import database
 from . import score
-from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus, greynoise, threatfox, malwarebazaar, otx
+from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus, greynoise, threatfox, malwarebazaar, otx, urlscan
 
 def should_refresh(timestamp_str):
     if not timestamp_str:
@@ -212,6 +212,25 @@ def enrich_ioc(value, ioc_type):
         if otx_data:
             results['OTX'] = {'score': otx_score, 'data': otx_data}
             scores.append(otx_score)
+
+    # --- URLscan.io — IP / domain / URL (free key optional, anon allowed) ---
+    if ioc_type in ('ip', 'domain', 'url'):
+        cached_urlscan = database.get_latest_enrichment(ioc_id, 'urlscan')
+        urlscan_data = None
+        urlscan_score = 0
+
+        if cached_urlscan and not should_refresh(cached_urlscan['timestamp']):
+            urlscan_data = json.loads(cached_urlscan['data'])
+            urlscan_score = cached_urlscan['score']
+        else:
+            urlscan_data = urlscan.enrich(value, ioc_type)
+            if urlscan_data:
+                urlscan_score = score.calculate_urlscan_score(urlscan_data)
+                database.add_enrichment(ioc_id, 'urlscan', urlscan_data, urlscan_score)
+
+        if urlscan_data:
+            results['URLscan'] = {'score': urlscan_score, 'data': urlscan_data}
+            scores.append(urlscan_score)
 
     # --- MalwareBazaar (abuse.ch) — hash only (no API key) ---
     if ioc_type == 'hash':

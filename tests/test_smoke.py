@@ -461,3 +461,10 @@ def test_otx_csv_columns_present():
     assert 'otx_pulse_count' in output_mod.CSV_COLUMNS
     assert 'otx_first_pulse' in output_mod.CSV_COLUMNS
     assert 'otx_adversary' in output_mod.CSV_COLUMNS
+
+
+def test_urlscan_csv_columns_present():
+    """CSV exports include the URLscan total + malicious flag + first result link columns."""
+    assert 'urlscan_total' in output_mod.CSV_COLUMNS
+    assert 'urlscan_malicious' in output_mod.CSV_COLUMNS
+    assert 'urlscan_first_result' in output_mod.CSV_COLUMNS
