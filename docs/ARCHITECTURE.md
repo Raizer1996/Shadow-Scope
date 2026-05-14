@@ -33,9 +33,14 @@ ShadowScope is a terminal-based IOC enrichment and risk-scoring tool. It accepts
             ┌──────────────┐
             │  core.score  │  composite risk 0-100
             └──────┬───────┘
-                   ▼
+                   │
+                   │   (optional, --summary / ?summary=true)
+                   │   ┌──────────────┐
+                   ├──▶│  core.llm    │──▶ POST localhost:11434/api/generate (Ollama)
+                   │   └──────┬───────┘    → 2-3 sentence verdict (None on failure)
+                   ▼          ▼
             ┌──────────────┐
-            │  ui.cli      │  render table + score banner
+            │  ui.cli      │  render table + score banner [+ LLM verdict panel]
             └──────────────┘
 ```
 
@@ -63,6 +68,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/core/database.py` | SQLite wrapper (IOCs + enrichments tables) |
 | `ioc_tool/core/score.py` | Per-source scoring + composite risk avg |
 | `ioc_tool/core/output.py` | JSON/CSV serializers for results |
+| `ioc_tool/core/llm.py` | LLM-generated natural-language verdict via local Ollama (optional, `--summary` / `?summary=true`) |
 | `ioc_tool/modules/vt.py` | VirusTotal v3 API client |
 | `ioc_tool/modules/abuseipdb.py` | AbuseIPDB IP confidence lookup |
 | `ioc_tool/modules/shodan_mod.py` | Shodan host info |
@@ -145,6 +151,19 @@ Tiers:
 - **Tables**: `iocs` (id, value, type), `enrichments` (ioc_id, source, data_json, score, timestamp)
 - **TTL**: 24 h (`core.enrich.should_refresh`)
 - **Effect**: repeat queries within 24 h hit cache → no API spend
+
+## LLM verdict
+
+Optional natural-language layer on top of the structured enrichment. After `core.score` produces the composite risk, callers can opt in (`--summary` on the CLI, `?summary=true` on the API) to have `core.llm.summarize()` call a local Ollama HTTP server and return a 2-3 sentence analyst-grade verdict that names the dominant signals and recommends a next action.
+
+* **Endpoint** — `POST {OLLAMA_BASE_URL}/api/generate` (default `http://localhost:11434`)
+* **Model**    — `OLLAMA_MODEL` (default `llama3.2`)
+* **Timeout**  — 30 s by default; tweakable via the `timeout` argument
+* **Prompt**   — built by `_build_prompt(result)` from the enrichment dict: IOC value, type, composite score + tier, then one line per source with score and 1–3 key facts (VirusTotal `5/93 malicious`, AbuseIPDB `confidence 95`, URLhaus `threat=malware_download`, etc.). Total stays under ~600 chars so small local models handle it without truncation.
+* **Fallback** — connection error, timeout, non-200, malformed JSON, or missing `response` field all return `None`. The CLI surfaces a dim "LLM summary unavailable" note; the REST API simply omits the `llm_summary` key. **ShadowScope never crashes because Ollama is offline.**
+* **Bulk**     — `/enrich/bulk` and `/extract` parallelise summarisation across results via `asyncio.gather(asyncio.to_thread(llm.summarize, r), ...)` since each call is independent network I/O.
+
+The feature is purely additive — disable it by omitting the flag/query param, and ShadowScope behaves exactly as before.
 
 ## Configuration
 

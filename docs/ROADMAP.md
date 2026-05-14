@@ -82,7 +82,8 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [ ] **Reverse DNS** lookup on every IP. **[issue]**
 - [ ] **Suspicious TLD scoring** — `.tk / .top / .xyz / .surf` bump. **[issue]**
 - [ ] **First-seen / IP age** from PDNS data. **[issue]**
-- [ ] **LLM summary** (local Ollama / Claude API) — natural-language verdict + reasoning. **[issue]**
+<!-- Moved to Done 2026-05-14 — LLM summary (local Ollama, --summary flag) -->
+
 - [ ] **Auto-tag with MITRE ATT&CK** technique mapping based on observed behavior. **[issue]**
 
 ---
@@ -202,3 +203,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] REST API server — `shadowscope serve` exposes enrichment as HTTP via FastAPI + uvicorn. Endpoints: `/`, `/health`, `/enrich`, `/enrich/bulk` (concurrent), `/extract`, `/show`, `/sources`. Bearer-token auth via `SHADOWSCOPE_API_TOKEN` (off when unset), configurable CORS via `SHADOWSCOPE_CORS_ORIGINS`. Thin layer over `enrich_ioc_async` — zero core changes (2026-05-14)
 - [x] Web dashboard — minimal terminal-themed HTML/CSS/JS at `/ui`, served from `ioc_tool/web/static/`. Single-page, no SPA framework, no build step, no CDN deps. Auto-classifies input (single IOC / bulk list / prose blob → `/enrich`, `/enrich/bulk`, `/extract`). Drill-down per-source details, color-coded risk tiers, live `/sources` panel. Token via `?token=<v>` query string for iframe embeds — in-memory only, never persisted. Iframe-embeddable into homelab secops dashboard (2026-05-14)
 - [x] CVE IOC type — NVD CVSS v3.1 + EPSS exploit probability + CISA KEV (Known Exploited Vulnerabilities) catalog. New `cve` type in `parser.detect_type` (uppercase-canonicalised), three new modules (`nvd.py`, `epss.py`, `kev.py`), KEV catalog cached daily at `ioc_tool/data/cisa_kev.json`, six new CSV columns (`nvd_cvss`, `nvd_severity`, `epss_score`, `epss_percentile`, `kev_in_catalog`, `kev_ransomware`). No new API keys required (2026-05-14)
+- [x] **LLM summary** — natural-language 2-3 sentence verdict via local Ollama. New `ioc_tool/core/llm.py` (model-agnostic `_build_prompt` + `summarize`), top-level `--summary` CLI flag (works on `enrich` and `show`, plus JSON/CSV output), `?summary=true` query param on `/enrich`, `/enrich/bulk`, `/extract`. Bulk summarisation parallelised via `asyncio.to_thread`. Configurable via env `OLLAMA_BASE_URL` (default `http://localhost:11434`) + `OLLAMA_MODEL` (default `llama3.2`). Optional feature — Ollama unreachable → `summarize()` returns `None`, ShadowScope keeps working. Dashboard exposes a global "Include LLM verdict" checkbox; verdicts render below each row (2026-05-14)

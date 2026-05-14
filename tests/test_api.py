@@ -156,6 +156,72 @@ def test_enrich_defang_query_param(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# /enrich — LLM summary integration (summary=true)
+# ---------------------------------------------------------------------------
+
+
+def test_api_enrich_with_summary_query(client, monkeypatch):
+    """``?summary=true`` injects ``llm_summary`` populated from llm.summarize."""
+    _stub_async_enrich(monkeypatch)
+    # Patch llm.summarize where it's *used* (the api module's binding) so the
+    # async to_thread wrapper picks it up.
+    monkeypatch.setattr(api_mod.llm_mod, "summarize", lambda r: "verdict text")
+    response = client.get(
+        "/enrich",
+        params={"ioc": "8.8.8.8", "summary": "true"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("llm_summary") == "verdict text"
+
+
+def test_api_enrich_summary_false_omits_field(client, monkeypatch):
+    """Without ``?summary=true`` the ``llm_summary`` key is absent."""
+    _stub_async_enrich(monkeypatch)
+    # Even if summarize would return text, it must never run when the flag's off.
+    monkeypatch.setattr(
+        api_mod.llm_mod,
+        "summarize",
+        lambda r: (_ for _ in ()).throw(AssertionError("must not be called")),
+    )
+    response = client.get("/enrich", params={"ioc": "8.8.8.8"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert "llm_summary" not in payload
+
+
+def test_api_enrich_summary_none_omits_field(client, monkeypatch):
+    """When llm.summarize returns ``None`` (Ollama down), no key is injected."""
+    _stub_async_enrich(monkeypatch)
+    monkeypatch.setattr(api_mod.llm_mod, "summarize", lambda r: None)
+    response = client.get(
+        "/enrich",
+        params={"ioc": "8.8.8.8", "summary": "true"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "llm_summary" not in payload
+
+
+def test_api_bulk_enrich_with_summary(client, monkeypatch):
+    """Bulk endpoint attaches per-result summaries when ``?summary=true`` is set."""
+    _stub_async_enrich(monkeypatch)
+    monkeypatch.setattr(
+        api_mod.llm_mod, "summarize", lambda r: "verdict for " + r["ioc"]
+    )
+    response = client.post(
+        "/enrich/bulk",
+        params={"summary": "true"},
+        json={"iocs": ["1.2.3.4", "8.8.8.8"]},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload, list)
+    assert all("llm_summary" in r for r in payload)
+    assert any(r["llm_summary"].endswith("1.2.3.4") for r in payload)
+
+
+# ---------------------------------------------------------------------------
 # /enrich/bulk
 # ---------------------------------------------------------------------------
 

@@ -267,6 +267,29 @@
         { class: "details hidden", dataset: { idx: String(idx) } },
         el("td", { colspan: "5" }, buildDetails(r)));
 
+      // Optional LLM verdict — only present when the server attached it
+      // (api responds when ?summary=true and Ollama returned text). We
+      // render as a dim paragraph below the row so analysts can read at
+      // a glance without expanding the full module dump.
+      if (r && typeof r.llm_summary === "string" && r.llm_summary.trim()) {
+        const verdictRow = el(
+          "tr",
+          { class: "llm-verdict", dataset: { idx: String(idx) } },
+          el("td", { colspan: "5" },
+            el("div", { class: "llm-verdict-box" },
+              el("span", { class: "llm-verdict-label" }, "LLM verdict: "),
+              el("span", { class: "llm-verdict-text" }, r.llm_summary.trim()))));
+        tbody.appendChild(row);
+        tbody.appendChild(detailsRow);
+        tbody.appendChild(verdictRow);
+        row.addEventListener("click", () => {
+          const isHidden = detailsRow.classList.toggle("hidden");
+          const toggle = row.querySelector(".toggle");
+          if (toggle) toggle.textContent = isHidden ? "▸" : "▾";
+        });
+        return;
+      }
+
       row.addEventListener("click", () => {
         const isHidden = detailsRow.classList.toggle("hidden");
         const toggle = row.querySelector(".toggle");
@@ -357,6 +380,7 @@
       return;
     }
     const defang = !!els.defang.checked;
+    const wantSummary = !!(els.summary && els.summary.checked);
     setSpinner(true);
     setStatus(
       mode === "single" ? "Enriching 1 IOC…" :
@@ -366,19 +390,20 @@
     );
     try {
       let results, extracted;
+      const summaryQs = "&summary=" + (wantSummary ? "true" : "false");
       if (mode === "single") {
         const r = await apiFetch(
           "/enrich?ioc=" + encodeURIComponent(tokens[0]) +
-          "&defang=" + (defang ? "true" : "false"));
+          "&defang=" + (defang ? "true" : "false") + summaryQs);
         results = [r];
       } else if (mode === "bulk") {
         const r = await apiFetch(
-          "/enrich/bulk?defang=" + (defang ? "true" : "false"),
+          "/enrich/bulk?defang=" + (defang ? "true" : "false") + summaryQs,
           { method: "POST", body: { iocs: tokens } });
         results = Array.isArray(r) ? r : [];
       } else {
         const r = await apiFetch(
-          "/extract?defang=" + (defang ? "true" : "false"),
+          "/extract?defang=" + (defang ? "true" : "false") + summaryQs,
           { method: "POST", body: { text } });
         results = (r && r.results) || [];
         extracted = (r && r.extracted) || null;
@@ -452,6 +477,7 @@
     els.input       = $("ioc-input");
     els.enrichBtn   = $("enrich-btn");
     els.defang      = $("defang-checkbox");
+    els.summary     = $("summary-checkbox");
     els.status      = $("status");
     els.statusText  = $("status-text");
     els.spinner     = $("spinner");

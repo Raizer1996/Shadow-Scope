@@ -42,7 +42,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ..core import database, defang as defang_mod, enrich, extractor, parser
+from ..core import database, defang as defang_mod, enrich, extractor, llm as llm_mod, parser
 
 API_VERSION = "0.9.0"
 
@@ -122,6 +122,27 @@ def _apply_output_defang(result: Dict[str, Any], should_defang: bool) -> Dict[st
         result = dict(result)  # don't mutate caller's reference
         result["ioc"] = defang_mod.defang(result["ioc"])
     return result
+
+
+async def _attach_summaries(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Run ``llm.summarize`` for each result concurrently and inject ``llm_summary``.
+
+    Summarisation is network I/O against Ollama — we parallelise via
+    ``asyncio.gather(asyncio.to_thread(...))`` so a batch of N IOCs only
+    pays one round-trip's worth of wall-clock latency. Failures land as
+    ``None`` and the key is omitted.
+    """
+    if not results:
+        return results
+    tasks = [asyncio.to_thread(llm_mod.summarize, r) for r in results]
+    summaries = await asyncio.gather(*tasks, return_exceptions=True)
+    enriched: List[Dict[str, Any]] = []
+    for r, s in zip(results, summaries):
+        merged = dict(r)
+        if isinstance(s, str) and s:
+            merged["llm_summary"] = s
+        enriched.append(merged)
+    return enriched
 
 
 async def _enrich_one(ioc: str) -> Dict[str, Any]:
@@ -221,16 +242,30 @@ def health() -> HealthResponse:
 async def enrich_single(
     ioc: str = Query(..., description="IOC value (auto-detected, refanged)"),
     defang: bool = Query(False, description="Defang the returned ioc field"),
+    summary: bool = Query(
+        False,
+        description="Attach an llm_summary field via local Ollama (optional)",
+    ),
 ) -> Dict[str, Any]:
     """Enrich a single IOC. Type is auto-detected and defanged input is refanged."""
     result = await _enrich_one(ioc)
-    return _apply_output_defang(result, defang)
+    result = _apply_output_defang(result, defang)
+    if summary:
+        verdict = await asyncio.to_thread(llm_mod.summarize, result)
+        if isinstance(verdict, str) and verdict:
+            result = dict(result)
+            result["llm_summary"] = verdict
+    return result
 
 
 @app.post("/enrich/bulk", dependencies=[Depends(require_token)])
 async def enrich_bulk(
     payload: BulkEnrichRequest,
     defang: bool = Query(False, description="Defang the returned ioc fields"),
+    summary: bool = Query(
+        False,
+        description="Attach an llm_summary field via local Ollama (optional)",
+    ),
 ) -> List[Dict[str, Any]]:
     """Enrich many IOCs concurrently.
 
@@ -256,6 +291,8 @@ async def enrich_bulk(
             # Never crash the whole batch — match the CLI contract.
             continue
         results.append(_apply_output_defang(item, defang))
+    if summary:
+        results = await _attach_summaries(results)
     return results
 
 
@@ -263,6 +300,10 @@ async def enrich_bulk(
 async def extract_and_enrich(
     payload: ExtractRequest,
     defang: bool = Query(False, description="Defang the returned ioc fields"),
+    summary: bool = Query(
+        False,
+        description="Attach an llm_summary field via local Ollama (optional)",
+    ),
 ) -> Dict[str, Any]:
     """Extract IOCs from a free-form text blob, then enrich each.
 
@@ -292,6 +333,9 @@ async def extract_and_enrich(
         if isinstance(item, Exception):
             continue
         results.append(_apply_output_defang(item, defang))
+
+    if summary:
+        results = await _attach_summaries(results)
 
     return {"extracted": extracted, "results": results}
 

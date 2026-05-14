@@ -13,6 +13,7 @@ from ..core import (
     defang as defang_mod,
     enrich,
     extractor,
+    llm as llm_mod,
     output as output_mod,
     parser,
 )
@@ -678,16 +679,71 @@ def handle_enrich(args: argparse.Namespace) -> None:
     if not results:
         return
 
+    want_summary = bool(getattr(args, 'summary', False))
+    summaries: Dict[int, Optional[str]] = {}
+    if want_summary:
+        # Compute one verdict per result upfront so JSON/CSV and table
+        # branches share the same data. Each call wraps its own errors
+        # and returns None on failure — never blocks the pipeline.
+        for idx, res in enumerate(results):
+            summaries[idx] = llm_mod.summarize(res)
+
     if want_json:
-        print(output_mod.to_json(results))
+        if want_summary:
+            payload: List[Dict[str, Any]] = []
+            for idx, res in enumerate(results):
+                merged = dict(res)
+                merged['llm_summary'] = summaries.get(idx)
+                payload.append(merged)
+            print(output_mod.to_json(payload))
+        else:
+            print(output_mod.to_json(results))
         return
     if want_csv:
         # Use sys.stdout.write to preserve the trailing newline structure
         # exactly as csv.writer emits it; print() would append an extra \n.
-        sys.stdout.write(output_mod.to_csv(results))
+        csv_text = output_mod.to_csv(results)
+        if want_summary:
+            # Append an llm_summary column on the fly. We pad header +
+            # each row so the column count stays balanced.
+            lines = csv_text.split("\n")
+            if lines and lines[-1] == "":
+                trailing_blank = True
+                lines = lines[:-1]
+            else:
+                trailing_blank = False
+            if lines:
+                lines[0] = lines[0] + ",llm_summary"
+                import csv as _csv
+                import io as _io
+                for i in range(1, len(lines)):
+                    summary = summaries.get(i - 1) or ""
+                    buf = _io.StringIO()
+                    writer = _csv.writer(buf, lineterminator="")
+                    writer.writerow([summary])
+                    lines[i] = lines[i] + "," + buf.getvalue()
+            csv_text = "\n".join(lines) + ("\n" if trailing_blank else "")
+        sys.stdout.write(csv_text)
         return
 
     print_aggregated_table(results, should_defang=getattr(args, 'defang', False))
+    if want_summary:
+        for idx, res in enumerate(results):
+            verdict = summaries.get(idx)
+            if verdict:
+                console.print(
+                    Panel(
+                        verdict,
+                        title=f"LLM Verdict — {res.get('ioc')}",
+                        border_style="cyan",
+                        expand=False,
+                    )
+                )
+            else:
+                console.print(
+                    f"[dim]LLM summary unavailable for {res.get('ioc')} "
+                    "(Ollama not reachable)[/dim]"
+                )
 
 
 def handle_show(args: argparse.Namespace) -> None:
@@ -700,6 +756,22 @@ def handle_show(args: argparse.Namespace) -> None:
     ioc_type = parser.detect_type(args.ioc)
     result = enrich.enrich_ioc(args.ioc, ioc_type)
     print_single_result(result, should_defang=getattr(args, 'defang', False))
+
+    if getattr(args, 'summary', False):
+        verdict = llm_mod.summarize(result)
+        if verdict:
+            console.print(
+                Panel(
+                    verdict,
+                    title=f"LLM Verdict — {result.get('ioc')}",
+                    border_style="cyan",
+                    expand=False,
+                )
+            )
+        else:
+            console.print(
+                "[dim]LLM summary unavailable (Ollama not reachable)[/dim]"
+            )
 
 
 def handle_analyze(
@@ -941,6 +1013,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help='Defang IOCs in printed output (e.g. 1.2.3.4 → 1[.]2[.]3[.]4) so reports are safe to share',
     )
+    parser_arg.add_argument(
+        '--summary',
+        action='store_true',
+        default=False,
+        help='Append an LLM-generated natural-language verdict (requires local Ollama)',
+    )
     subparsers = parser_arg.add_subparsers(dest='command', metavar='<command>')
 
     # enrich
@@ -977,6 +1055,16 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Output as CSV instead of rich table (stdout stays parse-clean)',
     )
+    # --summary is also exposed on the top-level parser (above) so it works
+    # before the subcommand (`--summary enrich 8.8.8.8`); duplicating it on the
+    # subparser keeps `enrich 8.8.8.8 --summary` working too. ``default=None``
+    # ensures the subparser's value never overrides a top-level ``--summary``.
+    p_enrich.add_argument(
+        '--summary',
+        action='store_true',
+        default=argparse.SUPPRESS,
+        help='Append an LLM-generated natural-language verdict (requires local Ollama)',
+    )
 
     # analyze
     p_analyze = subparsers.add_parser(
@@ -1006,6 +1094,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_show.add_argument(
         'ioc',
         help='IOC value to show',
+    )
+    p_show.add_argument(
+        '--summary',
+        action='store_true',
+        default=argparse.SUPPRESS,
+        help='Append an LLM-generated natural-language verdict (requires local Ollama)',
     )
 
     # serve — REST API

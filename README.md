@@ -45,6 +45,8 @@
 
 - **Parallel multi-source enrichment** — every applicable source fires concurrently via `asyncio.to_thread`; ~9× faster than serial for multi-source IP queries (wall-clock becomes `max(per-source latency)` instead of the sum)
 
+- **LLM verdict (optional)** — 2-3 sentence natural-language reasoning via local Ollama. Pass `--summary` on the CLI or `?summary=true` on the API; configurable via `OLLAMA_BASE_URL` / `OLLAMA_MODEL`. Gracefully degrades to no-op when Ollama is unreachable
+
 - **Sleek CLI**
   - Interactive menu system
   - Rich text formatting with tables and colors
@@ -106,6 +108,14 @@ python3 -m ioc_tool.main
 python3 -m ioc_tool.main enrich 8.8.8.8
 python3 -m ioc_tool.main enrich CVE-2024-1234
 ```
+
+**LLM verdict** (optional — requires a local [Ollama](https://ollama.com) install)
+
+```bash
+python3 -m ioc_tool.main enrich 8.8.8.8 --summary
+```
+
+Appends a 2-3 sentence natural-language verdict below the table. Override the model or endpoint via `OLLAMA_MODEL` / `OLLAMA_BASE_URL`. If Ollama is unreachable the call returns silently and the rest of the report still prints.
 
 **Bulk enrich from a file** (one IOC per line)
 
@@ -185,7 +195,7 @@ The CLI entry name is `shadowscope` when installed; from a checkout use `python3
 | GET    | `/show?ioc=<value>` | Cached enrichment, no refetch — 404 if not cached |
 | GET    | `/sources` | `{source_name: key_present}` — never returns key values |
 
-Add `?defang=true` to any enrichment endpoint to defang the returned `ioc` field. Auth (`SHADOWSCOPE_API_TOKEN`) and CORS (`SHADOWSCOPE_CORS_ORIGINS`, comma-separated, default `*`) are env-configurable. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#rest-api) for the full breakdown.
+Add `?defang=true` to any enrichment endpoint to defang the returned `ioc` field. Add `?summary=true` to `/enrich`, `/enrich/bulk`, or `/extract` to attach an LLM-generated `llm_summary` field via local Ollama (omitted when Ollama is unreachable). Auth (`SHADOWSCOPE_API_TOKEN`) and CORS (`SHADOWSCOPE_CORS_ORIGINS`, comma-separated, default `*`) are env-configurable. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#rest-api) for the full breakdown.
 
 **Web dashboard** — once the server is up, open `http://localhost:8765/ui` for a minimal terminal-themed UI: paste one IOC, a comma/newline list, or a full text blob and the page picks the right call (`/enrich`, `/enrich/bulk`, or `/extract`) automatically. It is iframe-embeddable into the homelab secops dashboard via `?token=<bearer>` in the URL. See the **Dashboard** section in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#dashboard) for the embed pattern.
 

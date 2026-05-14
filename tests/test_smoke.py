@@ -193,6 +193,19 @@ def test_cli_defang_flag_parses():
     assert args2.defang is False
 
 
+def test_cli_summary_flag_parses():
+    """The top-level --summary flag is accepted and defaults False."""
+    parser = cli.build_parser()
+    args = parser.parse_args(['--summary', 'enrich', '8.8.8.8'])
+    assert args.summary is True
+    assert args.command == 'enrich'
+    assert args.ioc == '8.8.8.8'
+
+    # --summary may also be placed after the subcommand via the top-level parser
+    args_default = parser.parse_args(['enrich', '8.8.8.8'])
+    assert args_default.summary is False
+
+
 # ---------------------------------------------------------------------------
 # JSON / CSV output formats
 # ---------------------------------------------------------------------------
