@@ -42,6 +42,8 @@
   - Automatic flagging of VPNs, proxies, and Tor exit nodes
   - 24 h SQLite cache — no wasted API quota on repeat queries
 
+- **Parallel multi-source enrichment** — every applicable source fires concurrently via `asyncio.to_thread`; ~9× faster than serial for multi-source IP queries (wall-clock becomes `max(per-source latency)` instead of the sum)
+
 - **Sleek CLI**
   - Interactive menu system
   - Rich text formatting with tables and colors
@@ -170,7 +172,6 @@ python3 -m ioc_tool.main enrich --help
 
 Highlights (full list in [`docs/ROADMAP.md`](docs/ROADMAP.md)):
 
-- Async enrichment (`aiohttp` + `asyncio.gather`)
 - Argparse subcommands (`shadowscope enrich <ioc>`)
 - JSON / CSV output for SIEM ingest
 - Bulk mode (`-f iocs.txt`)

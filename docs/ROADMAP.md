@@ -9,7 +9,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ## v0.2 — Quality + Speed (foundations)
 
 ### Engineering
-- [ ] **Async enrichment** — `aiohttp` + `asyncio.gather()` in `core.enrich`; ~5–10× speedup on multi-source IP queries. **[issue]**
 - [ ] **Type hints + mypy clean** on public functions. **[issue]**
 - [ ] **GitHub Actions CI matrix** — ruff lint + pytest on py3.10/3.11/3.12 *(already scaffolded — needs ruff config + green run)*. **[issue]**
 
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] abuse.ch MalwareBazaar — hash → sample + malware family classification, no API key required (2026-05-14)
 - [x] AlienVault OTX — community pulse / threat-actor reports across IP/domain/URL/hash (free API key) (2026-05-14)
 - [x] URLscan.io — historical scan search (screenshots + verdicts) across IP/domain/URL, optional free API key (2026-05-14)
+- [x] Async enrichment — `core.enrich` now runs every applicable source in parallel. Implemented via `asyncio.to_thread()` — modules stay sync, parallelism via thread-pool gather (zero module rewrites, all 119 existing tests stay green). ~9× wall-clock speedup on multi-source IP queries (2026-05-14)

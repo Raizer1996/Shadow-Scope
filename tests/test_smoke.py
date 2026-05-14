@@ -468,3 +468,165 @@ def test_urlscan_csv_columns_present():
     assert 'urlscan_total' in output_mod.CSV_COLUMNS
     assert 'urlscan_malicious' in output_mod.CSV_COLUMNS
     assert 'urlscan_first_result' in output_mod.CSV_COLUMNS
+
+
+# ---------------------------------------------------------------------------
+# Async enrichment — parallel multi-source orchestrator
+# ---------------------------------------------------------------------------
+#
+# These tests cover the asyncio.to_thread() refactor of enrich_ioc(): they
+# confirm the public dict shape is unchanged AND that the `responses` lib
+# still intercepts `requests` calls when those calls execute inside a
+# thread-pool worker (the load-bearing assumption behind keeping the
+# modules sync rather than rewriting against aiohttp).
+
+
+import asyncio as _asyncio
+
+import responses as _responses
+
+from ioc_tool.core import enrich as _enrich_mod
+from ioc_tool.modules import tor as _tor_mod
+
+
+def _stub_all_network(monkeypatch):
+    """Force every network-touching module to return None.
+
+    `responses` would also work, but stubbing the module functions
+    directly is simpler when we don't care about specific payloads —
+    we want a fast, no-DB-side-effects shape test.
+    """
+    from ioc_tool.modules import (
+        abuseipdb,
+        greynoise,
+        ipinfo_mod,
+        ip_quality_score,
+        malwarebazaar,
+        otx,
+        shodan_mod,
+        threatfox,
+        urlhaus,
+        urlscan,
+        vt,
+        whois_mod,
+    )
+    monkeypatch.setattr(abuseipdb, "enrich_ip", lambda v: None)
+    monkeypatch.setattr(greynoise, "enrich_ip", lambda v: None)
+    monkeypatch.setattr(ipinfo_mod, "enrich_ip", lambda v: None)
+    monkeypatch.setattr(ip_quality_score, "enrich_ip", lambda v: None)
+    monkeypatch.setattr(malwarebazaar, "enrich_hash", lambda v: None)
+    monkeypatch.setattr(otx, "enrich", lambda v, t: None)
+    monkeypatch.setattr(shodan_mod, "host_search", lambda v: {"error": "stub"})
+    monkeypatch.setattr(threatfox, "enrich", lambda v: None)
+    monkeypatch.setattr(urlhaus, "enrich_url", lambda v: None)
+    monkeypatch.setattr(urlhaus, "enrich_host", lambda v: None)
+    monkeypatch.setattr(urlscan, "enrich", lambda v, t: None)
+    monkeypatch.setattr(vt, "enrich_ip", lambda v: None)
+    monkeypatch.setattr(vt, "enrich_domain", lambda v: None)
+    monkeypatch.setattr(vt, "enrich_url", lambda v: None)
+    monkeypatch.setattr(vt, "enrich_hash", lambda v: None)
+    monkeypatch.setattr(whois_mod, "get_whois_data", lambda v: None)
+    # Tor: empty list so the IP never registers as a Tor exit.
+    monkeypatch.setattr(_tor_mod, "is_tor_node", lambda v: False)
+
+
+def test_enrich_ioc_concurrency_returns_expected_shape(monkeypatch, tmp_path):
+    """After the async refactor, enrich_ioc still returns the same dict shape.
+
+    Verifies:
+      * Top-level keys 'ioc' / 'type' / 'modules' / 'final_score' are present
+      * The result of a single populated source (VirusTotal here, via the
+        `responses` lib) lands under 'modules' with the historical key 'VirusTotal'
+      * The `responses` interceptor still works when the request fires inside
+        an asyncio.to_thread() worker — proving the load-bearing concurrency
+        assumption.
+    """
+    # Repoint the SQLite DB at a per-test file so the suite doesn't leak rows
+    # into the developer's cache.
+    db_dir = tmp_path
+    db_dir.mkdir(exist_ok=True)
+    from ioc_tool.core import database as _db
+    monkeypatch.setattr(_db, "DB_PATH", str(db_dir / "ioc.db"))
+    _db.init_db()
+
+    # Capture the real vt.enrich_ip BEFORE stubbing so we can put it back.
+    from ioc_tool.modules import vt as _vt
+    _real_vt_enrich_ip = _vt.enrich_ip
+
+    # Stub everything sources except VirusTotal — VT goes through `responses`
+    # so we exercise the thread-pool + responses-intercept path.
+    _stub_all_network(monkeypatch)
+
+    monkeypatch.setenv("VT_API_KEY", "fake-key-for-test")
+
+    with _responses.RequestsMock() as rsps:
+        rsps.add(
+            _responses.GET,
+            "https://www.virustotal.com/api/v3/ip_addresses/1.2.3.4",
+            json={
+                "data": {
+                    "attributes": {
+                        "last_analysis_stats": {
+                            "malicious": 5,
+                            "harmless": 60,
+                            "suspicious": 0,
+                            "undetected": 35,
+                        }
+                    }
+                }
+            },
+            status=200,
+        )
+        # Override the VT stub so the real (responses-mocked) HTTP call fires.
+        monkeypatch.setattr(_enrich_mod.vt, "enrich_ip", _real_vt_enrich_ip)
+
+        result = _enrich_mod.enrich_ioc("1.2.3.4", "ip")
+
+    assert set(result.keys()) == {"ioc", "type", "modules", "final_score"}
+    assert result["ioc"] == "1.2.3.4"
+    assert result["type"] == "ip"
+    assert "VirusTotal" in result["modules"]
+    # 5 malicious / 100 total = 5
+    assert result["modules"]["VirusTotal"]["score"] == 5
+    assert result["final_score"] == 5
+
+
+def test_enrich_ioc_async_can_be_awaited(monkeypatch, tmp_path):
+    """The async function itself is awaitable and returns the same shape.
+
+    Future bulk-parallel mode (gather across multiple IOCs) needs this
+    to be callable directly, not just through the sync wrapper.
+    """
+    from ioc_tool.core import database as _db
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
+    _db.init_db()
+
+    _stub_all_network(monkeypatch)
+
+    result = _asyncio.run(_enrich_mod.enrich_ioc_async("8.8.8.8", "ip"))
+    assert "final_score" in result
+    assert result["ioc"] == "8.8.8.8"
+    assert result["type"] == "ip"
+    # All sources stubbed → no module entries, no scores → composite 0.
+    assert result["modules"] == {}
+    assert result["final_score"] == 0
+
+
+def test_enrich_ioc_swallows_source_exceptions(monkeypatch, tmp_path):
+    """A source that raises inside the thread must not crash the orchestrator."""
+    from ioc_tool.core import database as _db
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
+    _db.init_db()
+
+    _stub_all_network(monkeypatch)
+
+    # Force one source to explode inside the thread pool.
+    from ioc_tool.modules import vt as _vt
+    def _boom(value):
+        raise RuntimeError("simulated thread crash")
+    monkeypatch.setattr(_enrich_mod.vt, "enrich_ip", _boom)
+
+    result = _enrich_mod.enrich_ioc("9.9.9.9", "ip")
+    # Crashed source omitted, but the orchestrator returned cleanly.
+    assert "VirusTotal" not in result["modules"]
+    assert result["final_score"] == 0
