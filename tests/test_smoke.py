@@ -5,7 +5,13 @@ from datetime import datetime
 
 import pytest
 
-from ioc_tool.core import defang as defang_mod, output as output_mod, parser as parser_mod, score
+from ioc_tool.core import (
+    defang as defang_mod,
+    extractor as extractor_mod,
+    output as output_mod,
+    parser as parser_mod,
+    score,
+)
 from ioc_tool.ui import cli
 
 
@@ -340,3 +346,88 @@ def test_cli_json_and_csv_are_mutually_exclusive():
     parser = cli.build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(['enrich', '8.8.8.8', '--json', '--csv'])
+
+
+# ---------------------------------------------------------------------------
+# IOC extraction from text blobs
+# ---------------------------------------------------------------------------
+
+
+def test_extract_iocs_ip():
+    """Two valid IPs surface; the bogus 999.999.999.999 string is dropped."""
+    text = "We saw 1.2.3.4 then 9.9.9.9 and ignore 999.999.999.999 entirely"
+    result = extractor_mod.extract_iocs(text)
+    assert result.get("ip") == ["1.2.3.4", "9.9.9.9"]
+
+
+def test_extract_iocs_defanged():
+    """Refang runs before extraction so defanged IOCs are caught."""
+    text = "see 1[.]2[.]3[.]4 and hxxp://evil[.]com/bad for details"
+    result = extractor_mod.extract_iocs(text)
+    assert "1.2.3.4" in result.get("ip", [])
+    # The URL must be refanged into its live form.
+    assert any(u.startswith("http://evil.com") for u in result.get("url", []))
+
+
+def test_extract_iocs_mixed_blob():
+    """A paragraph with all 5 IOC types yields one of each."""
+    text = (
+        "Incident report: attacker 198.51.100.42 hit our edge from "
+        "http://malicious.example.org/payload. Phishing email came from "
+        "attacker@evil.com referencing badguy.io. Dropped sample SHA256 "
+        "d3486ae9136e7856bc42212385ea797094475802bcc9b2a8b6f23f5a1f5f4b6c."
+    )
+    result = extractor_mod.extract_iocs(text)
+    assert "198.51.100.42" in result.get("ip", [])
+    assert any("malicious.example.org" in u for u in result.get("url", []))
+    assert "attacker@evil.com" in result.get("email", [])
+    assert "badguy.io" in result.get("domain", [])
+    assert (
+        "d3486ae9136e7856bc42212385ea797094475802bcc9b2a8b6f23f5a1f5f4b6c"
+        in result.get("hash", [])
+    )
+
+
+def test_extract_iocs_dedup():
+    """Repeated IPs are collapsed to one entry, first-seen order preserved."""
+    text = "1.2.3.4 again 1.2.3.4 and once more 1.2.3.4 alongside 5.6.7.8"
+    result = extractor_mod.extract_iocs(text)
+    assert result.get("ip") == ["1.2.3.4", "5.6.7.8"]
+
+
+def test_extract_iocs_filename_excluded():
+    """Strings like report.pdf / script.py must not surface as domains."""
+    text = "Generated report.pdf and ran script.py against the host"
+    result = extractor_mod.extract_iocs(text)
+    domains = result.get("domain", [])
+    assert "report.pdf" not in domains
+    assert "script.py" not in domains
+
+
+def test_extract_iocs_url_host_dedupe():
+    """A host already captured in a URL must not also appear as a domain."""
+    text = "Click http://evil.com/bad to see the payload"
+    result = extractor_mod.extract_iocs(text)
+    assert any(u.startswith("http://evil.com") for u in result.get("url", []))
+    # evil.com is the URL host, so it should NOT also be in the domain list.
+    assert "evil.com" not in result.get("domain", [])
+
+
+def test_cli_text_flag_parses():
+    """`enrich --text "blob"` round-trips through argparse."""
+    parser = cli.build_parser()
+    args = parser.parse_args(['enrich', '--text', 'saw 1.2.3.4 today'])
+    assert args.command == 'enrich'
+    assert args.text == 'saw 1.2.3.4 today'
+    assert args.ioc is None
+    assert args.file is None
+
+
+def test_cli_stdin_dash_parses():
+    """`enrich -` is accepted as a valid positional sentinel for stdin."""
+    parser = cli.build_parser()
+    args = parser.parse_args(['enrich', '-'])
+    assert args.command == 'enrich'
+    assert args.ioc == '-'
+    assert args.file is None
+    assert args.text is None

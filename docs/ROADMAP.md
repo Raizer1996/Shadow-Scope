@@ -25,7 +25,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ### Bulk + I/O
 - [ ] **Bulk mode** (`-f iocs.txt`) — one IOC per line, parallel enrich, combined report. **[issue]**
 - [ ] **Pipe support** (`echo 1.2.3.4 | shadowscope enrich -`). **[issue]**
-- [ ] **IOC extraction from text** — paste email body / log dump, auto-extract IPs/domains/hashes/URLs, enrich each. **[issue]**
 - [ ] **Punycode decode** — catch IDN homograph attacks in domains. **[issue]**
 
 ### Cache / freshness
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] Pytest mocking — `responses` lib intercepts every module HTTP call; tests run offline in <1 s (2026-05-14)
 - [x] JSON output (`--json`) for SIEM ingest (2026-05-14)
 - [x] CSV output (`--csv`) for spreadsheet handoff (2026-05-14)
+- [x] IOC extraction from text — `enrich --text "blob"` / `enrich -` pipe-mode pulls IPs/domains/URLs/hashes/emails from prose and enriches each (2026-05-14)

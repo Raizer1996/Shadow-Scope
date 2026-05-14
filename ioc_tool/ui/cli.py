@@ -8,7 +8,14 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
-from ..core import database, defang as defang_mod, enrich, output as output_mod, parser
+from ..core import (
+    database,
+    defang as defang_mod,
+    enrich,
+    extractor,
+    output as output_mod,
+    parser,
+)
 from ..modules import (
     abuseipdb,  # noqa: F401  (imported for side-effect parity with previous CLI)
     filescan_io,
@@ -293,23 +300,57 @@ def handle_enrich(args: argparse.Namespace) -> None:
 
     iocs_to_process: List[str] = []
 
-    if getattr(args, 'ioc', None):
-        iocs_to_process.append(args.ioc)
+    # --- Bulk text-blob mode ------------------------------------------------
+    # `--text BLOB` and the `-` stdin sentinel both feed into the same
+    # extractor pipeline and override any positional / -f input.
+    blob_text: Optional[str] = getattr(args, 'text', None)
+    if blob_text is None and getattr(args, 'ioc', None) == '-':
+        blob_text = sys.stdin.read()
 
-    file_path = getattr(args, 'file', None)
-    if file_path:
-        try:
-            with open(file_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        iocs_to_process.append(line)
-        except FileNotFoundError:
-            msg_console.print(f"[red]Error: File {file_path} not found.[/red]")
-            return
-        except OSError as exc:
-            msg_console.print(f"[red]Error reading {file_path}: {exc}[/red]")
-            return
+    if blob_text is not None:
+        extracted = extractor.extract_iocs(blob_text)
+        for bucket in extracted.values():
+            iocs_to_process.extend(bucket)
+        # One-line summary to stderr so analysts see what was pulled — but
+        # only in human mode; JSON/CSV consumers want stdout pristine.
+        if not machine_readable:
+            total = len(iocs_to_process)
+            parts = [f"{len(v)} {k}" for k, v in extracted.items()]
+            summary = (
+                f"Extracted {total} IOCs: {', '.join(parts)}"
+                if parts
+                else "Extracted 0 IOCs"
+            )
+            err_console.print(f"[dim]{summary}[/dim]")
+    else:
+        if getattr(args, 'ioc', None):
+            iocs_to_process.append(args.ioc)
+
+        file_path = getattr(args, 'file', None)
+        if file_path:
+            try:
+                with open(file_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            iocs_to_process.append(line)
+            except FileNotFoundError:
+                msg_console.print(f"[red]Error: File {file_path} not found.[/red]")
+                return
+            except OSError as exc:
+                msg_console.print(f"[red]Error reading {file_path}: {exc}[/red]")
+                return
+
+    # Deduplicate while preserving order — text extraction can produce
+    # repeats across types (e.g. domain + email-domain overlap), and the
+    # enrichment cache is keyed on value anyway.
+    seen: set[str] = set()
+    deduped: List[str] = []
+    for ioc in iocs_to_process:
+        if ioc not in seen:
+            seen.add(ioc)
+            deduped.append(ioc)
+    iocs_to_process = deduped
 
     if not iocs_to_process:
         msg_console.print("[yellow]No IOCs provided. Pass an IOC positional or -f FILE.[/yellow]")
@@ -591,13 +632,19 @@ def build_parser() -> argparse.ArgumentParser:
         'ioc',
         nargs='?',
         default=None,
-        help='IOC value to enrich (optional if -f is given)',
+        help='IOC value to enrich (optional if -f is given). Pass "-" to read a text blob from stdin and auto-extract IOCs.',
     )
     p_enrich.add_argument(
         '-f', '--file',
         dest='file',
         default=None,
         help='Path to a file with one IOC per line',
+    )
+    p_enrich.add_argument(
+        '--text',
+        metavar='BLOB',
+        default=None,
+        help='Extract IOCs from a free-form text blob and enrich each (overrides positional ioc / -f)',
     )
     output_group = p_enrich.add_mutually_exclusive_group()
     output_group.add_argument(

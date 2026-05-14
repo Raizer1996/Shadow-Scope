@@ -103,6 +103,18 @@ python3 -m ioc_tool.main enrich 8.8.8.8
 python3 -m ioc_tool.main enrich -f iocs.txt
 ```
 
+**Extract IOCs from text**
+
+Paste a ticket, email body, or threat report and ShadowScope will pull every
+IP, domain, URL, hash, and email out (refanging on the way in) and enrich
+each one.
+
+```bash
+python3 -m ioc_tool.main enrich --text "Saw 1.2.3.4 hit our firewall and email from attacker@evil.com"
+echo "blob with hxxp://evil[.]com/bad" | python3 -m ioc_tool.main enrich -
+cat ticket.txt | python3 -m ioc_tool.main enrich -
+```
+
 **Machine-readable output** for SIEM / spreadsheet pipelines
 
 ```bash
