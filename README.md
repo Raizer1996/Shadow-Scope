@@ -185,6 +185,10 @@ The CLI entry name is `shadowscope` when installed; from a checkout use `python3
 
 Add `?defang=true` to any enrichment endpoint to defang the returned `ioc` field. Auth (`SHADOWSCOPE_API_TOKEN`) and CORS (`SHADOWSCOPE_CORS_ORIGINS`, comma-separated, default `*`) are env-configurable. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#rest-api) for the full breakdown.
 
+**Web dashboard** — once the server is up, open `http://localhost:8765/ui` for a minimal terminal-themed UI: paste one IOC, a comma/newline list, or a full text blob and the page picks the right call (`/enrich`, `/enrich/bulk`, or `/extract`) automatically. It is iframe-embeddable into the homelab secops dashboard via `?token=<bearer>` in the URL. See the **Dashboard** section in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#dashboard) for the embed pattern.
+
+<!-- TODO: dashboard screenshot -->
+
 ## 📚 Documentation
 
 | Doc | Purpose |

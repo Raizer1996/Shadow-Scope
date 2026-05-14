@@ -83,6 +83,9 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |
 | `ioc_tool/web/__init__.py` | REST API package marker |
 | `ioc_tool/web/api.py` | FastAPI app + routes — thin HTTP layer over `enrich_ioc_async` |
+| `ioc_tool/web/static/index.html` | Dashboard shell (terminal-dark theme, no framework) |
+| `ioc_tool/web/static/styles.css` | Dashboard CSS (vanilla, dark palette + monospace) |
+| `ioc_tool/web/static/app.js` | Dashboard logic — vanilla JS, fetches the JSON API |
 
 The CLI subcommand `shadowscope serve` (handled in `ui/cli.py::handle_serve`) launches the FastAPI app under uvicorn — see the **REST API** section below.
 
@@ -178,6 +181,8 @@ All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. 
 | POST   | `/extract` | Body `{"text": "..."}` — pull IOCs from a text blob, then enrich each |
 | GET    | `/show?ioc=<value>[&defang=true]` | Return cached enrichment without refetching — 404 if not in cache |
 | GET    | `/sources` | Map of `source_name → bool` indicating whether the API key is set. **Never returns key values.** |
+| GET    | `/ui` | Dashboard SPA shell (HTML). No auth — the data behind it is what's gated. |
+| GET    | `/static/*` | Dashboard CSS / JS assets. No auth. |
 
 Every enrichment endpoint accepts an optional `?defang=true` query param that defangs the returned `ioc` field (uses `core.defang.defang()`).
 
@@ -199,6 +204,24 @@ The homelab "secops web service" treats ShadowScope as a callable HTTP API. Reco
 * Bind `127.0.0.1:8765` (or a Docker-internal network) — never expose directly to the public internet.
 * Generate a token: `export SHADOWSCOPE_API_TOKEN=$(openssl rand -hex 32)` and pass it as a Bearer header from the dashboard.
 * Set `SHADOWSCOPE_CORS_ORIGINS` to the dashboard's exact origin when leaving permissive defaults.
+
+### Dashboard
+
+The dashboard (`GET /ui`) is a single-page UI served from `ioc_tool/web/static/` — vanilla HTML/CSS/JS, no SPA framework, no build step, no CDN dependencies. CSS/JS load from stable `/static/<file>` paths via FastAPI's `StaticFiles` mount. The dashboard route itself is **not** auth-gated; the HTML shell is harmless and the per-fetch JSON calls inside the JS carry the bearer token.
+
+**Standalone use** — open `http://<host>:8765/ui` in a browser. If `SHADOWSCOPE_API_TOKEN` is set, the page surfaces an inline auth banner where the user can paste the token; it's kept in memory for the page lifetime only (never `localStorage` — that's an XSS risk).
+
+**Iframe embed pattern** (homelab secops web service):
+
+```html
+<iframe
+  src="http://shadowscope.lan:8765/ui?token=<bearer-token>"
+  referrerpolicy="no-referrer"
+  sandbox="allow-scripts allow-same-origin"
+  style="width:100%;height:100vh;border:0"></iframe>
+```
+
+The dashboard reads `?token=<v>` from `window.location.search` on load and injects it into every fetch as `Authorization: Bearer <v>`. The HTML sets `<meta name="referrer" content="no-referrer">` and ShadowScope does not emit `X-Frame-Options` / `Content-Security-Policy: frame-ancestors`, so embedding works out of the box. Lock down CORS (`SHADOWSCOPE_CORS_ORIGINS`) to the embedding dashboard's origin in production.
 
 ## Open work
 

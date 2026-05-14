@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>ShadowScope — IOC enrichment dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="banner">
+    <h1>ShadowScope</h1>
+    <p class="subtitle">IOC enrichment dashboard</p>
+  </header>
+
+  <main>
+    <section id="auth-banner" class="auth-banner hidden" aria-live="polite">
+      <span class="auth-msg">Authentication required.</span>
+      <input type="password" id="auth-token-input" placeholder="paste API token" autocomplete="off">
+      <button type="button" id="auth-token-submit">use token</button>
+    </section>
+
+    <section class="input-row">
+      <label for="ioc-input" class="visually-hidden">IOC input</label>
+      <textarea
+        id="ioc-input"
+        rows="3"
+        placeholder="paste one IOC, a comma/newline list, or a full text blob…"
+        spellcheck="false"
+        autocomplete="off"></textarea>
+      <div class="controls">
+        <button type="button" id="enrich-btn">Enrich</button>
+        <label class="defang-toggle">
+          <input type="checkbox" id="defang-checkbox">
+          <span>Defang output</span>
+        </label>
+      </div>
+    </section>
+
+    <section id="status" class="status" aria-live="polite">
+      <span id="status-text"></span>
+      <span id="spinner" class="spinner hidden" aria-hidden="true"></span>
+    </section>
+
+    <section id="results"></section>
+
+    <section class="sources-panel">
+      <h2>Sources</h2>
+      <div id="sources-list" class="sources-list">
+        <span class="dim">loading…</span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span class="dim">ShadowScope — served from <code>/ui</code></span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

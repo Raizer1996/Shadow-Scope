@@ -82,6 +82,16 @@ def test_root_returns_service_info(client):
     assert any("/enrich" in ep for ep in payload["endpoints"])
 
 
+def test_root_includes_ui_link(client):
+    """GET / response carries a ``ui`` key pointing at /ui."""
+    response = client.get("/")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("ui") == "/ui"
+    # And the endpoints list mentions the UI route explicitly.
+    assert any("/ui" in ep for ep in payload["endpoints"])
+
+
 def test_health_returns_ok(client):
     """GET /health returns {'status': 'ok'}."""
     response = client.get("/health")
@@ -285,3 +295,42 @@ def test_health_skips_auth_even_when_token_set(monkeypatch):
         response = c.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Dashboard UI (/ui + /static/*)
+# ---------------------------------------------------------------------------
+
+
+def test_ui_route_returns_html(client):
+    """GET /ui returns 200 HTML containing the ShadowScope title."""
+    response = client.get("/ui")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "ShadowScope" in response.text
+
+
+def test_ui_route_skips_auth(monkeypatch):
+    """Even with SHADOWSCOPE_API_TOKEN set, /ui loads without an Authorization header.
+
+    Rationale: the HTML shell is harmless; the JSON endpoints behind it are
+    what's gated. The browser needs to be able to load the page in order to
+    prompt for a token in the first place.
+    """
+    monkeypatch.setenv("SHADOWSCOPE_API_TOKEN", "supersecret")
+    with TestClient(app) as c:
+        response = c.get("/ui")
+    assert response.status_code == 200
+    assert "ShadowScope" in response.text
+
+
+def test_static_files_served(client):
+    """GET /static/app.js returns 200 with a JS content type."""
+    response = client.get("/static/app.js")
+    assert response.status_code == 200
+    ctype = response.headers.get("content-type", "")
+    assert ("javascript" in ctype) or ctype.startswith("application/javascript"), (
+        f"unexpected content-type for /static/app.js: {ctype!r}"
+    )
+    # And it must really be the app code — sanity-check a known marker.
+    assert "ShadowScope dashboard" in response.text

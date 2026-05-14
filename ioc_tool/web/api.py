@@ -33,15 +33,22 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..core import database, defang as defang_mod, enrich, extractor, parser
 
 API_VERSION = "0.9.0"
+
+# Static assets for the dashboard UI. The directory holds index.html,
+# styles.css, app.js — all served verbatim, no build step.
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 # ---------------------------------------------------------------------------
@@ -156,16 +163,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount the dashboard static assets at /static so CSS/JS resolve with stable
+# absolute paths regardless of where the UI is reached from.
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
 
-@app.get("/", response_model=ServiceInfoResponse, dependencies=[Depends(require_token)])
-def root() -> ServiceInfoResponse:
-    """Service banner — version + endpoint list."""
-    return ServiceInfoResponse(
+class ServiceInfoResponseWithUI(ServiceInfoResponse):
+    """Service info plus a ``ui`` pointer to the dashboard route."""
+
+    ui: str
+
+
+@app.get("/", response_model=ServiceInfoResponseWithUI, dependencies=[Depends(require_token)])
+def root() -> ServiceInfoResponseWithUI:
+    """Service banner — version + endpoint list + dashboard pointer."""
+    return ServiceInfoResponseWithUI(
         name="ShadowScope",
         version=API_VERSION,
         endpoints=[
@@ -176,8 +193,22 @@ def root() -> ServiceInfoResponse:
             "POST /extract",
             "GET /show?ioc=<value>[&defang=true]",
             "GET /sources",
+            "GET /ui",
         ],
+        ui="/ui",
     )
+
+
+@app.get("/ui", include_in_schema=False)
+def ui() -> FileResponse:
+    """Serve the dashboard single-page UI.
+
+    The HTML itself is harmless — the JSON data behind it is auth-gated by
+    the ``require_token`` dependency on each fetch the JS makes. The route
+    intentionally has **no** auth dependency so an unauthenticated browser
+    can still load the shell and prompt the user for a token.
+    """
+    return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
 
 
 @app.get("/health", response_model=HealthResponse)

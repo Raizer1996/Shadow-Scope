@@ -124,7 +124,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ## v0.9 — UI Surfaces
 
-- [ ] **Web dashboard** — FastAPI + minimal HTML, table of recent queries, drill-down. **[issue]**
 - [ ] **GraphQL API** *(optional)*. **[issue]**
 - [ ] **TUI** — full-screen terminal UI with `textual`. **[issue]**
 - [ ] **Browser extension** — right-click any IP/domain → enrich popup. **[issue]**
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] URLscan.io — historical scan search (screenshots + verdicts) across IP/domain/URL, optional free API key (2026-05-14)
 - [x] Async enrichment — `core.enrich` now runs every applicable source in parallel. Implemented via `asyncio.to_thread()` — modules stay sync, parallelism via thread-pool gather (zero module rewrites, all 119 existing tests stay green). ~9× wall-clock speedup on multi-source IP queries (2026-05-14)
 - [x] REST API server — `shadowscope serve` exposes enrichment as HTTP via FastAPI + uvicorn. Endpoints: `/`, `/health`, `/enrich`, `/enrich/bulk` (concurrent), `/extract`, `/show`, `/sources`. Bearer-token auth via `SHADOWSCOPE_API_TOKEN` (off when unset), configurable CORS via `SHADOWSCOPE_CORS_ORIGINS`. Thin layer over `enrich_ioc_async` — zero core changes (2026-05-14)
+- [x] Web dashboard — minimal terminal-themed HTML/CSS/JS at `/ui`, served from `ioc_tool/web/static/`. Single-page, no SPA framework, no build step, no CDN deps. Auto-classifies input (single IOC / bulk list / prose blob → `/enrich`, `/enrich/bulk`, `/extract`). Drill-down per-source details, color-coded risk tiers, live `/sources` panel. Token via `?token=<v>` query string for iframe embeds — in-memory only, never persisted. Iframe-embeddable into homelab secops dashboard (2026-05-14)
