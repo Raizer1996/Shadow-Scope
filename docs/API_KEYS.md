@@ -39,6 +39,20 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 - **Scope**: URL, domain, IP
 - **Env var**: none required — module short-circuits on network errors and skips gracefully.
 
+### ThreatFox (abuse.ch) — *no API key*
+- **Signup**: none — public API at https://threatfox-api.abuse.ch/api/v1/
+- **Free tier**: free, no rate limit beyond reasonable use (be polite)
+- **Used for**: lookups against abuse.ch's fresh community-shared IOC feed (botnet C2, payload delivery, distribution hosts). Returns malware family, threat type, confidence level, and tags.
+- **Scope**: IP, domain, URL, hash
+- **Env var**: none required — module short-circuits on network errors and skips gracefully.
+
+### MalwareBazaar (abuse.ch) — *no API key*
+- **Signup**: none — public API at https://mb-api.abuse.ch/api/v1/
+- **Free tier**: free, no rate limit beyond reasonable use (be polite)
+- **Used for**: hash → sample metadata against abuse.ch's malware sample repository. Returns malware family (`signature`), file type / size / name, tags, first-seen, delivery method, and vendor intel cross-references.
+- **Scope**: hash (md5 / sha1 / sha256)
+- **Env var**: none required — module short-circuits on network errors and skips gracefully.
+
 ## Enrichment (location / fraud context)
 
 ### IPQualityScore — `IPQS_API_KEY`

@@ -39,8 +39,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ### Free / freemium IOC sources
 - [ ] **AlienVault OTX** — community pulses, broad coverage. **[issue]**
 - [ ] **URLscan.io** — URL screenshot + sibling domains + behavior (phishing gold). **[issue]**
-- [ ] **abuse.ch ThreatFox** — fresh IOC feed, no API key. **[issue]**
-- [ ] **abuse.ch MalwareBazaar** — hash → sample + family classification. **[issue]**
 - [ ] **abuse.ch Feodo Tracker** — botnet C2 list. **[issue]**
 - [ ] **abuse.ch SSL Blacklist** — malicious cert fingerprints. **[issue]**
 - [ ] **crt.sh certificate transparency** — pivot from cert to related domains. **[issue]**
@@ -202,3 +200,5 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] IOC extraction from text — `enrich --text "blob"` / `enrich -` pipe-mode pulls IPs/domains/URLs/hashes/emails from prose and enriches each (2026-05-14)
 - [x] abuse.ch URLhaus — malicious URL / host enrichment, no API key required (2026-05-14)
 - [x] GreyNoise — Community API IP classification (noise vs targeted, huge SOC FP killer) (2026-05-14)
+- [x] abuse.ch ThreatFox — fresh IOC feed across IP/domain/URL/hash, no API key required (2026-05-14)
+- [x] abuse.ch MalwareBazaar — hash → sample + malware family classification, no API key required (2026-05-14)

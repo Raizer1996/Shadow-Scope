@@ -76,6 +76,43 @@ def calculate_urlhaus_score(data):
         return 70
     return 80
 
+def calculate_threatfox_score(data: dict | None) -> int:
+    """ThreatFox hit signals known-malicious infrastructure.
+
+    Score is bucketed by abuse.ch's own ``confidence_level`` (0–100)
+    so we don't second-guess the curator:
+
+    - ``None`` / empty payload -> 0
+    - hit with ``confidence_level >= 75`` -> 95
+    - hit with ``confidence_level >= 50`` -> 80
+    - hit (lower / missing confidence) -> 60
+    """
+    if not data:
+        return 0
+    confidence = data.get("confidence_level")
+    try:
+        confidence_int = int(confidence) if confidence is not None else 0
+    except (TypeError, ValueError):
+        confidence_int = 0
+
+    if confidence_int >= 75:
+        return 95
+    if confidence_int >= 50:
+        return 80
+    return 60
+
+
+def calculate_malwarebazaar_score(data: dict | None) -> int:
+    """MalwareBazaar hit means the hash is a known malicious sample.
+
+    - ``None`` / empty payload -> 0
+    - any hit -> 95
+    """
+    if not data:
+        return 0
+    return 95
+
+
 def calculate_greynoise_score(data: dict | None) -> int:
     """GreyNoise: malicious=90, benign/riot=0, unknown=0, none=0.
 

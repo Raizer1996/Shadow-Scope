@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import json
 from . import database
 from . import score
-from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus, greynoise
+from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus, greynoise, threatfox, malwarebazaar
 
 def should_refresh(timestamp_str):
     if not timestamp_str:
@@ -174,6 +174,44 @@ def enrich_ioc(value, ioc_type):
         if urlhaus_data:
             results['URLhaus'] = {'score': urlhaus_score, 'data': urlhaus_data}
             scores.append(urlhaus_score)
+
+    # --- ThreatFox (abuse.ch) — IP / domain / URL / hash (no API key) ---
+    if ioc_type in ('ip', 'domain', 'url', 'hash'):
+        cached_threatfox = database.get_latest_enrichment(ioc_id, 'threatfox')
+        threatfox_data = None
+        threatfox_score = 0
+
+        if cached_threatfox and not should_refresh(cached_threatfox['timestamp']):
+            threatfox_data = json.loads(cached_threatfox['data'])
+            threatfox_score = cached_threatfox['score']
+        else:
+            threatfox_data = threatfox.enrich(value)
+            if threatfox_data:
+                threatfox_score = score.calculate_threatfox_score(threatfox_data)
+                database.add_enrichment(ioc_id, 'threatfox', threatfox_data, threatfox_score)
+
+        if threatfox_data:
+            results['ThreatFox'] = {'score': threatfox_score, 'data': threatfox_data}
+            scores.append(threatfox_score)
+
+    # --- MalwareBazaar (abuse.ch) — hash only (no API key) ---
+    if ioc_type == 'hash':
+        cached_mb = database.get_latest_enrichment(ioc_id, 'malwarebazaar')
+        mb_data = None
+        mb_score = 0
+
+        if cached_mb and not should_refresh(cached_mb['timestamp']):
+            mb_data = json.loads(cached_mb['data'])
+            mb_score = cached_mb['score']
+        else:
+            mb_data = malwarebazaar.enrich_hash(value)
+            if mb_data:
+                mb_score = score.calculate_malwarebazaar_score(mb_data)
+                database.add_enrichment(ioc_id, 'malwarebazaar', mb_data, mb_score)
+
+        if mb_data:
+            results['MalwareBazaar'] = {'score': mb_score, 'data': mb_data}
+            scores.append(mb_score)
 
     # --- WHOIS (Domain Only) ---
     if ioc_type == 'domain':

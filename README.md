@@ -20,6 +20,8 @@
   - **Tor Detection** — Identifies active Tor exit nodes
   - **WHOIS** — Domain creation dates and registrar info
   - **URLhaus** — abuse.ch malicious URL database (no API key)
+  - **ThreatFox (abuse.ch)** — fresh community-shared IOCs (no API key)
+  - **MalwareBazaar (abuse.ch)** — hash → malware family + sample metadata (no API key)
   - **GreyNoise** — classifies internet background noise vs targeted activity (kills SOC false positives)
 
   <img width="1341" height="529" alt="enrich result" src="https://github.com/user-attachments/assets/033a128a-68db-4fdd-8698-7d0f09439246" />

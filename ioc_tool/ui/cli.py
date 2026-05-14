@@ -138,6 +138,31 @@ def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> 
                 f"Class: {classification}"
                 + (f" — {name}" if name else "")
             )
+        elif source == 'ThreatFox':
+            tf_data = data['data']
+            threat_type = tf_data.get('threat_type', 'unknown')
+            malware = tf_data.get('malware', '')
+            confidence = tf_data.get('confidence_level')
+            parts = [f"Threat: {threat_type}"]
+            if malware:
+                parts.append(f"Malware: {malware}")
+            if confidence is not None:
+                parts.append(f"Confidence: {confidence}")
+            details = " — ".join(parts)
+        elif source == 'MalwareBazaar':
+            mb_data = data['data']
+            signature = mb_data.get('signature') or 'unknown'
+            file_type = mb_data.get('file_type', '')
+            file_size = mb_data.get('file_size', '')
+            first_seen = mb_data.get('first_seen', '')
+            parts = [f"Signature: {signature}"]
+            if file_type:
+                parts.append(f"Type: {file_type}")
+            if file_size:
+                parts.append(f"Size: {file_size}")
+            if first_seen:
+                parts.append(f"First seen: {first_seen}")
+            details = " — ".join(parts)
 
         table.add_row(source, f"[{score_color}]{score_val}[/{score_color}]", str(details))
 
@@ -227,6 +252,24 @@ def print_aggregated_table(
                     " " + ",".join(str(t) for t in tags[:2]) if tags else ""
                 )
                 summary_parts.append(f"[red]URLhaus:HIT[/red]{tag_fragment}")
+
+        # ThreatFox (abuse.ch) — fresh community-shared IOCs
+        if 'ThreatFox' in modules:
+            tf_score = modules['ThreatFox']['score']
+            if tf_score > 0:
+                tf_data = modules['ThreatFox']['data']
+                malware = tf_data.get('malware')
+                malware_fragment = f" [dim]({malware})[/dim]" if malware else ""
+                summary_parts.append(f"[red]TF:HIT[/red]{malware_fragment}")
+
+        # MalwareBazaar (abuse.ch) — hash → sample lookup
+        if 'MalwareBazaar' in modules:
+            mb_score = modules['MalwareBazaar']['score']
+            if mb_score > 0:
+                mb_data = modules['MalwareBazaar']['data']
+                signature = mb_data.get('signature')
+                sig_fragment = f" [dim]({signature})[/dim]" if signature else ""
+                summary_parts.append(f"[red]MB:HIT[/red]{sig_fragment}")
 
         # GreyNoise — internet background-noise classification
         if 'GreyNoise' in modules:

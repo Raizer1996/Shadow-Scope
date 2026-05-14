@@ -442,3 +442,15 @@ def test_greynoise_csv_columns_present():
     """CSV exports include the GreyNoise classification + name columns."""
     assert 'greynoise_classification' in output_mod.CSV_COLUMNS
     assert 'greynoise_name' in output_mod.CSV_COLUMNS
+
+
+def test_threatfox_csv_columns_present():
+    """CSV exports include the ThreatFox threat_type + malware columns."""
+    assert 'threatfox_threat_type' in output_mod.CSV_COLUMNS
+    assert 'threatfox_malware' in output_mod.CSV_COLUMNS
+
+
+def test_malwarebazaar_csv_columns_present():
+    """CSV exports include the MalwareBazaar signature + file_type columns."""
+    assert 'malwarebazaar_signature' in output_mod.CSV_COLUMNS
+    assert 'malwarebazaar_file_type' in output_mod.CSV_COLUMNS

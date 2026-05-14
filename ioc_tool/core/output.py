@@ -35,6 +35,10 @@ CSV_COLUMNS: List[str] = [
     "tor",
     "whois_creation_date",
     "urlhaus_threat",
+    "threatfox_threat_type",
+    "threatfox_malware",
+    "malwarebazaar_signature",
+    "malwarebazaar_file_type",
     "greynoise_classification",
     "greynoise_name",
 ]
@@ -168,6 +172,22 @@ def _flatten_result(result: Dict[str, Any]) -> Dict[str, str]:
     threat = urlhaus_data.get("threat")
     if threat:
         row["urlhaus_threat"] = _s(threat)
+
+    # ThreatFox (abuse.ch) — threat_type + malware family if hit
+    threatfox = modules.get("ThreatFox") or {}
+    threatfox_data = threatfox.get("data") or {}
+    if threatfox_data.get("threat_type"):
+        row["threatfox_threat_type"] = _s(threatfox_data.get("threat_type"))
+    if threatfox_data.get("malware"):
+        row["threatfox_malware"] = _s(threatfox_data.get("malware"))
+
+    # MalwareBazaar (abuse.ch) — signature (malware family) + file_type
+    malwarebazaar = modules.get("MalwareBazaar") or {}
+    malwarebazaar_data = malwarebazaar.get("data") or {}
+    if malwarebazaar_data.get("signature"):
+        row["malwarebazaar_signature"] = _s(malwarebazaar_data.get("signature"))
+    if malwarebazaar_data.get("file_type"):
+        row["malwarebazaar_file_type"] = _s(malwarebazaar_data.get("file_type"))
 
     # GreyNoise — classification + name (Censys, Shodan, Mirai, ...)
     greynoise = modules.get("GreyNoise") or {}

@@ -24,7 +24,9 @@ from ioc_tool.modules import (
     greynoise,
     ipinfo_mod,
     ip_quality_score,
+    malwarebazaar,
     shodan_mod,
+    threatfox,
     tor,
     urlhaus,
     vt,
@@ -658,3 +660,210 @@ class TestGreyNoise:
         assert (
             score_mod.calculate_greynoise_score({"classification": "unknown"}) == 0
         )
+
+
+# ---------------------------------------------------------------------------
+# ThreatFox (abuse.ch) — no API key required, broad IOC scope
+# ---------------------------------------------------------------------------
+
+
+class TestThreatFox:
+    """Cover the ThreatFox module: hit (ip/hash), miss flavors, errors, scoring."""
+
+    @responses.activate
+    def test_threatfox_ip_hit(self) -> None:
+        """An IP lookup with a botnet_cc match returns the first data entry."""
+        responses.add(
+            responses.POST,
+            "https://threatfox-api.abuse.ch/api/v1/",
+            json={
+                "query_status": "ok",
+                "data": [
+                    {
+                        "id": "12345",
+                        "ioc": "1.2.3.4:443",
+                        "ioc_type": "ip:port",
+                        "threat_type": "botnet_cc",
+                        "malware": "Emotet",
+                        "malware_alias": "Geodo",
+                        "first_seen": "2024-01-01 12:00:00 UTC",
+                        "confidence_level": 100,
+                        "tags": ["emotet", "c2"],
+                    }
+                ],
+            },
+            status=200,
+        )
+        result = threatfox.enrich("1.2.3.4")
+        assert result is not None
+        assert result["malware"] == "Emotet"
+        assert result["threat_type"] == "botnet_cc"
+        assert result["confidence_level"] == 100
+
+    @responses.activate
+    def test_threatfox_hash_hit(self) -> None:
+        """A hash IOC also routes through the same /api/v1/ endpoint."""
+        responses.add(
+            responses.POST,
+            "https://threatfox-api.abuse.ch/api/v1/",
+            json={
+                "query_status": "ok",
+                "data": [
+                    {
+                        "id": "98765",
+                        "ioc": "abc123def456",
+                        "ioc_type": "sha256_hash",
+                        "threat_type": "payload",
+                        "malware": "TrickBot",
+                        "confidence_level": 90,
+                        "tags": ["trickbot"],
+                    }
+                ],
+            },
+            status=200,
+        )
+        result = threatfox.enrich(
+            "d3486ae9136e7856bc42212385ea797094475802bcc9b2a8b6f23f5a1f5f4b6c"
+        )
+        assert result is not None
+        assert result["malware"] == "TrickBot"
+        assert result["ioc_type"] == "sha256_hash"
+
+    @responses.activate
+    def test_threatfox_no_result(self) -> None:
+        """query_status 'no_result' is a clean miss → None."""
+        responses.add(
+            responses.POST,
+            "https://threatfox-api.abuse.ch/api/v1/",
+            json={"query_status": "no_result"},
+            status=200,
+        )
+        assert threatfox.enrich("8.8.8.8") is None
+
+    @responses.activate
+    def test_threatfox_illegal_search(self) -> None:
+        """An illegal_search_term response is treated as miss → None."""
+        responses.add(
+            responses.POST,
+            "https://threatfox-api.abuse.ch/api/v1/",
+            json={"query_status": "illegal_search_term"},
+            status=200,
+        )
+        assert threatfox.enrich("???") is None
+
+    @responses.activate
+    def test_threatfox_request_exception(self) -> None:
+        """Network errors return None without crashing."""
+        responses.add(
+            responses.POST,
+            "https://threatfox-api.abuse.ch/api/v1/",
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+        assert threatfox.enrich("1.2.3.4") is None
+
+    def test_calculate_threatfox_score_high_confidence(self) -> None:
+        """confidence_level 100 → 95 (top severity)."""
+        assert (
+            score_mod.calculate_threatfox_score(
+                {"malware": "Emotet", "confidence_level": 100}
+            )
+            == 95
+        )
+
+    def test_calculate_threatfox_score_medium(self) -> None:
+        """confidence_level 60 → 80 (medium-confidence hit)."""
+        assert (
+            score_mod.calculate_threatfox_score(
+                {"malware": "Cobalt Strike", "confidence_level": 60}
+            )
+            == 80
+        )
+
+    def test_calculate_threatfox_score_low(self) -> None:
+        """confidence_level 30 → 60 (lower confidence but still a hit)."""
+        assert (
+            score_mod.calculate_threatfox_score(
+                {"malware": "unknown", "confidence_level": 30}
+            )
+            == 60
+        )
+
+    def test_calculate_threatfox_score_none(self) -> None:
+        """None / empty payload → 0."""
+        assert score_mod.calculate_threatfox_score(None) == 0
+        assert score_mod.calculate_threatfox_score({}) == 0
+
+
+# ---------------------------------------------------------------------------
+# MalwareBazaar (abuse.ch) — hash-only, no API key
+# ---------------------------------------------------------------------------
+
+
+class TestMalwareBazaar:
+    """Cover the MalwareBazaar module: hit, miss, network error, scoring."""
+
+    @responses.activate
+    def test_malwarebazaar_hash_hit(self) -> None:
+        """A hash lookup with an Emotet sample returns the first data entry."""
+        responses.add(
+            responses.POST,
+            "https://mb-api.abuse.ch/api/v1/",
+            json={
+                "query_status": "ok",
+                "data": [
+                    {
+                        "sha256_hash": "abc123def456",
+                        "md5_hash": "deadbeef",
+                        "sha1_hash": "cafe1234",
+                        "file_name": "invoice.exe",
+                        "file_size": 12345,
+                        "file_type": "exe",
+                        "signature": "Emotet",
+                        "tags": ["emotet", "exe"],
+                        "first_seen": "2024-01-01 12:00:00",
+                        "delivery_method": "email",
+                    }
+                ],
+            },
+            status=200,
+        )
+        result = malwarebazaar.enrich_hash("abc123def456")
+        assert result is not None
+        assert result["signature"] == "Emotet"
+        assert result["file_type"] == "exe"
+        assert result["file_size"] == 12345
+
+    @responses.activate
+    def test_malwarebazaar_not_found(self) -> None:
+        """query_status 'hash_not_found' is a clean miss → None."""
+        responses.add(
+            responses.POST,
+            "https://mb-api.abuse.ch/api/v1/",
+            json={"query_status": "hash_not_found"},
+            status=200,
+        )
+        assert malwarebazaar.enrich_hash("0" * 64) is None
+
+    @responses.activate
+    def test_malwarebazaar_request_exception(self) -> None:
+        """Network errors return None without crashing."""
+        responses.add(
+            responses.POST,
+            "https://mb-api.abuse.ch/api/v1/",
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+        assert malwarebazaar.enrich_hash("abc123") is None
+
+    def test_calculate_malwarebazaar_score_hit(self) -> None:
+        """Any hit → 95 (presence of a sample is a strong signal)."""
+        assert (
+            score_mod.calculate_malwarebazaar_score(
+                {"signature": "Emotet", "file_type": "exe"}
+            )
+            == 95
+        )
+
+    def test_calculate_malwarebazaar_score_none(self) -> None:
+        """None / empty payload → 0."""
+        assert score_mod.calculate_malwarebazaar_score(None) == 0
+        assert score_mod.calculate_malwarebazaar_score({}) == 0
