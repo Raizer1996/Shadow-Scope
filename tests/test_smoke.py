@@ -66,7 +66,7 @@ def test_cli_parser_builds_with_all_subcommands():
     subparsers_action = next(
         a for a in parser._actions if getattr(a, 'dest', None) == 'command'
     )
-    assert set(subparsers_action.choices.keys()) == {'enrich', 'analyze', 'shodan', 'show'}
+    assert set(subparsers_action.choices.keys()) == {'enrich', 'analyze', 'shodan', 'show', 'serve'}
 
 
 def test_cli_enrich_help_exits_cleanly():

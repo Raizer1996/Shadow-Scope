@@ -37,6 +37,7 @@ ioc_tool/core/score.py        — per-source scoring + composite formula
 ioc_tool/core/database.py     — SQLite cache wrapper
 ioc_tool/core/parser.py       — IOC type detection
 ioc_tool/modules/<source>.py  — one file per threat-intel source
+ioc_tool/web/                 — FastAPI REST API (shadowscope serve)
 ioc_tool/.env.example         — secret template (commit this)
 ioc_tool/.env                 — actual secrets (gitignored)
 ioc_tool/data/ioc.db          — SQLite cache (gitignored)

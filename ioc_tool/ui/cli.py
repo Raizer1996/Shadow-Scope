@@ -687,6 +687,29 @@ def handle_analyze(
             console.print(Panel(str(res), title=title, border_style=style))
 
 
+def handle_serve(args: argparse.Namespace) -> None:
+    """Launch the FastAPI app under uvicorn.
+
+    Imported lazily so the rest of the CLI doesn't pay the FastAPI /
+    uvicorn import cost on every invocation. The ``--reload`` flag is
+    intended for dev only; uvicorn requires an import-string target when
+    reload is enabled, so we hand it ``ioc_tool.web.api:app`` in that
+    case rather than the imported object.
+    """
+    import uvicorn
+
+    if args.reload:
+        uvicorn.run(
+            "ioc_tool.web.api:app",
+            host=args.host,
+            port=args.port,
+            reload=True,
+        )
+    else:
+        from ioc_tool.web.api import app
+        uvicorn.run(app, host=args.host, port=args.port)
+
+
 def handle_shodan(
     args: Optional[argparse.Namespace] = None,
     target: Optional[str] = None,
@@ -877,6 +900,28 @@ def build_parser() -> argparse.ArgumentParser:
         help='IOC value to show',
     )
 
+    # serve — REST API
+    p_serve = subparsers.add_parser(
+        'serve',
+        help='Start the REST API server',
+    )
+    p_serve.add_argument(
+        '--host',
+        default='127.0.0.1',
+        help='Bind address (default: 127.0.0.1)',
+    )
+    p_serve.add_argument(
+        '--port',
+        type=int,
+        default=8765,
+        help='Port (default: 8765)',
+    )
+    p_serve.add_argument(
+        '--reload',
+        action='store_true',
+        help='Enable auto-reload (dev mode)',
+    )
+
     return parser_arg
 
 
@@ -922,6 +967,8 @@ def main() -> None:
         handle_shodan(args)
     elif args.command == 'show':
         handle_show(args)
+    elif args.command == 'serve':
+        handle_serve(args)
     else:
         parser_arg.print_help()
 

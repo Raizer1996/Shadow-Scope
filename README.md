@@ -158,6 +158,33 @@ python3 -m ioc_tool.main --help
 python3 -m ioc_tool.main enrich --help
 ```
 
+## 🌐 REST API
+
+`shadowscope serve` launches a FastAPI server that exposes the enrichment pipeline over HTTP — built for integration with the homelab secops dashboard or any other consumer that wants JSON instead of CLI.
+
+```bash
+pip install -r requirements.txt
+export SHADOWSCOPE_API_TOKEN=$(openssl rand -hex 32)  # optional — omit for unauthed localhost-only use
+shadowscope serve --host 0.0.0.0 --port 8765
+curl -H "Authorization: Bearer $SHADOWSCOPE_API_TOKEN" "http://localhost:8765/enrich?ioc=8.8.8.8"
+```
+
+The CLI entry name is `shadowscope` when installed; from a checkout use `python3 -m ioc_tool.main serve ...`. Both forms work identically.
+
+**Endpoints**
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET    | `/` | Service info |
+| GET    | `/health` | Liveness — always public |
+| GET    | `/enrich?ioc=<value>` | Enrich one IOC (auto-detected, refanged) |
+| POST   | `/enrich/bulk` | `{"iocs": [...]}` — concurrent enrichment |
+| POST   | `/extract` | `{"text": "..."}` — extract IOCs from a blob and enrich each |
+| GET    | `/show?ioc=<value>` | Cached enrichment, no refetch — 404 if not cached |
+| GET    | `/sources` | `{source_name: key_present}` — never returns key values |
+
+Add `?defang=true` to any enrichment endpoint to defang the returned `ioc` field. Auth (`SHADOWSCOPE_API_TOKEN`) and CORS (`SHADOWSCOPE_CORS_ORIGINS`, comma-separated, default `*`) are env-configurable. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#rest-api) for the full breakdown.
+
 ## 📚 Documentation
 
 | Doc | Purpose |

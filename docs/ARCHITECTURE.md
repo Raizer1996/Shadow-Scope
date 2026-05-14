@@ -81,6 +81,10 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/modules/joe_sandbox.py` | Joe Sandbox Cloud (optional) |
 | `ioc_tool/data/ioc.db` | SQLite cache (gitignored) |
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |
+| `ioc_tool/web/__init__.py` | REST API package marker |
+| `ioc_tool/web/api.py` | FastAPI app + routes — thin HTTP layer over `enrich_ioc_async` |
+
+The CLI subcommand `shadowscope serve` (handled in `ui/cli.py::handle_serve`) launches the FastAPI app under uvicorn — see the **REST API** section below.
 
 ## Source coverage matrix
 
@@ -150,6 +154,51 @@ All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. 
 3. Wire into `ioc_tool/core/enrich.py` next to existing source blocks (preserve cache pattern).
 4. Add env-var name to `ioc_tool/.env.example` and to `docs/API_KEYS.md`.
 5. Add a smoke test in `tests/`.
+
+## REST API
+
+`shadowscope serve` exposes the enrichment pipeline as a JSON REST API for external consumers (notably the homelab secops dashboard). The HTTP layer (`ioc_tool/web/api.py`) is intentionally thin — it parses params, refangs input, delegates to `enrich_ioc_async`, and serialises the result. No new enrichment logic lives in the API.
+
+### Bind defaults
+
+| Setting | Default | CLI flag |
+|---------|---------|----------|
+| Host    | `127.0.0.1` | `--host` |
+| Port    | `8765`      | `--port` |
+| Reload  | off         | `--reload` (dev only — uvicorn requires import-string target) |
+
+### Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET    | `/` | Service info — version + endpoint list |
+| GET    | `/health` | Liveness probe — always public, returns `{"status": "ok"}` |
+| GET    | `/enrich?ioc=<value>[&defang=true]` | Enrich a single IOC (auto-detected, refanged) |
+| POST   | `/enrich/bulk` | Body `{"iocs": [...]}` — enrich every IOC concurrently via `asyncio.gather` |
+| POST   | `/extract` | Body `{"text": "..."}` — pull IOCs from a text blob, then enrich each |
+| GET    | `/show?ioc=<value>[&defang=true]` | Return cached enrichment without refetching — 404 if not in cache |
+| GET    | `/sources` | Map of `source_name → bool` indicating whether the API key is set. **Never returns key values.** |
+
+Every enrichment endpoint accepts an optional `?defang=true` query param that defangs the returned `ioc` field (uses `core.defang.defang()`).
+
+### Auth model
+
+Bearer token via the `SHADOWSCOPE_API_TOKEN` env var.
+
+* **Unset** — auth disabled. Suitable for localhost-only homelab use.
+* **Set** — every endpoint except `/health` requires `Authorization: Bearer <token>`. Missing/malformed header → `401`. Wrong token → `403`. Error messages are deliberately generic and never reveal whether the token is configured.
+
+### CORS
+
+Configured via `SHADOWSCOPE_CORS_ORIGINS` (comma-separated origins). Default `*` — permissive on the assumption the homelab network is private. Override to lock to the dashboard origin in production-style deployments, e.g. `SHADOWSCOPE_CORS_ORIGINS=https://secops.lan`.
+
+### Integration with homelab consumers
+
+The homelab "secops web service" treats ShadowScope as a callable HTTP API. Recommended deployment:
+
+* Bind `127.0.0.1:8765` (or a Docker-internal network) — never expose directly to the public internet.
+* Generate a token: `export SHADOWSCOPE_API_TOKEN=$(openssl rand -hex 32)` and pass it as a Bearer header from the dashboard.
+* Set `SHADOWSCOPE_CORS_ORIGINS` to the dashboard's exact origin when leaving permissive defaults.
 
 ## Open work
 
