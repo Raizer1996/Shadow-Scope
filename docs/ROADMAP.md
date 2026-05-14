@@ -10,7 +10,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ### Engineering
 - [ ] **Async enrichment** — `aiohttp` + `asyncio.gather()` in `core.enrich`; ~5–10× speedup on multi-source IP queries. **[issue]**
-- [ ] **Pytest mocking** — `responses` lib; tests must not hit live APIs. **[issue]**
 - [ ] **Type hints + mypy clean** on public functions. **[issue]**
 - [ ] **GitHub Actions CI matrix** — ruff lint + pytest on py3.10/3.11/3.12 *(already scaffolded — needs ruff config + green run)*. **[issue]**
 
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] Argparse subcommands — `enrich`, `analyze`, `shodan`, `show` replace `-1/-2/-3` (2026-05-14)
 - [x] Pinned `requirements.txt` versions + added `requirements-dev.txt` (pytest, ruff, responses) (2026-05-14)
 - [x] IOC defang / refang — auto-refang input in parser, optional `--defang` flag for output (2026-05-14)
+- [x] Pytest mocking — `responses` lib intercepts every module HTTP call; tests run offline in <1 s (2026-05-14)

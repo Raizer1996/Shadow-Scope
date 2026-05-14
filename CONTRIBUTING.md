@@ -59,7 +59,22 @@ Doc-only PRs are very welcome. README polish, clearer install steps, screenshots
 pytest -q
 ```
 
-Use `responses` / `pytest-mock` to stub out external APIs — tests must not hit live services.
+External APIs are mocked with the `responses` lib — tests must never hit live services. The pattern is:
+
+```python
+@responses.activate
+def test_vt_enrich_ip(monkeypatch):
+    monkeypatch.setenv("VT_API_KEY", "fake-key-for-test")
+    responses.add(
+        responses.GET,
+        "https://www.virustotal.com/api/v3/ip_addresses/1.2.3.4",
+        json={"data": {"attributes": {"last_analysis_stats": {"malicious": 5}}}},
+        status=200,
+    )
+    assert vt.enrich_ip("1.2.3.4")["last_analysis_stats"]["malicious"] == 5
+```
+
+See `tests/test_modules.py` for the full set.
 
 ## PR checklist
 
