@@ -149,6 +149,26 @@ def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> 
             if confidence is not None:
                 parts.append(f"Confidence: {confidence}")
             details = " — ".join(parts)
+        elif source == 'OTX':
+            otx_data = data['data'] or {}
+            pulse_info = otx_data.get('pulse_info') or {}
+            pulse_count = pulse_info.get('count', 0) or 0
+            pulses = pulse_info.get('pulses') or []
+            parts = [f"Pulses: {pulse_count}"]
+            # First few pulse names, truncated for readability.
+            for pulse in pulses[:3]:
+                name = (pulse.get('name') or '').strip()
+                if not name:
+                    continue
+                if len(name) > 60:
+                    name = name[:57] + '...'
+                parts.append(name)
+            adversary = ''
+            if pulses:
+                adversary = (pulses[0].get('adversary') or '').strip()
+            if adversary:
+                parts.append(f"Adversary: {adversary}")
+            details = " — ".join(parts)
         elif source == 'MalwareBazaar':
             mb_data = data['data']
             signature = mb_data.get('signature') or 'unknown'
@@ -270,6 +290,31 @@ def print_aggregated_table(
                 signature = mb_data.get('signature')
                 sig_fragment = f" [dim]({signature})[/dim]" if signature else ""
                 summary_parts.append(f"[red]MB:HIT[/red]{sig_fragment}")
+
+        # AlienVault OTX — community pulse / threat-actor reports
+        if 'OTX' in modules:
+            otx_data = modules['OTX']['data'] or {}
+            pulse_info = otx_data.get('pulse_info') or {}
+            pulse_count = pulse_info.get('count', 0) or 0
+            try:
+                pulse_count = int(pulse_count)
+            except (TypeError, ValueError):
+                pulse_count = 0
+            if pulse_count >= 1:
+                if pulse_count >= 10:
+                    color = 'red'
+                elif pulse_count >= 3:
+                    color = 'orange1'
+                else:
+                    color = 'yellow'
+                pulses = pulse_info.get('pulses') or []
+                adversary = ''
+                if pulses:
+                    adversary = (pulses[0].get('adversary') or '').strip()
+                adversary_fragment = f" [dim]({adversary})[/dim]" if adversary else ""
+                summary_parts.append(
+                    f"[{color}]OTX:{pulse_count} pulses[/{color}]{adversary_fragment}"
+                )
 
         # GreyNoise — internet background-noise classification
         if 'GreyNoise' in modules:

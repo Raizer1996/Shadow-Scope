@@ -55,6 +55,12 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 
 ## Enrichment (location / fraud context)
 
+### AlienVault OTX — `OTX_API_KEY`
+- **Signup**: https://otx.alienvault.com/
+- **Free tier**: generous — no documented daily quota (be polite)
+- **Used for**: community pulse / threat-actor reports. Each OTX **pulse** bundles a campaign or family with the IOCs that identify it, plus tags, references, and (sometimes) a named adversary. A hit with many pulses signals a widely-reported threat; an IOC with negative `reputation` is a community-flagged bad actor.
+- **Scope**: IP, domain, URL, hash
+
 ### IPQualityScore — `IPQS_API_KEY`
 - **Signup**: https://www.ipqualityscore.com/create-account
 - **Free tier**: 5,000 IP queries/month

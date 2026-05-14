@@ -25,6 +25,7 @@ from ioc_tool.modules import (
     ipinfo_mod,
     ip_quality_score,
     malwarebazaar,
+    otx,
     shodan_mod,
     threatfox,
     tor,
@@ -867,3 +868,202 @@ class TestMalwareBazaar:
         """None / empty payload → 0."""
         assert score_mod.calculate_malwarebazaar_score(None) == 0
         assert score_mod.calculate_malwarebazaar_score({}) == 0
+
+
+# ---------------------------------------------------------------------------
+# AlienVault OTX — community pulses across IP / domain / URL / hash
+# ---------------------------------------------------------------------------
+
+
+class TestOTX:
+    """Cover the OTX module: per-type path mapping, hits, misses, scoring."""
+
+    @responses.activate
+    def test_otx_ip_high_pulse_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An IP with many pulses returns the full payload (including count)."""
+        monkeypatch.setenv("OTX_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://otx.alienvault.com/api/v1/indicators/IPv4/1.2.3.4/general",
+            json={
+                "pulse_info": {
+                    "count": 15,
+                    "pulses": [
+                        {
+                            "id": "abc",
+                            "name": "Emotet C2 May 2024",
+                            "tags": ["emotet", "c2"],
+                            "adversary": "TA542",
+                            "created": "2024-05-01",
+                        }
+                    ],
+                },
+                "reputation": -3,
+                "country_name": "United States",
+                "asn": "AS15169 Google LLC",
+            },
+            status=200,
+        )
+        result = otx.enrich("1.2.3.4", "ip")
+        assert result is not None
+        assert result["pulse_info"]["count"] == 15
+        assert result["pulse_info"]["pulses"][0]["adversary"] == "TA542"
+
+    @responses.activate
+    def test_otx_domain_few_pulses(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A domain with a small number of pulses still returns the dict."""
+        monkeypatch.setenv("OTX_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://otx.alienvault.com/api/v1/indicators/domain/evil.example/general",
+            json={
+                "pulse_info": {
+                    "count": 2,
+                    "pulses": [
+                        {"id": "1", "name": "Phishing wave Q1", "tags": ["phishing"]},
+                        {"id": "2", "name": "Lookalike domain set", "tags": []},
+                    ],
+                },
+                "reputation": 0,
+            },
+            status=200,
+        )
+        result = otx.enrich("evil.example", "domain")
+        assert result is not None
+        assert result["pulse_info"]["count"] == 2
+
+    @responses.activate
+    def test_otx_no_pulses(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``pulse_info.count == 0`` is still a valid 200 → dict, not None.
+
+        A negative (no-known-pulse) result is its own signal versus a
+        network-error miss.
+        """
+        monkeypatch.setenv("OTX_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://otx.alienvault.com/api/v1/indicators/IPv4/8.8.8.8/general",
+            json={
+                "pulse_info": {"count": 0, "pulses": []},
+                "reputation": 0,
+            },
+            status=200,
+        )
+        result = otx.enrich("8.8.8.8", "ip")
+        assert result is not None
+        assert result["pulse_info"]["count"] == 0
+
+    @responses.activate
+    def test_otx_url_path_mapping(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A URL IOC must hit the ``/indicators/url/<value>/general`` path."""
+        monkeypatch.setenv("OTX_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://otx.alienvault.com/api/v1/indicators/url/"
+            "http://malicious.example/payload.exe/general",
+            json={"pulse_info": {"count": 1, "pulses": [{"name": "drop"}]}},
+            status=200,
+        )
+        result = otx.enrich("http://malicious.example/payload.exe", "url")
+        assert result is not None
+        assert result["pulse_info"]["count"] == 1
+
+    @responses.activate
+    def test_otx_hash_path_mapping(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A hash IOC routes through the ``/indicators/file/<hash>/general`` path."""
+        monkeypatch.setenv("OTX_API_KEY", "fake-key-for-test")
+        sha = "d3486ae9136e7856bc42212385ea797094475802bcc9b2a8b6f23f5a1f5f4b6c"
+        responses.add(
+            responses.GET,
+            f"https://otx.alienvault.com/api/v1/indicators/file/{sha}/general",
+            json={
+                "pulse_info": {
+                    "count": 4,
+                    "pulses": [{"name": "TrickBot sample set", "adversary": ""}],
+                },
+                "reputation": 0,
+            },
+            status=200,
+        )
+        result = otx.enrich(sha, "hash")
+        assert result is not None
+        assert result["pulse_info"]["count"] == 4
+
+    def test_otx_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing ``OTX_API_KEY`` → returns None without an HTTP call."""
+        monkeypatch.delenv("OTX_API_KEY", raising=False)
+        # No responses.add() needed — short-circuits before requests.get fires.
+        assert otx.enrich("1.2.3.4", "ip") is None
+
+    @responses.activate
+    def test_otx_unauthorized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A 401 from a bad/expired key returns None."""
+        monkeypatch.setenv("OTX_API_KEY", "bad-key")
+        responses.add(
+            responses.GET,
+            "https://otx.alienvault.com/api/v1/indicators/IPv4/1.2.3.4/general",
+            json={"detail": "Authentication credentials were not provided."},
+            status=401,
+        )
+        assert otx.enrich("1.2.3.4", "ip") is None
+
+    @responses.activate
+    def test_otx_request_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Network / connection errors return None without crashing."""
+        monkeypatch.setenv("OTX_API_KEY", "fake-key-for-test")
+        responses.add(
+            responses.GET,
+            "https://otx.alienvault.com/api/v1/indicators/IPv4/1.2.3.4/general",
+            body=requests.exceptions.ConnectionError("kaboom"),
+        )
+        assert otx.enrich("1.2.3.4", "ip") is None
+
+    def test_otx_score_zero_pulses(self) -> None:
+        """No pulses + non-negative reputation → 0."""
+        assert (
+            score_mod.calculate_otx_score(
+                {"pulse_info": {"count": 0, "pulses": []}, "reputation": 0}
+            )
+            == 0
+        )
+
+    def test_otx_score_few_pulses(self) -> None:
+        """1–2 pulses → 50."""
+        assert (
+            score_mod.calculate_otx_score(
+                {"pulse_info": {"count": 2, "pulses": []}, "reputation": 0}
+            )
+            == 50
+        )
+
+    def test_otx_score_many_pulses(self) -> None:
+        """3–9 pulses → 75."""
+        assert (
+            score_mod.calculate_otx_score(
+                {"pulse_info": {"count": 5, "pulses": []}, "reputation": 0}
+            )
+            == 75
+        )
+
+    def test_otx_score_widespread(self) -> None:
+        """≥10 pulses → 90."""
+        assert (
+            score_mod.calculate_otx_score(
+                {"pulse_info": {"count": 12, "pulses": []}, "reputation": 0}
+            )
+            == 90
+        )
+
+    def test_otx_score_negative_rep_bumps(self) -> None:
+        """pulse_count=10 + reputation=-5 → 90 + 10 = 100 (capped)."""
+        assert (
+            score_mod.calculate_otx_score(
+                {"pulse_info": {"count": 10, "pulses": []}, "reputation": -5}
+            )
+            == 100
+        )
+
+    def test_otx_score_none(self) -> None:
+        """None / empty payload → 0."""
+        assert score_mod.calculate_otx_score(None) == 0
+        assert score_mod.calculate_otx_score({}) == 0

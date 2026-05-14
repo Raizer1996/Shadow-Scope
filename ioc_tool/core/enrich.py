@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import json
 from . import database
 from . import score
-from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus, greynoise, threatfox, malwarebazaar
+from ..modules import vt, abuseipdb, whois_mod, tor, ip_quality_score, ipinfo_mod, urlhaus, greynoise, threatfox, malwarebazaar, otx
 
 def should_refresh(timestamp_str):
     if not timestamp_str:
@@ -193,6 +193,25 @@ def enrich_ioc(value, ioc_type):
         if threatfox_data:
             results['ThreatFox'] = {'score': threatfox_score, 'data': threatfox_data}
             scores.append(threatfox_score)
+
+    # --- AlienVault OTX — IP / domain / URL / hash (free API key) ---
+    if ioc_type in ('ip', 'domain', 'url', 'hash'):
+        cached_otx = database.get_latest_enrichment(ioc_id, 'otx')
+        otx_data = None
+        otx_score = 0
+
+        if cached_otx and not should_refresh(cached_otx['timestamp']):
+            otx_data = json.loads(cached_otx['data'])
+            otx_score = cached_otx['score']
+        else:
+            otx_data = otx.enrich(value, ioc_type)
+            if otx_data:
+                otx_score = score.calculate_otx_score(otx_data)
+                database.add_enrichment(ioc_id, 'otx', otx_data, otx_score)
+
+        if otx_data:
+            results['OTX'] = {'score': otx_score, 'data': otx_data}
+            scores.append(otx_score)
 
     # --- MalwareBazaar (abuse.ch) — hash only (no API key) ---
     if ioc_type == 'hash':

@@ -39,6 +39,9 @@ CSV_COLUMNS: List[str] = [
     "threatfox_malware",
     "malwarebazaar_signature",
     "malwarebazaar_file_type",
+    "otx_pulse_count",
+    "otx_first_pulse",
+    "otx_adversary",
     "greynoise_classification",
     "greynoise_name",
 ]
@@ -188,6 +191,20 @@ def _flatten_result(result: Dict[str, Any]) -> Dict[str, str]:
         row["malwarebazaar_signature"] = _s(malwarebazaar_data.get("signature"))
     if malwarebazaar_data.get("file_type"):
         row["malwarebazaar_file_type"] = _s(malwarebazaar_data.get("file_type"))
+
+    # AlienVault OTX — pulse count + first pulse name + adversary
+    otx = modules.get("OTX") or {}
+    otx_data = otx.get("data") or {}
+    otx_pulse_info = otx_data.get("pulse_info") or {}
+    if "count" in otx_pulse_info:
+        row["otx_pulse_count"] = _s(otx_pulse_info.get("count"))
+    otx_pulses = otx_pulse_info.get("pulses") or []
+    if otx_pulses:
+        first_pulse = otx_pulses[0] or {}
+        if first_pulse.get("name"):
+            row["otx_first_pulse"] = _s(first_pulse.get("name"))
+        if first_pulse.get("adversary"):
+            row["otx_adversary"] = _s(first_pulse.get("adversary"))
 
     # GreyNoise — classification + name (Censys, Shodan, Mirai, ...)
     greynoise = modules.get("GreyNoise") or {}

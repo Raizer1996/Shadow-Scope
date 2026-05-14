@@ -132,6 +132,56 @@ def calculate_greynoise_score(data: dict | None) -> int:
     return 0
 
 
+def calculate_otx_score(data: dict | None) -> int:
+    """AlienVault OTX pulse count + reputation drive risk.
+
+    OTX surfaces analyst-curated **pulses** that reference an IOC; the
+    more pulses, the more widely-reported the threat. Negative
+    ``reputation`` (OTX's own community signal) tilts the score up.
+
+    Mapping:
+
+    - ``None`` / no data → ``0``
+    - ``pulse_info.count == 0`` and ``reputation >= 0`` → ``0``
+    - ``pulse_info.count`` 1–2 → ``50``
+    - ``pulse_info.count`` 3–9 → ``75``
+    - ``pulse_info.count >= 10`` → ``90``
+    - Negative ``reputation`` (``< 0``) bumps the score by ``+10``
+      (capped at ``100``)
+    """
+    if not data:
+        return 0
+
+    pulse_info = data.get("pulse_info") or {}
+    try:
+        pulse_count = int(pulse_info.get("count", 0) or 0)
+    except (TypeError, ValueError):
+        pulse_count = 0
+
+    try:
+        reputation = int(data.get("reputation", 0) or 0)
+    except (TypeError, ValueError):
+        reputation = 0
+
+    if pulse_count == 0 and reputation >= 0:
+        return 0
+
+    if pulse_count >= 10:
+        base = 90
+    elif pulse_count >= 3:
+        base = 75
+    elif pulse_count >= 1:
+        base = 50
+    else:
+        # pulse_count == 0 but reputation < 0 — still a (weak) signal
+        base = 0
+
+    if reputation < 0:
+        base += 10
+
+    return min(base, 100)
+
+
 def calculate_final_risk(scores):
     """
     Average of all module scores

@@ -454,3 +454,10 @@ def test_malwarebazaar_csv_columns_present():
     """CSV exports include the MalwareBazaar signature + file_type columns."""
     assert 'malwarebazaar_signature' in output_mod.CSV_COLUMNS
     assert 'malwarebazaar_file_type' in output_mod.CSV_COLUMNS
+
+
+def test_otx_csv_columns_present():
+    """CSV exports include the OTX pulse_count + first pulse + adversary columns."""
+    assert 'otx_pulse_count' in output_mod.CSV_COLUMNS
+    assert 'otx_first_pulse' in output_mod.CSV_COLUMNS
+    assert 'otx_adversary' in output_mod.CSV_COLUMNS

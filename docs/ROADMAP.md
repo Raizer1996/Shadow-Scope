@@ -37,7 +37,6 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ## v0.4 — New Sources (intel breadth)
 
 ### Free / freemium IOC sources
-- [ ] **AlienVault OTX** — community pulses, broad coverage. **[issue]**
 - [ ] **URLscan.io** — URL screenshot + sibling domains + behavior (phishing gold). **[issue]**
 - [ ] **abuse.ch Feodo Tracker** — botnet C2 list. **[issue]**
 - [ ] **abuse.ch SSL Blacklist** — malicious cert fingerprints. **[issue]**
@@ -202,3 +201,4 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 - [x] GreyNoise — Community API IP classification (noise vs targeted, huge SOC FP killer) (2026-05-14)
 - [x] abuse.ch ThreatFox — fresh IOC feed across IP/domain/URL/hash, no API key required (2026-05-14)
 - [x] abuse.ch MalwareBazaar — hash → sample + malware family classification, no API key required (2026-05-14)
+- [x] AlienVault OTX — community pulse / threat-actor reports across IP/domain/URL/hash (free API key) (2026-05-14)
