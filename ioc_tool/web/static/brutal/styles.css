@@ -213,11 +213,10 @@ input, select, textarea { font-family: inherit; color: inherit; }
   grid-template-columns: 1fr;
   min-width: 0;
 }
-/* 3-column row when an IP IOC has geo data — IP CORE | SOURCE PROFILE | NETWORK GEO */
+/* 2-column row when an IP IOC has geo data — SOURCE PROFILE | NETWORK GEO */
 .hero-right.has-geo {
-  grid-template-columns: minmax(220px, 1.1fr) minmax(0, 1.6fr) minmax(260px, 1.3fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr);
 }
-.hero-right > .ip-core-panel,
 .hero-right > .spider,
 .hero-right > .net-geo-panel {
   padding: 14px 16px;
@@ -228,19 +227,51 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .hero-right > :last-child { border-right: none; }
 .hero-right .spider svg { max-width: 100%; max-height: 360px; }
 
-/* When score column wraps */
+/* Score column on the left stacks SCORE on top of IP CORE */
+.score-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.score-stack > .ip-core-panel {
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  padding: 12px 14px;
+}
+
+/* Score column wraps to full width on narrow viewports */
 @media (max-width: 1280px) {
   .hero { grid-template-columns: 1fr; }
   .hero-left { border-right: none; border-bottom: 1px solid var(--line-2); }
 }
-@media (max-width: 1080px) {
-  .hero-right.has-geo { grid-template-columns: 1fr 1fr; }
-  .hero-right.has-geo > .net-geo-panel { grid-column: 1 / -1; border-top: 1px solid var(--line-2); }
-}
-@media (max-width: 720px) {
+@media (max-width: 880px) {
   .hero-right.has-geo { grid-template-columns: 1fr; }
-  .hero-right > .ip-core-panel,
   .hero-right > .spider { border-right: none; border-bottom: 1px solid var(--line-2); }
+}
+
+/* Resizable hero columns — user drags the splitter to shift left:right ratio.
+   Default is the value set via --hero-left-fr on :root (1 = 1fr). */
+.hero { grid-template-columns: var(--hero-left-fr, minmax(360px, 1fr)) 6px minmax(0, var(--hero-right-fr, 2fr)) !important; }
+.hero-splitter {
+  background: var(--line-2);
+  cursor: col-resize;
+  position: relative;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+.hero-splitter:hover, .hero-splitter.dragging { background: var(--accent); }
+.hero-splitter::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 22px;
+  background: var(--ink-3);
+  opacity: 0.4;
+}
+.hero-splitter:hover::after { opacity: 0.9; background: var(--bg); }
+@media (max-width: 1280px) {
+  /* On narrow viewports the hero stacks vertically — hide the splitter */
+  .hero { grid-template-columns: 1fr !important; }
+  .hero-splitter { display: none; }
 }
 
 /* IP Core panel */
