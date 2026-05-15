@@ -663,33 +663,192 @@ function _geoFor(ioc) {
   return null;
 }
 
+// ─────────── Threat Surface — cross-source consensus matrix ───────────
+//
+// One row per canonical flag. OR-logic verdict (any source says yes →
+// verdict yes), with per-source attribution shown beside.
+//
+// Each FLAGS entry returns { confirmed: [source...], denied: [source...] }
+// where confirmed sources fired the flag; denied ones explicitly returned
+// false (so we can show "checked but clean").
+//
+// "RELATIONS" row dedups operator / hosting-provider / hostname strings
+// across the same modules and surfaces the most common form.
+
+const _ORG_KEYS = [
+  // (source-id, picker)
+  ["Shodan",      (d) => d.org || d.isp],
+  ["IPinfo",      (d) => d.org],
+  ["AbuseIPDB",   (d) => d.isp],
+  ["AbstractAPI", (d) => (d.asn || {}).name || (d.company || {}).name],
+  ["ASN",         (d) => d.name],
+];
+
+function _collectFlag(ioc, probes) {
+  // probes :: [(source, picker, isPositive?)]
+  // picker returns true/false; isPositive defaults to identity
+  const confirmed = [];
+  const denied = [];
+  for (const [src, pick, positive] of probes) {
+    const data = (ioc.modules[src] || {}).data;
+    if (!data) continue;
+    let v;
+    try { v = pick(data); } catch (e) { continue; }
+    if (v === undefined || v === null) continue;
+    const yes = positive ? positive(v) : !!v;
+    if (yes) confirmed.push(src);
+    else denied.push(src);
+  }
+  return { confirmed, denied };
+}
+
+function _collectOperators(ioc) {
+  // Returns [{ name, sources: [src...] }] dedup'd case-insensitively.
+  const map = new Map();
+  for (const [src, pick] of _ORG_KEYS) {
+    const data = (ioc.modules[src] || {}).data;
+    if (!data) continue;
+    let v;
+    try { v = pick(data); } catch (e) { continue; }
+    if (!v || typeof v !== "string") continue;
+    const norm = v.trim();
+    if (!norm) continue;
+    const key = norm.toLowerCase();
+    if (!map.has(key)) map.set(key, { name: norm, sources: [] });
+    map.get(key).sources.push(src);
+  }
+  return Array.from(map.values()).sort((a, b) => b.sources.length - a.sources.length);
+}
+
+function _collectHostnames(ioc) {
+  // Union across Shodan / IPinfo / AbuseIPDB; dedup'd lowercase.
+  const set = new Set();
+  for (const src of ["Shodan", "IPinfo", "AbuseIPDB"]) {
+    const d = (ioc.modules[src] || {}).data || {};
+    if (Array.isArray(d.hostnames)) d.hostnames.forEach(h => h && set.add(String(h).toLowerCase()));
+    if (typeof d.hostname === "string") set.add(d.hostname.toLowerCase());
+  }
+  return Array.from(set);
+}
+
+function ThreatSurfacePanel({ ioc }) {
+  const flagDefs = [
+    { k: "TOR",     color: "var(--crit)", probes: [
+      ["TOR",         (d) => d.is_tor],
+      ["AbuseIPDB",   (d) => d.isTor],
+      ["AbstractAPI", (d) => (d.security || {}).is_tor],
+      ["IPinfo",      (d) => (d.privacy || {}).tor],
+    ]},
+    { k: "VPN",     color: "var(--bad)", probes: [
+      ["IPQS",        (d) => d.vpn],
+      ["AbstractAPI", (d) => (d.security || {}).is_vpn],
+      ["IPinfo",      (d) => (d.privacy || {}).vpn],
+    ]},
+    { k: "PROXY",   color: "var(--bad)", probes: [
+      ["IPQS",        (d) => d.proxy],
+      ["AbstractAPI", (d) => (d.security || {}).is_proxy],
+      ["IPinfo",      (d) => (d.privacy || {}).proxy],
+    ]},
+    { k: "RELAY",   color: "var(--high)", probes: [
+      ["AbstractAPI", (d) => (d.security || {}).is_relay],
+    ]},
+    { k: "HOSTING", color: "var(--ink-2)", probes: [
+      ["AbstractAPI", (d) => (d.security || {}).is_hosting],
+      ["Shodan",      (d) => Array.isArray(d.tags) && d.tags.includes("cloud")],
+    ]},
+    { k: "MOBILE",  color: "var(--ink-2)", probes: [
+      ["AbstractAPI", (d) => (d.security || {}).is_mobile],
+    ]},
+    { k: "ABUSER",  color: "var(--bad)", probes: [
+      ["AbstractAPI", (d) => (d.security || {}).is_abuse],
+      ["AbuseIPDB",   (d) => (d.abuseConfidenceScore || 0) >= 25],
+    ]},
+    { k: "SCANNER", color: "var(--bad)", probes: [
+      ["GreyNoise",   (d) => d.classification === "malicious"],
+    ]},
+    { k: "RIOT",    color: "var(--safe)", probes: [
+      ["GreyNoise",   (d) => d.riot === true],
+    ]},
+    { k: "ANYCAST", color: "var(--ink-2)", probes: [
+      ["IPinfo",      (d) => d.anycast || d.is_anycast],
+    ]},
+  ];
+
+  const rows = flagDefs
+    .map(def => ({ ...def, result: _collectFlag(ioc, def.probes) }))
+    // Only show flags that were either confirmed by ≥1 source, OR
+    // explicitly checked and denied by ≥2 sources (so the analyst sees
+    // "we checked Tor with 3 sources and they all said no"). Skip
+    // flags with zero coverage entirely.
+    .filter(r => r.result.confirmed.length > 0 || r.result.denied.length >= 2);
+
+  const operators = _collectOperators(ioc);
+  const hostnames = _collectHostnames(ioc);
+
+  if (rows.length === 0 && operators.length === 0 && hostnames.length === 0) return null;
+
+  return (
+    <div className="threat-surface">
+      <div className="ts-head">
+        <span className="ts-title">THREAT SURFACE</span>
+        <span className="ts-meta">cross-source consensus · OR-merge</span>
+      </div>
+      {rows.length > 0 && (
+        <div className="ts-flag-rows">
+          {rows.map(r => {
+            const yes = r.result.confirmed.length > 0;
+            return (
+              <div key={r.k} className={`ts-flag-row ${yes ? "yes" : "no"}`}>
+                <span className="ts-flag-name" style={{ color: yes ? r.color : "var(--ink-3)" }}>
+                  {yes ? "✓" : "·"} {r.k}
+                </span>
+                <span className="ts-source-chips">
+                  {r.result.confirmed.map(s => (
+                    <span key={"y"+s} className="ts-source-chip confirmed" style={{ borderColor: r.color, color: r.color }}>{s}</span>
+                  ))}
+                  {r.result.denied.map(s => (
+                    <span key={"n"+s} className="ts-source-chip denied">{s}</span>
+                  ))}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {(operators.length > 0 || hostnames.length > 0) && (
+        <div className="ts-relations">
+          {operators.length > 0 && (
+            <div className="ts-rel-row">
+              <span className="ts-rel-k">OPERATOR</span>
+              <span className="ts-rel-v">
+                {operators.slice(0, 2).map(o => (
+                  <span key={o.name} className="ts-rel-chip">
+                    <span className="ts-rel-name">{o.name}</span>
+                    <span className="ts-rel-src">{o.sources.join(" · ")}</span>
+                  </span>
+                ))}
+              </span>
+            </div>
+          )}
+          {hostnames.length > 0 && (
+            <div className="ts-rel-row">
+              <span className="ts-rel-k">RDNS</span>
+              <span className="ts-rel-v ts-rel-hostnames">
+                {hostnames.slice(0, 4).map(h => <Copyable key={h} text={h}><span className="ts-host">{h}</span></Copyable>)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function IpCorePanel({ ioc, fmt }) {
   const g = _geoFor(ioc);
   if (!g) return null;
   const ports = g.ports || [];
-
-  // Cross-source flags surfaced as colour-coded badges at the top of
-  // the panel — Tor / VPN / Proxy / Abuse / Anycast / Privacy. The
-  // dashboard previously buried these inside the per-source drawers,
-  // which user testing showed made them invisible at a glance.
-  const flags = [];
-  const tor = ioc.modules.TOR?.data;
-  const ab = ioc.modules.AbuseIPDB?.data || {};
-  const ipinfo = ioc.modules.IPinfo?.data || {};
-  const gn = ioc.modules.GreyNoise?.data || {};
-  const ipqs = ioc.modules.IPQS?.data || {};
-  const aapi = ioc.modules.AbstractAPI?.data?.security || {};
-  if (tor?.is_tor || ab.isTor || aapi.is_tor) flags.push({ k: "TOR EXIT", color: "var(--crit)" });
-  if (ipqs.vpn || aapi.is_vpn) flags.push({ k: "VPN", color: "var(--bad)" });
-  if (ipqs.proxy || aapi.is_proxy) flags.push({ k: "PROXY", color: "var(--bad)" });
-  if (aapi.is_relay) flags.push({ k: "RELAY", color: "var(--high)" });
-  if (aapi.is_hosting) flags.push({ k: "HOSTING", color: "var(--ink-2)" });
-  if (aapi.is_abuse) flags.push({ k: "ABSTRACT-ABUSE", color: "var(--bad)" });
-  if (ipinfo.privacy?.tor || ipinfo.privacy?.vpn || ipinfo.privacy?.proxy) flags.push({ k: "PRIVACY-VPN", color: "var(--bad)" });
-  if (ab.abuseConfidenceScore >= 25) flags.push({ k: `ABUSE ${ab.abuseConfidenceScore}%`, color: "var(--bad)" });
-  if (gn.classification === "malicious") flags.push({ k: "SCANNER-MAL", color: "var(--bad)" });
-  if (gn.riot) flags.push({ k: "GN-RIOT", color: "var(--safe)" });
-  if (ipinfo.anycast || ipinfo.is_anycast) flags.push({ k: "ANYCAST", color: "var(--ink-2)" });
 
   return (
     <div className="ip-core-panel">
@@ -697,13 +856,7 @@ function IpCorePanel({ ioc, fmt }) {
         <span className="ipc-title glitch" data-text="IP CORE">IP CORE</span>
         <span className="ipc-meta">identity · routing</span>
       </div>
-      {flags.length > 0 && (
-        <div className="ipc-flags">
-          {flags.map(f => (
-            <span key={f.k} className="ipc-flag" style={{ color: f.color, borderColor: f.color }}>{f.k}</span>
-          ))}
-        </div>
-      )}
+      <ThreatSurfacePanel ioc={ioc} />
       <div className="ipc-grid">
         {g.country && (
           <div className="ipc-row">

@@ -154,8 +154,62 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
 }
 
 // SpiderChart — per-source score polygon. Honors disabled sources (greys out).
+// Per-IOC-type relevance: which sources actually have an opinion on
+// THIS kind of indicator? Sources that always run regardless (Shodan,
+// IPinfo, AbstractAPI) but only emit context — not an opinion on the
+// IOC's badness — get suppressed from the spider so the polygon
+// reflects the analysts' "did anyone think this is bad?" view.
+const _SPIDER_INFO_ONLY = new Set([
+  "Shodan", "IPinfo", "AbstractAPI", "crt.sh", "ASN", "Allowlist", "Heuristics",
+]);
+const _SPIDER_TYPE_HIDE = {
+  ip:     new Set(["URLscan"]),  // URLscan history on a bare IP is mostly low-signal noise
+  cve:    new Set([]),
+  asn:    new Set([]),
+  hash:   new Set([]),
+  url:    new Set([]),
+  domain: new Set([]),
+};
+
+
+// Pixel mascot — brutalist scanner drone. Idle bob + scanning eye +
+// LED indicators. SVG inline so the CSS keyframes drive the
+// animation; no external assets, no JS update loop.
+function ScopeDrone() {
+  return (
+    <span className="scope-drone" title="scope-drone idle · scanning sources" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="28" height="28" shapeRendering="crispEdges">
+        {/* antenna */}
+        <rect x="11" y="1" width="2" height="2" fill="var(--accent)" />
+        <rect x="11" y="3" width="2" height="2" fill="var(--ink-2)" />
+        {/* body shell */}
+        <rect x="4"  y="5"  width="16" height="14" fill="#1a1a1a" stroke="#3a3a3a" />
+        <rect x="5"  y="6"  width="14" height="3"  fill="#2a2a2a" />
+        {/* scanning eye track */}
+        <rect x="5"  y="9"  width="14" height="4"  fill="#0a0a0a" />
+        <rect className="sd-eye" x="6" y="9" width="3" height="4" fill="var(--accent)" />
+        {/* mouth grille */}
+        <rect x="6"  y="14" width="2" height="1" fill="#3a3a3a" />
+        <rect x="9"  y="14" width="2" height="1" fill="#3a3a3a" />
+        <rect x="12" y="14" width="2" height="1" fill="#3a3a3a" />
+        <rect x="15" y="14" width="2" height="1" fill="#3a3a3a" />
+        {/* LED indicators */}
+        <rect className="sd-led sd-led-a" x="6"  y="16" width="2" height="2" fill="var(--safe)" />
+        <rect className="sd-led sd-led-b" x="16" y="16" width="2" height="2" fill="var(--bad)" />
+        {/* legs / mount */}
+        <rect x="6"  y="19" width="2" height="3" fill="#2a2a2a" />
+        <rect x="16" y="19" width="2" height="3" fill="#2a2a2a" />
+      </svg>
+    </span>
+  );
+}
+
+
 function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
-  const entries = Object.entries(ioc.modules);
+  const hideByType = _SPIDER_TYPE_HIDE[ioc.type] || new Set();
+  const entries = Object.entries(ioc.modules).filter(([name]) =>
+    !_SPIDER_INFO_ONLY.has(name) && !hideByType.has(name)
+  );
   const N = entries.length;
   const cx = 140, cy = 132, R = 88;
 
@@ -178,6 +232,7 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
   return (
     <div className="spider">
       <div className="spider-head">
+        <ScopeDrone />
         <span className="spider-title glitch" data-text="SOURCE PROFILE">SOURCE PROFILE</span>
         <span className="spider-meta">{N} axes · radius = score</span>
       </div>
