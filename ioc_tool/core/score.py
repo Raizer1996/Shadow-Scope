@@ -326,13 +326,7 @@ def calculate_crtsh_score(data: dict | None) -> int:
 
 
 def calculate_abstract_score(data: dict | None) -> int:
-    """AbstractAPI security flags → 0-100. Anonymising path → 70, else info-only.
-
-    The endpoint may or may not return the ``security`` block depending
-    on subscription tier. Even when it does, AbstractAPI is one signal
-    among many — we cap at 70 so it never drives the composite above
-    where the other sources agree.
-    """
+    """AbstractAPI security flags → 0-100. Anonymising or abuser → 70."""
     if not data:
         return 0
     sec = data.get("security") or {}
@@ -342,6 +336,7 @@ def calculate_abstract_score(data: dict | None) -> int:
         or sec.get("is_tor")
         or sec.get("is_relay")
         or sec.get("is_anonymous")
+        or sec.get("is_abuse")
     ):
         return 70
     return 0

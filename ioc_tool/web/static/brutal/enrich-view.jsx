@@ -619,23 +619,29 @@ function SourceDrawer({ name, mod, ioc }) {
     case "AbstractAPI":
       {
         const sec = data.security || {};
-        const conn = data.connection || {};
+        const loc = data.location || {};
+        const asn = data.asn || {};
+        const company = data.company || {};
+        const tz = data.timezone || {};
         rows.push(
-          <KV k="country"  v={data.country ? `${data.country_code || ""} ${data.country}` : null} key="ab-c" />,
-          <KV k="city"     v={data.city ? `${data.city}${data.region ? " · " + data.region : ""}` : null} key="ab-city" />,
-          <KV k="coords"   v={data.latitude != null ? `${data.latitude}, ${data.longitude}` : null} mono key="ab-co" />,
-          <KV k="timezone" v={(data.timezone || {}).name} key="ab-tz" />,
-          <KV k="postal"   v={data.postal_code} key="ab-p" />,
-          <KV k="EU"       v={data.country_is_eu ? "yes" : null} key="ab-eu" />,
-          <KV k="ASN"      v={conn.autonomous_system_number ? `AS${conn.autonomous_system_number}` : null} key="ab-asn" />,
-          <KV k="ISP"      v={conn.isp_name || conn.organization_name} key="ab-isp" />,
-          <KV k="conn type" v={conn.connection_type} key="ab-ct" />,
+          <KV k="country"  v={loc.country ? `${loc.country_code || ""} ${loc.country}` : null} key="ab-c" />,
+          <KV k="city"     v={loc.city ? `${loc.city}${loc.region ? " · " + loc.region : ""}` : null} key="ab-city" />,
+          <KV k="postal"   v={loc.postal_code} key="ab-p" />,
+          <KV k="coords"   v={loc.latitude != null ? `${loc.latitude}, ${loc.longitude}` : null} mono key="ab-co" />,
+          <KV k="continent" v={loc.continent ? `${loc.continent_code || ""} ${loc.continent}` : null} key="ab-cont" />,
+          <KV k="EU"       v={loc.is_country_eu ? "yes" : null} key="ab-eu" />,
+          <KV k="timezone" v={tz.name ? `${tz.name} (UTC${tz.utc_offset >= 0 ? "+" : ""}${tz.utc_offset})` : null} key="ab-tz" />,
+          <KV k="local time" v={tz.local_time} mono key="ab-lt" />,
+          <KV k="ASN"      v={asn.asn ? `AS${asn.asn} · ${asn.name || ""}` : null} key="ab-asn" />,
+          <KV k="ASN type" v={asn.type} key="ab-ast" />,
+          <KV k="company"  v={company.name} key="ab-comp" />,
           <KV k="Tor"      v={sec.is_tor ? "yes" : null} key="ab-tor" />,
           <KV k="VPN"      v={sec.is_vpn ? "yes" : null} key="ab-vpn" />,
           <KV k="proxy"    v={sec.is_proxy ? "yes" : null} key="ab-prx" />,
           <KV k="relay"    v={sec.is_relay ? "yes" : null} key="ab-rly" />,
           <KV k="hosting"  v={sec.is_hosting ? "yes" : null} key="ab-hst" />,
-          <KV k="abuser"   v={sec.is_abuser ? "yes" : null} key="ab-ab" />,
+          <KV k="mobile"   v={sec.is_mobile ? "yes" : null} key="ab-mob" />,
+          <KV k="abuse"    v={sec.is_abuse ? "yes" : null} key="ab-ab" />,
         );
       }
       break;

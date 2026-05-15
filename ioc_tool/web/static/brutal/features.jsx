@@ -678,9 +678,13 @@ function IpCorePanel({ ioc, fmt }) {
   const ipinfo = ioc.modules.IPinfo?.data || {};
   const gn = ioc.modules.GreyNoise?.data || {};
   const ipqs = ioc.modules.IPQS?.data || {};
-  if (tor?.is_tor || ab.isTor) flags.push({ k: "TOR EXIT", color: "var(--crit)" });
-  if (ipqs.vpn) flags.push({ k: "VPN", color: "var(--bad)" });
-  if (ipqs.proxy) flags.push({ k: "PROXY", color: "var(--bad)" });
+  const aapi = ioc.modules.AbstractAPI?.data?.security || {};
+  if (tor?.is_tor || ab.isTor || aapi.is_tor) flags.push({ k: "TOR EXIT", color: "var(--crit)" });
+  if (ipqs.vpn || aapi.is_vpn) flags.push({ k: "VPN", color: "var(--bad)" });
+  if (ipqs.proxy || aapi.is_proxy) flags.push({ k: "PROXY", color: "var(--bad)" });
+  if (aapi.is_relay) flags.push({ k: "RELAY", color: "var(--high)" });
+  if (aapi.is_hosting) flags.push({ k: "HOSTING", color: "var(--ink-2)" });
+  if (aapi.is_abuse) flags.push({ k: "ABSTRACT-ABUSE", color: "var(--bad)" });
   if (ipinfo.privacy?.tor || ipinfo.privacy?.vpn || ipinfo.privacy?.proxy) flags.push({ k: "PRIVACY-VPN", color: "var(--bad)" });
   if (ab.abuseConfidenceScore >= 25) flags.push({ k: `ABUSE ${ab.abuseConfidenceScore}%`, color: "var(--bad)" });
   if (gn.classification === "malicious") flags.push({ k: "SCANNER-MAL", color: "var(--bad)" });

@@ -316,6 +316,7 @@ def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
         return data.get("malware") or "malicious cert hash"
     elif source == "AbstractAPI":
         sec = data.get("security") or {}
+        loc = data.get("location") or {}
         parts = []
         if sec.get("is_tor"):
             parts.append("Tor")
@@ -325,10 +326,12 @@ def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
             parts.append("proxy")
         if sec.get("is_relay"):
             parts.append("relay")
-        loc = data.get("country") or ""
+        if sec.get("is_abuse"):
+            parts.append("abuse")
+        country = loc.get("country_code") or loc.get("country") or ""
         if parts:
-            return ("/".join(parts) + (f" · {loc}" if loc else "")) or "—"
-        return loc or "—"
+            return ("/".join(parts) + (f" · {country}" if country else "")) or "—"
+        return country or "—"
     elif source == "Heuristics":
         parts = []
         if "nrd" in data and isinstance(data["nrd"], dict):
