@@ -129,6 +129,132 @@ function WhoisTimeline({ ioc, fmt }) {
   );
 }
 
+// ─────────── Named-threat strip ───────────
+//
+// Cross-source aggregation of *named* threat attribution: OTX pulse
+// adversaries + malware families, VirusTotal popular_threat_classification,
+// Pulsedive threats, ThreatFox malware, URLhaus threat + tags. The
+// strip de-duplicates and shows the analyst at a glance "what is this
+// IOC actually attributed to?" without needing to expand every source.
+
+const THREAT_KINDS = {
+  adversary: { label: "ADV",   className: "tk-adv"   },
+  family:    { label: "FAM",   className: "tk-fam"   },
+  threat:    { label: "THR",   className: "tk-thr"   },
+  tag:       { label: "TAG",   className: "tk-tag"   },
+};
+
+function collectThreats(ioc) {
+  const out = [];
+  const push = (kind, value, source) => {
+    if (!value) return;
+    const v = typeof value === "string" ? value : (value.name || value.target || value.display_name || "");
+    if (!v) return;
+    const norm = String(v).trim();
+    if (!norm) return;
+    out.push({ kind, value: norm, source });
+  };
+
+  // OTX — adversary attribution + malware families from pulses
+  const otx = ioc.modules.OTX?.data;
+  if (otx) {
+    const pulses = (otx.pulse_info?.pulses || []).slice(0, 25);
+    for (const p of pulses) {
+      if (p.adversary) push("adversary", p.adversary, "OTX");
+      for (const mf of (p.malware_families || [])) push("family", mf, "OTX");
+      for (const tag of (p.tags || []).slice(0, 3)) push("tag", tag, "OTX");
+    }
+  }
+
+  // VirusTotal — popular_threat_classification
+  const vt = ioc.modules.VirusTotal?.data;
+  if (vt) {
+    const ptc = vt.popular_threat_classification || {};
+    if (ptc.suggested_threat_label) push("family", ptc.suggested_threat_label, "VT");
+    for (const cat of (ptc.popular_threat_category || []).slice(0, 3)) push("threat", cat, "VT");
+    for (const tag of (vt.tags || []).slice(0, 6)) push("tag", tag, "VT");
+  }
+
+  // Pulsedive — threats array
+  const pd = ioc.modules.Pulsedive?.data;
+  if (pd) {
+    for (const t of (pd.threats || []).slice(0, 6)) push("threat", t, "Pulsedive");
+  }
+
+  // ThreatFox — malware family
+  const tf = ioc.modules.ThreatFox?.data;
+  if (tf?.malware) push("family", tf.malware, "ThreatFox");
+
+  // URLhaus — threat + tags
+  const uh = ioc.modules.URLhaus?.data;
+  if (uh) {
+    if (uh.threat) push("threat", uh.threat, "URLhaus");
+    for (const tag of (uh.tags || []).slice(0, 3)) push("tag", tag, "URLhaus");
+  }
+
+  // MalwareBazaar — signature / malware family
+  const mb = ioc.modules.MalwareBazaar?.data;
+  if (mb) {
+    if (mb.signature) push("family", mb.signature, "MalwareBazaar");
+    for (const tag of (mb.tags || []).slice(0, 3)) push("tag", tag, "MalwareBazaar");
+  }
+
+  // De-dup, keep first-seen ordering, with priority adversary > family > threat > tag
+  const order = { adversary: 0, family: 1, threat: 2, tag: 3 };
+  const seen = new Map();
+  for (const t of out) {
+    const key = t.kind + ":" + t.value.toLowerCase();
+    if (!seen.has(key) || order[t.kind] < order[seen.get(key).kind]) {
+      seen.set(key, t);
+    }
+  }
+  return Array.from(seen.values()).sort((a, b) => order[a.kind] - order[b.kind]);
+}
+
+function NamedThreatStrip({ ioc }) {
+  const threats = collectThreats(ioc);
+  if (threats.length === 0) return null;
+
+  const adv = threats.filter(t => t.kind === "adversary");
+  const fam = threats.filter(t => t.kind === "family");
+  const thr = threats.filter(t => t.kind === "threat");
+  const tag = threats.filter(t => t.kind === "tag").slice(0, 12);
+
+  return (
+    <section className="threat-strip">
+      <div className="ts-head">
+        <span className="sec-title">NAMED ATTRIBUTION</span>
+        <span className="sec-meta">{adv.length} adv · {fam.length} fam · {thr.length} threat · {tag.length} tag</span>
+        <span className="sec-meta dim">de-duplicated across OTX / VT / Pulsedive / ThreatFox / URLhaus / MalwareBazaar</span>
+      </div>
+      <div className="ts-body">
+        {adv.length > 0 && <ThreatRow kind="adversary" items={adv} />}
+        {fam.length > 0 && <ThreatRow kind="family"    items={fam} />}
+        {thr.length > 0 && <ThreatRow kind="threat"    items={thr} />}
+        {tag.length > 0 && <ThreatRow kind="tag"       items={tag} />}
+      </div>
+    </section>
+  );
+}
+
+function ThreatRow({ kind, items }) {
+  const k = THREAT_KINDS[kind] || { label: "?" };
+  return (
+    <div className="ts-row">
+      <span className={`ts-kind ${k.className}`}>{k.label}</span>
+      <div className="ts-chips">
+        {items.map(t => (
+          <span key={t.value} className={`ts-chip ${k.className}`} title={`reported by ${t.source}`}>
+            <span className="ts-chip-val">{t.value}</span>
+            <span className="ts-chip-src">{t.source}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 // ─────────── CVE feature block (NVD / EPSS / CISA KEV) ───────────
 //
 // Surfaces the CVE-specific data that the per-source rows can't fit:

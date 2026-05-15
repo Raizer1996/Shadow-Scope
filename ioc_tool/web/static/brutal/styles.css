@@ -648,6 +648,61 @@ input, select, textarea { font-family: inherit; color: inherit; }
   align-self: flex-start;
 }
 .crtsh-toggle:hover { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+/* ============================================================
+   Named-threat attribution strip
+   ============================================================ */
+.threat-strip {
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  padding: 12px 16px 14px;
+  margin: 12px 0;
+  display: flex; flex-direction: column;
+  gap: 10px;
+}
+.ts-head {
+  display: flex; align-items: baseline; gap: 16px;
+  padding-bottom: 6px; border-bottom: 1px dotted var(--line);
+}
+.ts-body { display: flex; flex-direction: column; gap: 6px; }
+.ts-row { display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: start; }
+.ts-kind {
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  padding: 3px 0;
+  text-align: center;
+  font-weight: 800;
+  color: var(--ink-3);
+  border-right: 2px solid var(--line);
+}
+.ts-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ts-chip {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--line-2);
+  background: var(--bg-3);
+  font-size: 11px;
+}
+.ts-chip-val { padding: 3px 8px; color: var(--ink); font-weight: 700; }
+.ts-chip-src {
+  padding: 3px 6px;
+  background: var(--bg);
+  color: var(--ink-3);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  border-left: 1px solid var(--line-2);
+  display: inline-flex; align-items: center;
+}
+.ts-chip.tk-adv { border-color: var(--crit); }
+.ts-chip.tk-adv .ts-chip-val { color: var(--crit); }
+.ts-chip.tk-fam { border-color: var(--bad); }
+.ts-chip.tk-fam .ts-chip-val { color: var(--bad); }
+.ts-chip.tk-thr { border-color: var(--high); }
+.ts-chip.tk-thr .ts-chip-val { color: var(--high); }
+.ts-chip.tk-tag { border-color: var(--line-2); }
+.ts-kind.tk-adv { color: var(--crit); }
+.ts-kind.tk-fam { color: var(--bad); }
+.ts-kind.tk-thr { color: var(--high); }
+.ts-kind.tk-tag { color: var(--ink-3); }
 .src-table tr:hover td { background: var(--bg-3); }
 .src-table tr.muted td { opacity: 0.35; }
 .src-name { font-weight: 700; color: var(--ink); }
