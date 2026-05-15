@@ -536,6 +536,89 @@ def _md_heuristics_block(modules: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Source agreement matrix
+# ---------------------------------------------------------------------------
+#
+# Across N sources, how many flagged the IOC vs how many missed? The
+# matrix is the analyst's anti-false-positive lens: a 90 from a single
+# source against 7 sources reporting 0 is suspicious *of the source*,
+# not of the IOC. Strong consensus (5/8 flag) is harder to argue away.
+#
+# We treat any source returning a score > 0 as "flagged". Info-only
+# sources (Shodan, IPinfo, Allowlist) don't contribute either way —
+# they have no opinion on risk. The Heuristics pseudo-module is also
+# excluded so the matrix reflects external evidence only.
+
+# Modules that are info-only / not opinion sources. Score is incidental
+# (or zero by design) and shouldn't push the agreement numerator either way.
+_NON_OPINION_MODULES = frozenset({"Shodan", "IPinfo", "Allowlist", "Heuristics", "crt.sh"})
+
+
+def consensus_summary(result: dict[str, Any]) -> dict[str, Any]:
+    """Compute a per-IOC source-agreement summary.
+
+    Returns:
+        {
+            "sources_total": int,           # opinion sources that returned data
+            "sources_flagged": int,         # of those, how many scored > 0
+            "sources_missed": int,          # sources_total - sources_flagged
+            "consensus": "none"|"low"|"medium"|"high",
+            "rows": [{"source": name, "score": int, "flagged": bool}, ...]
+        }
+
+    ``consensus`` is a coarse tier derived from the flagged fraction:
+    >= 70 % → high, >= 40 % → medium, > 0 → low, == 0 → none.
+    """
+    modules = (result or {}).get("modules") or {}
+    rows: list[dict[str, Any]] = []
+    for name, entry in modules.items():
+        if name in _NON_OPINION_MODULES:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        score = int(entry.get("score") or 0)
+        rows.append({"source": name, "score": score, "flagged": score > 0})
+
+    total = len(rows)
+    flagged = sum(1 for r in rows if r["flagged"])
+    if total == 0:
+        consensus = "none"
+    else:
+        fraction = flagged / total
+        if fraction >= 0.70:
+            consensus = "high"
+        elif fraction >= 0.40:
+            consensus = "medium"
+        elif fraction > 0:
+            consensus = "low"
+        else:
+            consensus = "none"
+
+    return {
+        "sources_total": total,
+        "sources_flagged": flagged,
+        "sources_missed": total - flagged,
+        "consensus": consensus,
+        "rows": rows,
+    }
+
+
+def _md_consensus_block(result: dict[str, Any]) -> str:
+    """Render the consensus summary as a Markdown section. Empty when no sources ran."""
+    summary = consensus_summary(result)
+    if summary["sources_total"] == 0:
+        return ""
+    flagged = summary["sources_flagged"]
+    total = summary["sources_total"]
+    consensus = summary["consensus"]
+    icon = {"high": "🔴", "medium": "🟠", "low": "🟡", "none": "🟢"}.get(consensus, "⚪")
+    return (
+        f"**Source agreement:** {icon} `{flagged}/{total}` sources flagged "
+        f"(consensus: **{consensus}**)"
+    )
+
+
 def to_markdown(
     results: list[dict[str, Any]],
     include_summaries: dict[int, str | None] | None = None,
@@ -573,6 +656,11 @@ def to_markdown(
         table = _md_module_table(modules)
         if table:
             parts.append(table)
+            parts.append("")
+
+        consensus_block = _md_consensus_block(result)
+        if consensus_block:
+            parts.append(consensus_block)
             parts.append("")
 
         heuristics_block = _md_heuristics_block(modules)
