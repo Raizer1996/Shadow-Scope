@@ -5,6 +5,15 @@ from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'ioc.db')
 
+# Python 3.12 deprecated the default datetime → SQLite adapter and the
+# inverse text → datetime converter. Register an explicit handler so the
+# library doesn't fall back to the deprecated path (which emits a runtime
+# DeprecationWarning on every INSERT carrying a ``datetime`` value).
+# ISO 8601 with a space separator round-trips losslessly and sorts
+# correctly as a string — same shape the existing parsers in enrich.py
+# already accept.
+sqlite3.register_adapter(datetime, lambda dt: dt.isoformat(sep=" "))
+
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
