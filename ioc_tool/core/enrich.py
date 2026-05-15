@@ -458,6 +458,11 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             heuristics_data['typosquat'] = typo
             heuristics_scores.append(typo['score'])
 
+        idn = heuristics.idn_check(value)
+        if idn is not None:
+            heuristics_data['idn'] = idn
+            heuristics_scores.append(idn['score'])
+
     if heuristics_data:
         composite = (
             int(sum(heuristics_scores) / len(heuristics_scores))

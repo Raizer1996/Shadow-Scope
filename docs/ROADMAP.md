@@ -24,12 +24,12 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ### Bulk + I/O
 - [ ] **Bulk mode** (`-f iocs.txt`) — one IOC per line, parallel enrich, combined report. **[issue]**
 - [ ] **Pipe support** (`echo 1.2.3.4 | shadowscope enrich -`). **[issue]**
-- [ ] **Punycode decode** — catch IDN homograph attacks in domains. **[issue]**
+- [x] **Punycode decode** — `idn_check` in heuristics module: decodes `xn--` labels, flags mixed-script homograph (Cyrillic 'а' in Latin context = 90, pure-script IDN = 50)
 
 ### Cache / freshness
-- [ ] **Configurable cache TTL** — env `CACHE_TTL_HOURS`. **[issue]**
+- [x] **Configurable cache TTL** — env `CACHE_TTL_HOURS` (float supported, fallback 24 h)
 - [ ] **Tor list auto-refresh** — daily fetch from `check.torproject.org`. **[issue]**
-- [ ] **Force refresh flag** (`--no-cache`) to bypass cache. **[issue]**
+- [x] **Force refresh flag** — `--no-cache` CLI flag + `enrich_ioc(no_cache=)` kwarg, propagated via `ContextVar`
 
 ---
 
