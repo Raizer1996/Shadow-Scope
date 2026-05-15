@@ -74,3 +74,51 @@ def test_nrd_includes_iso_date_string():
     creation = datetime(2026, 1, 1, 12, 0, 0)
     result = heuristics.nrd_check(creation)
     assert result["created"] == "2026-01-01"
+
+
+# ---------------------------------------------------------------------------
+# DGA — Domain Generation Algorithm detection
+# ---------------------------------------------------------------------------
+
+
+def test_dga_skips_short_labels():
+    """Labels under 7 chars are too noisy to score."""
+    assert heuristics.dga_check("ab.com") is None
+    assert heuristics.dga_check("google.com") is None  # "google" = 6 chars
+    assert heuristics.dga_check("microsoft.com") is not None  # 9 chars
+
+
+def test_dga_clean_english_low_score():
+    """A real English domain should score low."""
+    result = heuristics.dga_check("microsoft.com")
+    assert result is not None
+    assert result["score"] < 40, f"Expected low score, got {result['score']}"
+    assert result["label"] == "microsoft"
+
+
+def test_dga_random_high_score():
+    """An obviously algorithmic-looking domain should score high."""
+    result = heuristics.dga_check("kq3v9z7hxnt8.com")
+    assert result is not None
+    assert result["score"] > 60, f"Expected high score, got {result['score']}"
+
+
+def test_dga_long_consonant_run_bumps_score():
+    """A long consonant run is a known DGA signal."""
+    result = heuristics.dga_check("xkjptnvbw.com")
+    assert result is not None
+    assert result["longest_consonant_run"] >= 6
+    assert result["score"] > 50
+
+
+def test_dga_handles_subdomain():
+    """Should extract the registrable label, ignoring subdomains."""
+    result = heuristics.dga_check("api.cloudflare.com")
+    assert result is not None
+    assert result["label"] == "cloudflare"
+
+
+def test_dga_reports_entropy():
+    result = heuristics.dga_check("aaaaaaaa.com")  # zero entropy
+    assert result is not None
+    assert result["entropy"] < 0.1

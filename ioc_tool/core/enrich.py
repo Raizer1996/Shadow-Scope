@@ -397,6 +397,11 @@ async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
             heuristics_data['nrd'] = nrd
             heuristics_scores.append(nrd['score'])
 
+        dga = heuristics.dga_check(value)
+        if dga is not None:
+            heuristics_data['dga'] = dga
+            heuristics_scores.append(dga['score'])
+
     if heuristics_data:
         composite = (
             int(sum(heuristics_scores) / len(heuristics_scores))

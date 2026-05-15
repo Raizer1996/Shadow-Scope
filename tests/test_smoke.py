@@ -728,8 +728,13 @@ def test_enrich_injects_nrd_heuristic_for_fresh_domain(monkeypatch, tmp_path):
     assert result["final_score"] > 0
 
 
-def test_enrich_skips_heuristics_when_no_whois(monkeypatch, tmp_path):
-    """No WHOIS creation_date → no Heuristics module entry (silent skip)."""
+def test_enrich_skips_nrd_when_no_whois(monkeypatch, tmp_path):
+    """No WHOIS creation_date → no NRD entry under Heuristics (silent skip).
+
+    Other heuristics (DGA) may still fire for the same domain — we just
+    verify the NRD-specific branch is omitted, not the whole Heuristics
+    module.
+    """
     from ioc_tool.core import database as _db
     monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
     _db.init_db()
@@ -737,4 +742,5 @@ def test_enrich_skips_heuristics_when_no_whois(monkeypatch, tmp_path):
     _stub_all_network(monkeypatch)  # WHOIS already stubbed to return None
 
     result = _enrich_mod.enrich_ioc("example.com", "domain")
-    assert "Heuristics" not in result["modules"]
+    if "Heuristics" in result["modules"]:
+        assert "nrd" not in result["modules"]["Heuristics"]["data"]
