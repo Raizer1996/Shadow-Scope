@@ -303,6 +303,15 @@ def calculate_crtsh_score(data: dict | None) -> int:
     return 0
 
 
+def calculate_asn_score(data: dict | None) -> int:
+    """ASN enrichment is info-only — we always return 0 so it appears in
+    the result without pushing the composite tier. Analysts read the
+    ``country_code`` / ``description_short`` / ``abuse_contacts`` fields
+    directly. Future work could derive a reputation score from a known-
+    bad-ASN list (Spamhaus DROP, etc.) but that's a separate feed."""
+    return 0
+
+
 def calculate_pulsedive_score(data: dict | None) -> int:
     """Map Pulsedive's ``risk`` string into our 0–100 scale.
 

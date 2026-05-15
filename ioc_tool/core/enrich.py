@@ -60,6 +60,9 @@ from ..modules import (
     vt,
     whois_mod,
 )
+from ..modules import (
+    asn as asn_mod,
+)
 from . import allowlist, database, heuristics, parser, score
 
 # Per-call ``--no-cache`` toggle — propagates from enrich_ioc{,_async}
@@ -445,6 +448,15 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             lambda: whois_mod.get_whois_data(value),
             None,
             post_process=_whois_post_process,
+        ))
+
+    # --- ASN enrichment via bgpview.io (info-only score) ---
+    if ioc_type == 'asn':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'asn_bgpview', 'ASN',
+            lambda: asn_mod.enrich(value),
+            score.calculate_asn_score,
+            info_only=True,
         ))
 
     # --- CVE enrichment fan-out: NVD + EPSS + CISA KEV ---

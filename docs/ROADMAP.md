@@ -48,7 +48,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ### New IOC types
 - [ ] **Email** — EmailRep, HaveIBeenPwned breach check. **[issue]**
-- [ ] **ASN** — BGP info, abuse history, prefix reputation. **[issue]**
+- [x] **ASN** — `AS12345` / `ASN12345` / `as12345` recognised as new IOC type. Enriched via bgpview.io free API: name, country, RIR, allocation date, traffic estimation, email/abuse contacts. Info-only score (doesn't push composite tier — analysts read fields directly).
 - [ ] **Bitcoin / crypto wallet** — OFAC sanctions list, basic chain analytics. **[issue]**
 - [ ] **TLS fingerprint** — JA3 / JA3S matching against known-bad lists. **[issue]**
 - [ ] **YARA hash match** — auto-detect malware family from sample/hash. **[issue]**
