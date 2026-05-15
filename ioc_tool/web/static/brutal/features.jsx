@@ -644,6 +644,31 @@ window.recomputeComposite = recomputeComposite;
 
 function _geoFor(ioc) {
   if (ioc.geo && (ioc.geo.lat != null || ioc.geo.country)) return ioc.geo;
+  // Live /enrich has no aggregated geo blob — derive from modules.Shodan
+  // (port detail), with IPinfo / AbstractAPI filling missing fields.
+  const mods = ioc.modules || {};
+  const sh = (mods.Shodan || {}).data || null;
+  const ip = (mods.IPinfo || {}).data || null;
+  const ab = (mods.AbstractAPI || {}).data || null;
+  if (sh || ip || ab) {
+    const ports = sh && Array.isArray(sh.data) && sh.data.length
+      ? sh.data.map(e => ({ port: e.port, banner: (e.product || "") + (e.version ? " " + e.version : "") }))
+      : (sh && Array.isArray(sh.ports) ? sh.ports.map(p => ({ port: p })) : []);
+    const ipLoc = ip && typeof ip.loc === "string" ? ip.loc.split(",") : [];
+    return {
+      country: (sh && sh.country_code) || (ip && ip.country) || (ab && ab.country_code) || null,
+      country_name: (sh && sh.country_name) || (ab && ab.country) || null,
+      city: (sh && sh.city) || (ip && ip.city) || (ab && ab.city) || null,
+      region: (sh && sh.region_code) || (ip && ip.region) || (ab && ab.region) || "",
+      lat: (sh && sh.latitude) || (ipLoc[0] ? parseFloat(ipLoc[0]) : null),
+      lon: (sh && sh.longitude) || (ipLoc[1] ? parseFloat(ipLoc[1]) : null),
+      asn: (sh && sh.asn) || (ip && ip.org) || (ab && ((ab.asn || {}).number)) || null,
+      org: (sh && (sh.org || sh.isp)) || (ip && ip.org) || (ab && ((ab.company || {}).name)) || null,
+      hostnames: (sh && Array.isArray(sh.hostnames) ? sh.hostnames : (ip && ip.hostname ? [ip.hostname] : [])),
+      ports,
+      tags: (sh && Array.isArray(sh.tags)) ? sh.tags : []
+    };
+  }
   const mock = window.SHODAN_DATA && window.SHODAN_DATA[ioc.id];
   if (mock) {
     return {
@@ -913,6 +938,28 @@ function IpCorePanel({ ioc, fmt }) {
         </div>
       )}
 
+      {(() => {
+        const anon = _anonFor(ioc);
+        if (!anon.length) return null;
+        return (
+          <div className="ipc-ports">
+            <div className="ipc-ports-head">
+              <span className="ipc-ports-title">ANONYMIZATION</span>
+              <span className="ipc-ports-meta">{anon.length} signal{anon.length === 1 ? "" : "s"}</span>
+            </div>
+            <div className="ipc-ports-list">
+              {anon.map((a, i) => (
+                <div key={a.kind + ":" + i} className="port-row" title={`reported by ${a.sources.join(", ")}`}>
+                  <span className="port-num" style={{ borderColor: a.color, color: a.color }}>{a.kind}</span>
+                  <span className="port-svc">{a.service || "Detected"}</span>
+                  <span className="port-risk" style={{ color: a.color }}>{a.sources.join("·")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {g.tags && g.tags.length > 0 && (
         <div className="ipc-tags">
           {g.tags.slice(0, 6).map(t => <span key={t} className="geo-tag">#{t}</span>)}
@@ -920,6 +967,64 @@ function IpCorePanel({ ioc, fmt }) {
       )}
     </div>
   );
+}
+
+// Build anonymization signals — VPN / Proxy / Tor / Hosting — from
+// AbstractAPI.security, Shodan.tags, IPinfo.privacy (if Privacy tier),
+// and the standalone TOR module. Each kind reports source attribution
+// and, when available (IPinfo Privacy), the VPN service brand.
+function _anonFor(ioc) {
+  const mods = ioc.modules || {};
+  const ab = ((mods.AbstractAPI || {}).data || {}).security || {};
+  const sh = (mods.Shodan || {}).data || {};
+  const shTags = Array.isArray(sh.tags) ? sh.tags.map(t => String(t).toLowerCase()) : [];
+  const ip = (mods.IPinfo || {}).data || {};
+  const ipPriv = ip.privacy || {};
+  const torFlag = ((mods.TOR || {}).data || {}).is_tor === true
+    || ((mods.TOR || {}).score && (mods.TOR || {}).score > 0);
+
+  const rows = [];
+  const push = (kind, color, sources, service) => {
+    if (!sources.length) return;
+    rows.push({ kind, color, sources, service });
+  };
+
+  // VPN — AbstractAPI is_vpn / Shodan vpn tag / IPinfo Privacy vpn
+  const vpnSrc = [];
+  if (ab.is_vpn) vpnSrc.push("AbstractAPI");
+  if (shTags.includes("vpn")) vpnSrc.push("Shodan");
+  if (ipPriv.vpn) vpnSrc.push("IPinfo");
+  push("VPN", "#fb923c", vpnSrc, ipPriv.service || null);
+
+  // PROXY
+  const proxySrc = [];
+  if (ab.is_proxy) proxySrc.push("AbstractAPI");
+  if (shTags.includes("proxy")) proxySrc.push("Shodan");
+  if (ipPriv.proxy) proxySrc.push("IPinfo");
+  push("PROXY", "#fbbf24", proxySrc, null);
+
+  // TOR
+  const torSrc = [];
+  if (ab.is_tor) torSrc.push("AbstractAPI");
+  if (shTags.includes("tor")) torSrc.push("Shodan");
+  if (ipPriv.tor) torSrc.push("IPinfo");
+  if (torFlag) torSrc.push("TOR");
+  push("TOR", "#f43f5e", torSrc, null);
+
+  // RELAY (iCloud Private Relay etc.)
+  const relaySrc = [];
+  if (ab.is_relay) relaySrc.push("AbstractAPI");
+  if (ipPriv.relay) relaySrc.push("IPinfo");
+  push("RELAY", "#a78bfa", relaySrc, null);
+
+  // HOSTING / DATACENTER
+  const hostSrc = [];
+  if (ab.is_hosting) hostSrc.push("AbstractAPI");
+  if (shTags.includes("cloud") || shTags.includes("hosting")) hostSrc.push("Shodan");
+  if (ipPriv.hosting) hostSrc.push("IPinfo");
+  push("HOSTING", "#9aa5b1", hostSrc, null);
+
+  return rows;
 }
 
 // Leaflet map panel — real OpenStreetMap tiles. Initialised once per IOC
