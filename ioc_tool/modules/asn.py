@@ -1,36 +1,39 @@
-"""ASN enrichment via the free bgpview.io API.
+"""ASN enrichment.
 
-bgpview.io exposes per-ASN metadata (name, description, country, RIR,
-date allocated, prefix counts) and per-prefix data through a no-key
-REST API. We use the ``/asn/{n}`` endpoint to surface the analyst-
-useful summary fields.
+Primary provider: **RIPE Stat** — public, no-auth, no-quota REST API
+maintained by the RIPE NCC. Wider availability than the previous
+bgpview.io path (which Pi-hole / restrictive DNS sometimes blocks
+inside containers).
 
-API: https://api.bgpview.io/asn/{asn_number}
+Endpoint: ``https://stat.ripe.net/data/as-overview/data.json?resource=AS<n>``
+
+We additionally query ``/data/announced-prefixes/data.json`` for the
+list of announced prefixes — useful for analysts who pivot from an ASN
+to its address space (a future "expand to prefix list" UI element will
+consume this).
+
+Returns the analyst-facing summary fields on success, ``None`` on
+miss / network error / unexpected payload. Never raises.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any
 
 import requests
 
-BASE_URL = "https://api.bgpview.io"
+BASE_URL = "https://stat.ripe.net/data"
 TIMEOUT = 15
 
 
-def enrich(value: str) -> dict | None:
-    """Look up an ASN (``AS12345`` form) on bgpview.io.
+def _normalize_asn(value: str) -> str | None:
+    digits = re.sub(r"(?i)^as(n)?", "", value.strip())
+    return digits if digits.isdigit() else None
 
-    Returns the summary fields on success, ``None`` on miss / network
-    error / unexpected payload shape. Never raises.
-    """
-    digits = re.sub(r'(?i)^as(n)?', '', value.strip())
-    if not digits.isdigit():
-        return None
 
+def _fetch(path: str, params: dict) -> dict | None:
     try:
-        response = requests.get(f"{BASE_URL}/asn/{digits}", timeout=TIMEOUT)
+        response = requests.get(f"{BASE_URL}/{path}", params=params, timeout=TIMEOUT)
     except requests.exceptions.RequestException:
         return None
     if response.status_code != 200:
@@ -41,23 +44,44 @@ def enrich(value: str) -> dict | None:
         return None
     if not isinstance(payload, dict) or payload.get("status") != "ok":
         return None
-    data = payload.get("data") or {}
-    if not isinstance(data, dict):
+    data = payload.get("data")
+    return data if isinstance(data, dict) else None
+
+
+def enrich(value: str) -> dict | None:
+    """Look up an ASN on RIPE Stat. Returns analyst-facing summary fields."""
+    digits = _normalize_asn(value)
+    if digits is None:
         return None
 
-    rir = (data.get("rir_allocation") or {})
-    raw_emails: Any = data.get("email_contacts") or []
-    raw_abuse: Any = data.get("abuse_contacts") or []
+    overview = _fetch("as-overview/data.json", {"resource": f"AS{digits}"})
+    if overview is None:
+        return None
+
+    # Optional secondary call for announced prefix count. Failure is
+    # non-fatal — we still return the overview if it landed.
+    prefixes_count: int | None = None
+    pfx = _fetch("announced-prefixes/data.json", {"resource": f"AS{digits}"})
+    if pfx and isinstance(pfx.get("prefixes"), list):
+        prefixes_count = len(pfx["prefixes"])
+
+    holder = overview.get("holder") or ""
     return {
-        "asn": data.get("asn"),
-        "name": data.get("name"),
-        "description_short": data.get("description_short"),
-        "country_code": data.get("country_code"),
-        "rir_name": rir.get("rir_name"),
-        "date_allocated": rir.get("date_allocated"),
-        "website": data.get("website"),
-        "looking_glass": data.get("looking_glass"),
-        "traffic_estimation": data.get("traffic_estimation"),
-        "email_contacts": list(raw_emails) if isinstance(raw_emails, list) else [],
-        "abuse_contacts": list(raw_abuse) if isinstance(raw_abuse, list) else [],
+        "asn": int(digits),
+        "name": holder.split(",")[0] if "," in holder else holder,
+        "description_short": holder,
+        "country_code": (overview.get("resource") or {}) if isinstance(overview.get("resource"), dict) else None,
+        # RIPE Stat overview doesn't include country in this endpoint;
+        # the dashboard's IP-geo block carries it for IP IOCs. Kept the
+        # field for API back-compat with the bgpview shape.
+        "rir_name": "RIPE NCC",
+        "date_allocated": None,
+        "website": None,
+        "looking_glass": overview.get("looking_glass"),
+        "type": overview.get("type"),
+        "is_active": overview.get("announced"),
+        "block_resource": (overview.get("block") or {}).get("resource") if isinstance(overview.get("block"), dict) else None,
+        "block_name": (overview.get("block") or {}).get("name") if isinstance(overview.get("block"), dict) else None,
+        "announced_prefixes_count": prefixes_count,
+        "raw": overview,
     }
