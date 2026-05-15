@@ -19,7 +19,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ### Output formats
 - [x] **STIX 2.1 export** (`--stix`) — hand-rolled bundle with indicator SDOs (stable uuid5 IDs, score-mapped indicator_types, ShadowScope labels)
 - [x] **Markdown report** (`--md`) — case-doc with score banner, per-source table, heuristics block, optional LLM verdict
-- [ ] **PDF report** (`--pdf`) — exec-style with score banner, table, links. **[issue — needs `fpdf2` dependency]**
+- [ ] ~~**PDF report** (`--pdf`)~~ — dropped as not relevant for current users (use `--md` and render to PDF externally if needed).
 
 ### Bulk + I/O
 - [x] **Bulk mode** (`-f iocs.txt`) — parallel fan-out across IOCs via `enrich_many` / `enrich_many_async` (asyncio.gather over per-IOC tasks)
@@ -92,12 +92,12 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 - [x] **Tags + cases** — `shadowscope tag <ioc> --tag=phishing --case=campaign-x --note="ATO landing"`, `shadowscope cases [--case=name]`. New `ioc_tags` table; idempotent under UNIQUE constraint; remove via `--remove`.
 - [x] **Notes per IOC** — `--note` flag on `tag` subcommand upserts on conflict.
-- [ ] **History view** — past queries, score over time, change alerts. **[issue]**
+- [x] **History view** — `shadowscope history <ioc> [--source X]` shows every cached enrichment per source with a Unicode-block sparkline of score progression.
 - [x] **Allowlist** — `ALLOWLIST_CIDRS` + `ALLOWLIST_DOMAINS` env vars short-circuit the enrichment pipeline for org-internal IPs / domains / URLs (subdomain-aware, IPv4+IPv6 CIDR support)
 - [x] **Watch mode** — `shadowscope watch [--case=name] [--threshold=N] [--webhook=URL] [--json]` re-enriches every IOC (or just one case), diffs vs stored `last_score`, emits deltas above the threshold to stdout / webhook. Cron-friendly with `--json` (one event per line).
 - [ ] **Multiple workspaces** — isolate cases / engagements. **[issue]**
-- [ ] **Compare two IOCs** (`shadowscope diff <ioc1> <ioc2>`). **[issue]**
-- [ ] **Risk score history graph** (ASCII / terminal). **[issue]**
+- [x] **Compare two IOCs** — `shadowscope diff <ioc1> <ioc2>` side-by-side module-score table with per-source delta column.
+- [x] **Risk score history graph** — Unicode-block sparkline column inside the `history` subcommand (9-level bucketing, 0-100 → ` ▁▂▃▄▅▆▇█`).
 - [x] **Source agreement matrix** — `consensus_summary()` in output module: counts flagged vs missed across opinion sources (excludes Shodan / IPinfo / crt.sh / Heuristics / Allowlist); 4-tier consensus (high ≥70%, medium ≥40%, low >0, none); surfaces in Markdown reports
 
 ---

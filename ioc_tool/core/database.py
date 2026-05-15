@@ -271,6 +271,27 @@ def add_enrichment(ioc_id, source, data, score):
     conn.commit()
     conn.close()
 
+def get_all_enrichments(ioc_id: int) -> list[dict]:
+    """Return every cached enrichment row for an IOC, oldest first.
+
+    Used by the history view to render a chronological scoreline.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT id, source, score, timestamp, data
+        FROM enrichments
+        WHERE ioc_id = ?
+        ORDER BY timestamp ASC
+        ''',
+        (ioc_id,),
+    )
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
 def get_latest_enrichment(ioc_id, source):
     conn = get_db_connection()
     cursor = conn.cursor()
