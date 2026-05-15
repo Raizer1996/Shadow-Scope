@@ -95,7 +95,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [x] **History view** — `shadowscope history <ioc> [--source X]` shows every cached enrichment per source with a Unicode-block sparkline of score progression.
 - [x] **Allowlist** — `ALLOWLIST_CIDRS` + `ALLOWLIST_DOMAINS` env vars short-circuit the enrichment pipeline for org-internal IPs / domains / URLs (subdomain-aware, IPv4+IPv6 CIDR support)
 - [x] **Watch mode** — `shadowscope watch [--case=name] [--threshold=N] [--webhook=URL] [--json]` re-enriches every IOC (or just one case), diffs vs stored `last_score`, emits deltas above the threshold to stdout / webhook. Cron-friendly with `--json` (one event per line).
-- [ ] **Multiple workspaces** — isolate cases / engagements. **[issue]**
+- [x] **Multiple workspaces** — `--workspace=name` flag (or `SHADOWSCOPE_WORKSPACE` env) routes the SQLite cache + tags + history at `ioc_tool/data/ioc-<name>.db`. Default workspace stays at `ioc.db` for backwards compat. `shadowscope workspaces` lists every DB on disk with row counts.
 - [x] **Compare two IOCs** — `shadowscope diff <ioc1> <ioc2>` side-by-side module-score table with per-source delta column.
 - [x] **Risk score history graph** — Unicode-block sparkline column inside the `history` subcommand (9-level bucketing, 0-100 → ` ▁▂▃▄▅▆▇█`).
 - [x] **Source agreement matrix** — `consensus_summary()` in output module: counts flagged vs missed across opinion sources (excludes Shodan / IPinfo / crt.sh / Heuristics / Allowlist); 4-tier consensus (high ≥70%, medium ≥40%, low >0, none); surfaces in Markdown reports

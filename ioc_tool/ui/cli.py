@@ -1107,6 +1107,43 @@ def handle_diff(args: argparse.Namespace) -> None:
     console.print(t)
 
 
+def handle_workspaces(args: argparse.Namespace) -> None:
+    """List every workspace DB on disk, with row counts + sizes.
+
+    The currently-active workspace is marked with an arrow — useful when
+    analysts forget which `--workspace` they're operating on.
+    """
+    rows = database.list_workspaces()
+    if not rows:
+        console.print("[dim]No workspaces yet — run `shadowscope enrich ...` to create the default.[/dim]")
+        return
+
+    active_path = database.DB_PATH
+    from rich.table import Table
+    t = Table(title="ShadowScope workspaces")
+    t.add_column("Active")
+    t.add_column("Name")
+    t.add_column("IOCs", justify="right")
+    t.add_column("Size (KB)", justify="right")
+    t.add_column("Path")
+    for row in rows:
+        # Count IOCs without disrupting the active DB pointer.
+        path = row['path']
+        count = 0
+        try:
+            import sqlite3 as _sql
+            with _sql.connect(path) as _c:
+                cur = _c.cursor()
+                cur.execute("SELECT COUNT(*) FROM iocs")
+                count = int(cur.fetchone()[0])
+        except Exception:
+            count = 0
+        active = "▸" if path == active_path else ""
+        size_kb = max(1, row['size'] // 1024)
+        t.add_row(active, row['name'], str(count), str(size_kb), path)
+    console.print(t)
+
+
 def handle_watch(args: argparse.Namespace) -> None:
     """Re-enrich a watchlist of IOCs and emit deltas.
 
@@ -1335,6 +1372,12 @@ def build_parser() -> argparse.ArgumentParser:
         help='Append an LLM-generated natural-language verdict (requires local Ollama)',
     )
     parser_arg.add_argument(
+        '--workspace',
+        default=os.getenv('SHADOWSCOPE_WORKSPACE') or None,
+        help='Switch the active SQLite DB (per-project cache + tags + history). '
+             'Falls back to $SHADOWSCOPE_WORKSPACE; unset = the default DB.',
+    )
+    parser_arg.add_argument(
         '--no-cache',
         dest='no_cache',
         action='store_true',
@@ -1463,6 +1506,12 @@ def build_parser() -> argparse.ArgumentParser:
         help='List tags attached to the given IOC',
     )
 
+    # workspaces — list every per-project SQLite DB on disk
+    subparsers.add_parser(
+        'workspaces',
+        help='List every workspace DB on disk (file path, IOC count, size)',
+    )
+
     # cases — list cases or list IOCs for a case
     p_cases = subparsers.add_parser(
         'cases',
@@ -1568,6 +1617,12 @@ def main() -> None:
         parser_arg.print_help()
         return
 
+    # Switch the active DB file BEFORE anything else (banner, init_db,
+    # check_config). All downstream code reads database.DB_PATH at use
+    # time, so this single mutation is enough to route every operation
+    # — cache, tags, watch, history — at the chosen workspace.
+    database.set_workspace(getattr(args, 'workspace', None))
+
     # When the user wants machine-readable output, stdout is reserved
     # for the payload. Skip the banner entirely and send the missing-
     # keys warning to stderr so JSON/CSV pipes stay parse-clean.
@@ -1600,6 +1655,8 @@ def main() -> None:
         handle_history(args)
     elif args.command == 'diff':
         handle_diff(args)
+    elif args.command == 'workspaces':
+        handle_workspaces(args)
     else:
         parser_arg.print_help()
 
