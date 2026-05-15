@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
@@ -55,13 +56,31 @@ from ..modules import (
 )
 from . import database, heuristics, parser, score
 
+# Cache TTL — how long a cached row is considered fresh before we refetch.
+# Defaults to 24 h to match the historical behaviour; can be tuned via the
+# ``CACHE_TTL_HOURS`` env var (float supported for sub-hour increments).
+# Unparseable or non-positive values fall back to 24 h.
+_DEFAULT_CACHE_TTL_HOURS = 24.0
+
+
+def _cache_ttl_hours() -> float:
+    """Resolve the cache TTL in hours from the env, with a 24 h fallback."""
+    raw = os.getenv("CACHE_TTL_HOURS", "").strip()
+    if not raw:
+        return _DEFAULT_CACHE_TTL_HOURS
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_CACHE_TTL_HOURS
+    return value if value > 0 else _DEFAULT_CACHE_TTL_HOURS
+
 # ---------------------------------------------------------------------------
 # Cache freshness
 # ---------------------------------------------------------------------------
 
 
 def should_refresh(timestamp_str: str | None) -> bool:
-    """Return True if the cached row is stale (older than 24 h) or unparseable."""
+    """Return True when the cached row is older than ``CACHE_TTL_HOURS`` or unparseable."""
     if not timestamp_str:
         return True
     try:
@@ -77,7 +96,7 @@ def should_refresh(timestamp_str: str | None) -> bool:
         except Exception:
             return True
 
-    return datetime.now() - last_check > timedelta(hours=24)
+    return datetime.now() - last_check > timedelta(hours=_cache_ttl_hours())
 
 
 # ---------------------------------------------------------------------------
