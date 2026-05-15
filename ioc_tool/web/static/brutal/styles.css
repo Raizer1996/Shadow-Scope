@@ -535,6 +535,119 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .us-scan .us-when { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .us-scan .us-url { word-break: break-all; }
 .us-scan .us-verdict { background: var(--bad); color: var(--bg); padding: 0 4px; font-weight: 800; font-size: 9px; text-align: center; }
+
+/* ============================================================
+   CVE intelligence block (NVD + EPSS + KEV)
+   ============================================================ */
+.cve-block, .crtsh-block {
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  padding: 14px 18px 16px;
+  margin: 12px 0;
+  display: flex; flex-direction: column;
+  gap: 12px;
+}
+.cve-grid, .crtsh-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.cve-card {
+  border: 1px solid var(--line-2);
+  background: var(--bg-3);
+  padding: 10px 12px;
+  display: flex; flex-direction: column;
+  gap: 4px;
+}
+.cve-card .ws-k { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.12em; text-transform: uppercase; }
+.cve-card .ws-v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.cve-card .ws-sub { font-size: 10px; letter-spacing: 0.04em; }
+
+.cve-vector {
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 12px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+}
+.cve-vector .ws-k { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.14em; min-width: 70px; }
+.cve-vector-v { font-size: 11px; font-family: inherit; color: var(--ink); letter-spacing: 0.02em; word-break: break-all; }
+
+.cve-desc {
+  display: flex; gap: 14px;
+  padding: 8px 12px;
+  background: var(--bg-3);
+  border-left: 3px solid var(--accent);
+}
+.cve-desc .ws-k { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.14em; min-width: 90px; padding-top: 3px; }
+.cve-desc p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink); }
+
+.cve-cwes { display: flex; align-items: center; gap: 14px; }
+.cve-cwes .ws-k { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.14em; min-width: 70px; }
+.cve-cwes-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.cwe-chip {
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  padding: 2px 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+}
+.cwe-chip:hover { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+.cve-refs .ws-k { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.14em; }
+.cve-refs-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.cve-ref {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px;
+  align-items: center;
+  text-decoration: none;
+  padding: 4px 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+}
+.cve-ref:hover { border-color: var(--accent); }
+.cve-ref-tag {
+  font-size: 9.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cve-ref-url {
+  font-size: 10.5px;
+  color: var(--accent);
+  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   crt.sh certificate-transparency block
+   ============================================================ */
+.crtsh-issuer-list { display: flex; flex-direction: column; gap: 3px; }
+.crtsh-issuer-row { display: grid; grid-template-columns: 36px 1fr; gap: 8px; font-size: 11px; }
+.ci-count { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 800; text-align: right; }
+.ci-name { color: var(--ink); }
+.crtsh-subs { display: flex; flex-direction: column; gap: 6px; }
+.crtsh-subs .ws-k { font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.14em; }
+.crtsh-sub-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.crtsh-toggle {
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.crtsh-toggle:hover { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 .src-table tr:hover td { background: var(--bg-3); }
 .src-table tr.muted td { opacity: 0.35; }
 .src-name { font-weight: 700; color: var(--ink); }

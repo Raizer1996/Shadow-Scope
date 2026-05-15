@@ -58,13 +58,18 @@ function WhoisTimeline({ ioc, fmt }) {
   const now = new Date();
   const ageDays = Math.max(0, Math.floor((now - created) / 86400000));
 
-  // Build event timeline (newest first, descending by days-ago)
+  // Build event timeline from real WHOIS / agreement / enrichment data.
+  // Decorative "PASSIVE DNS PICKUP" / "NS CHANGE" placeholders from the
+  // mock prototype are removed — they would lie about events we can't
+  // observe. Real change-tracking lands once watch-mode persists deltas.
+  const updated = Array.isArray(whois.updated_date) ? whois.updated_date[0] : whois.updated_date;
+  const expires = Array.isArray(whois.expiration_date) ? whois.expiration_date[0] : whois.expiration_date;
   const events = [
-    { ago: 0,                       label: "ENRICHED",        detail: <Relative iso={ioc.enriched_at} />,                                     glyph: "▶", emphasis: "now",   ts: ioc.enriched_at.slice(0,10) },
-    { ago: 1,                       label: "FIRST FLAGGED",   detail: `${ioc.agreement.sources_flagged}/${ioc.agreement.sources_total} sources · ${ioc.agreement.consensus} consensus`, glyph: "▲", emphasis: "alert", ts: dateAgo(1) },
-    ageDays > 7  ? { ago: Math.floor(ageDays * 0.35), label: "PASSIVE DNS PICKUP",  detail: "first hosting observation", glyph: "◇", emphasis: null,    ts: dateAgo(Math.floor(ageDays * 0.35)) } : null,
-    ageDays > 14 ? { ago: Math.floor(ageDays * 0.7),  label: "NS CHANGE",           detail: "ns1.cloudflare → ns3.suspect.tld", glyph: "◇", emphasis: null,    ts: dateAgo(Math.floor(ageDays * 0.7)) } : null,
-    { ago: ageDays,                 label: "REGISTERED",      detail: whois.registrar || "unknown registrar",                                glyph: "◆", emphasis: ageDays < 30 ? "warn" : null, ts: whois.creation_date }
+    { ago: 0, label: "ENRICHED", detail: <Relative iso={ioc.enriched_at} />, glyph: "▶", emphasis: "now", ts: ioc.enriched_at.slice(0,10) },
+    ioc.agreement.sources_flagged > 0 ? { ago: 1, label: "SOURCES FLAGGED", detail: `${ioc.agreement.sources_flagged}/${ioc.agreement.sources_total} · ${ioc.agreement.consensus} consensus`, glyph: "▲", emphasis: ioc.agreement.consensus === "high" ? "alert" : null, ts: dateAgo(1) } : null,
+    updated ? { ago: Math.floor((now - new Date(updated)) / 86400000), label: "WHOIS UPDATED", detail: "registry record modified", glyph: "◇", emphasis: null, ts: String(updated).slice(0, 10) } : null,
+    { ago: ageDays, label: "REGISTERED", detail: whois.registrar || "unknown registrar", glyph: "◆", emphasis: ageDays < 30 ? "warn" : null, ts: String(whois.creation_date).slice(0, 10) },
+    expires ? { ago: -Math.floor((new Date(expires) - now) / 86400000), label: "EXPIRES", detail: "registration valid until", glyph: "◇", emphasis: null, ts: String(expires).slice(0, 10) } : null,
   ].filter(Boolean);
 
   const nrdRemaining = Math.max(0, 30 - ageDays);
@@ -120,6 +125,177 @@ function WhoisTimeline({ ioc, fmt }) {
           ))}
         </div>
       </div>
+    </section>
+  );
+}
+
+// ─────────── CVE feature block (NVD / EPSS / CISA KEV) ───────────
+//
+// Surfaces the CVE-specific data that the per-source rows can't fit:
+// the description, CVSS vector, CWE list, affected products, and any
+// KEV ransomware flag. Renders only for ioc.type === "cve".
+
+function CveBlock({ ioc }) {
+  if (ioc.type !== "cve") return null;
+  const nvd = ioc.modules.NVD?.data || {};
+  const epss = ioc.modules.EPSS?.data || {};
+  const kev = ioc.modules.KEV?.data || {};
+
+  const desc = ((nvd.descriptions || []).find(d => d.lang === "en") || {}).value || "";
+  const cvssBlock = ((nvd.metrics || {}).cvssMetricV31 || [])[0] || {};
+  const cvss = cvssBlock.cvssData || {};
+  const cwes = (nvd.weaknesses || []).flatMap(w => (w.description || []).map(d => d.value)).filter(v => v.startsWith("CWE-"));
+  const refs = (nvd.references || []).slice(0, 6);
+
+  const epssProb = epss.epss != null ? Math.round(epss.epss * 10000) / 100 : null;
+  const epssPct = epss.percentile != null ? Math.round(epss.percentile * 10000) / 100 : null;
+
+  const ransomware = kev.knownRansomwareCampaignUse === "Known";
+  const inKev = Boolean(kev.cveID || kev.vulnerabilityName);
+
+  if (!desc && !cvss.baseScore && !inKev && epssProb == null) return null;
+
+  return (
+    <section className="cve-block">
+      <div className="sec-head">
+        <span className="sec-title">CVE · INTELLIGENCE</span>
+        <span className="sec-meta">{ioc.ioc} · NVD + EPSS + CISA KEV</span>
+      </div>
+
+      <div className="cve-grid">
+        {cvss.baseScore != null && (
+          <div className="cve-card">
+            <div className="ws-k">CVSS v3.1</div>
+            <div className="ws-v" style={{ color: cvss.baseScore >= 9 ? "var(--bad)" : cvss.baseScore >= 7 ? "var(--high)" : cvss.baseScore >= 4 ? "var(--med)" : "var(--safe)" }}>
+              {cvss.baseScore} <span className="dim">/ 10</span>
+            </div>
+            <div className="ws-sub dim">{cvss.baseSeverity}</div>
+          </div>
+        )}
+        {epssProb != null && (
+          <div className="cve-card">
+            <div className="ws-k">EPSS</div>
+            <div className="ws-v" style={{ color: epssProb >= 50 ? "var(--bad)" : epssProb >= 10 ? "var(--high)" : "var(--ink)" }}>{epssProb}%</div>
+            <div className="ws-sub dim">{epssPct}% percentile</div>
+          </div>
+        )}
+        {inKev && (
+          <div className="cve-card" style={{ borderColor: "var(--bad)" }}>
+            <div className="ws-k">CISA KEV</div>
+            <div className="ws-v" style={{ color: "var(--bad)" }}>LISTED</div>
+            <div className="ws-sub dim">{kev.dateAdded ? `added ${kev.dateAdded}` : ""}</div>
+          </div>
+        )}
+        {ransomware && (
+          <div className="cve-card" style={{ borderColor: "var(--crit)" }}>
+            <div className="ws-k">RANSOMWARE</div>
+            <div className="ws-v" style={{ color: "var(--crit)" }}>KNOWN-USED</div>
+            <div className="ws-sub dim">in ransomware campaigns</div>
+          </div>
+        )}
+      </div>
+
+      {cvss.vectorString && (
+        <div className="cve-vector">
+          <span className="ws-k">VECTOR</span>
+          <code className="cve-vector-v">{cvss.vectorString}</code>
+        </div>
+      )}
+
+      {desc && (
+        <div className="cve-desc">
+          <span className="ws-k">DESCRIPTION</span>
+          <p>{desc}</p>
+        </div>
+      )}
+
+      {cwes.length > 0 && (
+        <div className="cve-cwes">
+          <span className="ws-k">CWE</span>
+          <span className="cve-cwes-list">
+            {cwes.map(cwe => <a key={cwe} href={`https://cwe.mitre.org/data/definitions/${cwe.replace("CWE-","")}.html`} target="_blank" rel="noreferrer" className="cwe-chip">{cwe}</a>)}
+          </span>
+        </div>
+      )}
+
+      {refs.length > 0 && (
+        <div className="cve-refs">
+          <div className="ws-k">REFERENCES · {(nvd.references || []).length}</div>
+          <div className="cve-refs-list">
+            {refs.map((r, i) => {
+              const tags = (r.tags || []).slice(0, 3).join(" · ") || "link";
+              return (
+                <a key={i} href={r.url} target="_blank" rel="noreferrer" className="cve-ref">
+                  <span className="cve-ref-tag">{tags}</span>
+                  <span className="cve-ref-url">{r.url}</span>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─────────── Certificate-transparency subdomain expander (crt.sh) ───────────
+
+function CrtshBlock({ ioc, fmt }) {
+  if (ioc.type !== "domain") return null;
+  const data = ioc.modules["crt.sh"]?.data;
+  if (!data || !data.total) return null;
+
+  const subs = (data.unique_subdomains || []);
+  const issuers = (data.top_issuers || []).slice(0, 5);
+  const mr = data.most_recent || {};
+
+  const [showAll, setShowAll] = React.useState(false);
+  const visible = showAll ? subs : subs.slice(0, 16);
+
+  return (
+    <section className="crtsh-block">
+      <div className="sec-head">
+        <span className="sec-title">CERTIFICATE TRANSPARENCY</span>
+        <span className="sec-meta">{data.total} certificates · {data.subdomain_count} unique subdomains</span>
+        <span className="sec-meta dim">via crt.sh</span>
+      </div>
+
+      <div className="crtsh-grid">
+        {mr.not_before && (
+          <div className="cve-card">
+            <div className="ws-k">MOST RECENT</div>
+            <div className="ws-v">{String(mr.not_before).slice(0, 10)}</div>
+            <div className="ws-sub dim">{(mr.issuer || "").slice(0, 36)}</div>
+          </div>
+        )}
+        {issuers.length > 0 && (
+          <div className="cve-card crtsh-issuers">
+            <div className="ws-k">TOP ISSUERS</div>
+            <div className="crtsh-issuer-list">
+              {issuers.map(i => (
+                <div key={i.issuer} className="crtsh-issuer-row">
+                  <span className="ci-count">{i.count}</span>
+                  <span className="ci-name">{i.issuer.replace(/^.*?CN=/, "").slice(0, 38)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {subs.length > 0 && (
+        <div className="crtsh-subs">
+          <div className="ws-k">SUBDOMAINS · {subs.length} sample of {data.subdomain_count}</div>
+          <div className="crtsh-sub-list">
+            {visible.map(s => <span key={s} className="dr-sub">{fmt(s)}</span>)}
+          </div>
+          {subs.length > 16 && (
+            <button className="crtsh-toggle" onClick={() => setShowAll(s => !s)}>
+              {showAll ? "show fewer" : `show all ${subs.length}`}
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }
