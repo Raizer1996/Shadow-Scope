@@ -19,6 +19,9 @@
   --med:    #fbbf24;
   --high:   #fb923c;
   --crit:   #f43f5e;
+  /* Semantic aliases */
+  --bad:    var(--crit);
+  --warn:   var(--high);
   --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
   --row-h: 30px;
   --row-pad: 12px;
@@ -226,28 +229,28 @@ input, select, textarea { font-family: inherit; color: inherit; }
   border-right: 1px solid var(--line-2);
 }
 .hero-right > :last-child { border-right: none; }
-.hero-right .spider svg { max-width: 100%; max-height: 360px; }
+.hero-right .spider > svg { max-width: 100%; max-height: 360px; }
 
 /* SCORE block + IP CORE share one row inside hero-left.
    SCORE is fixed-natural-width on the left; IP CORE expands to fill
    whatever's free on the right (where there used to be empty space).
    Collapses back to stacked on narrow viewports. */
 .score-stack {
-  display: grid;
-  grid-template-columns: minmax(220px, max-content) minmax(0, 1fr);
-  gap: 12px;
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   align-items: stretch;
 }
-.score-stack > .score-block { min-width: 220px; }
+.score-stack > .score-block { width: 100%; }
 .score-stack > .ip-core-panel {
   border: 1px solid var(--line-2);
   background: var(--bg-2);
   padding: 12px 14px;
+  display: flex; flex-direction: column;
   min-width: 0;
 }
 @media (max-width: 920px) {
-  .score-stack { grid-template-columns: 1fr; }
+  .score-stack { gap: 8px; }
 }
 
 /* Score column wraps to full width on narrow viewports */
@@ -355,7 +358,36 @@ input, select, textarea { font-family: inherit; color: inherit; }
   display: grid;
   grid-template-columns: 220px 1fr;
   gap: 16px;
-  align-items: stretch;
+  align-items: start;
+}
+
+/* IP CORE — sits below the hero-grid row, spanning full hero-left width.
+   Uses an auto-fit grid so country/asn/org/rdns lay out horizontally
+   when there's room and reflow vertically on narrow screens. */
+.hero-left > .ip-core-panel {
+  margin-top: 12px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  padding: 12px 14px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hero-left > .ip-core-panel .ipc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 18px;
+  row-gap: 8px;
+}
+.hero-left > .ip-core-panel .ipc-row {
+  grid-template-columns: 64px 1fr;
+  font-size: 11.5px;
+}
+.hero-left > .ip-core-panel .ipc-ports-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 4px 12px;
 }
 
 /* Brutalist score: huge mono number in a hard box */
@@ -392,7 +424,20 @@ input, select, textarea { font-family: inherit; color: inherit; }
   position: relative;
   overflow: hidden;
 }
-.score-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; }
+.score-bar-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  transition: width 700ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Score reveal — number gets a soft glow + slight scale on switch */
+.score-num-big.is-tweening {
+  text-shadow: 0 0 24px currentColor, 0 0 4px currentColor;
+  animation: ss-score-tween-pulse 700ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes ss-score-tween-pulse {
+  0%   { transform: scale(0.94); letter-spacing: 0.04em; }
+  60%  { transform: scale(1.04); letter-spacing: 0; }
+  100% { transform: scale(1);    letter-spacing: 0; }
+}
 .score-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--bg); opacity: 0.5; }
 .score-tier-banner {
   display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -445,7 +490,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .spider-head { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 4px; border-bottom: 1px dotted var(--line); }
 .spider-title { font-size: 10.5px; letter-spacing: 0.18em; color: var(--ink); font-weight: 700; }
 .spider-meta { font-size: 10px; color: var(--ink-3); letter-spacing: 0.04em; }
-.spider svg { display: block; width: 100%; height: auto; max-width: 460px; max-height: 460px; margin: 0 auto; }
+.spider > svg { display: block; width: 100%; height: auto; max-width: 460px; max-height: 460px; margin: 0 auto; }
 .spider-legend { display: flex; gap: 14px; font-size: 10px; color: var(--ink-3); letter-spacing: 0.08em; padding-top: 4px; border-top: 1px dotted var(--line); }
 .swatch-line { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 4px; }
 
@@ -968,7 +1013,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
 @media (max-width: 1180px) {
   .hero { grid-template-columns: 1fr; }
   .hero-right { border-top: 1px solid var(--line-2); padding: 18px; }
-  .spider svg { max-width: 360px; max-height: 360px; }
+  .spider > svg { max-width: 360px; max-height: 360px; }
 }
 @media (max-width: 760px) {
   .topbar { grid-template-columns: 1fr; height: auto; }
@@ -1431,59 +1476,234 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 
 /* ============================================================
-   Scope-drone mascot — brutalist scanner critter, roams inside
-   the spider panel like a Tamagotchi pet. Absolute-positioned at
-   the bottom of .spider; traverses left↔right on a 10s cycle, bobs
-   on a 1.6s sub-cycle, eye sweeps at 1.8s, LEDs alternate at 1.2s.
+   Claude Crab mascot — clawd-tank style. Locked to the right
+   side of the .spider panel. Square head, 4 peg legs, side
+   claw stubs. State-cycle drives prop swaps + body animations
+   matching the real clawd captures (building/sweeping/typing/
+   juggling/sleeping/confused/idle).
    ============================================================ */
-.spider { position: relative; }
-.scope-drone {
+.spider { position: relative; overflow: hidden; }
+
+/* Registered custom properties so multiple animations can target
+   different sub-transforms simultaneously (CSS can't compose two
+   `transform:` animations on the same element without one stomping
+   the other). Each animation writes a single channel; the actual
+   transform is composed from the channels below. */
+@property --cc-bob   { syntax: "<length>"; initial-value: 0px;   inherits: false; }
+@property --cc-rot   { syntax: "<angle>";  initial-value: 0deg;  inherits: false; }
+@property --cc-ext-x { syntax: "<length>"; initial-value: 0px;   inherits: false; }
+@property --cc-ext-y { syntax: "<length>"; initial-value: 0px;   inherits: false; }
+@property --cc-sy    { syntax: "<number>"; initial-value: 1;     inherits: false; }
+
+.claude-crab-host {
   position: absolute;
-  bottom: 8px;
-  left: 0;
+  right: 8px; top: 12%;
+  width: 140px; height: 132px;
   pointer-events: auto;
-  filter: drop-shadow(0 0 4px rgba(255, 107, 53, 0.45));
-  animation:
-    ss-drone-roam 10s ease-in-out infinite,
-    ss-drone-bob 1.6s ease-in-out infinite;
-  z-index: 2;
   cursor: help;
+  z-index: 3;
+  /* Slow perimeter walk — linear timing so the path reads as steady
+     motion, not stop-start. Simple closed loop. */
+  animation: cc-host-roam 22s linear infinite;
 }
-.scope-drone svg { display: block; }
-.sd-eye { animation: ss-drone-scan 1.8s cubic-bezier(.5,.0,.5,1) infinite alternate; }
-.sd-led-a { animation: ss-drone-led 1.2s ease-in-out infinite; }
-.sd-led-b { animation: ss-drone-led 1.2s 0.6s ease-in-out infinite; }
+@keyframes cc-host-roam {
+  0%   { transform: translate(0px,    0px); }
+  25%  { transform: translate(-20px, 60px); }
+  50%  { transform: translate(-60px,100px); }
+  75%  { transform: translate(-40px, 20px); }
+  100% { transform: translate(0px,    0px); }
+}
 
-/* Idle hop — slight vertical bob */
-@keyframes ss-drone-bob {
+/* Base body bob — gentle 1.4s ease wave. Writes to --cc-bob only. */
+.cc-sprite {
+  display: block;
+  position: absolute; inset: 0;
+  transform:
+    translate(var(--cc-ext-x), calc(var(--cc-bob) + var(--cc-ext-y)))
+    rotate(var(--cc-rot))
+    scaleY(var(--cc-sy));
+  animation: cc-bob 1.4s ease-in-out infinite;
+}
+@keyframes cc-bob {
+  0%, 100% { --cc-bob: 0px; }
+  50%      { --cc-bob: -3px; }
+}
+
+/* Shadow synced to the body bob — 1.4s, same easing, opposite phase
+   (tightens when body lifts). */
+.cc-shadow {
+  position: absolute;
+  left: 24px; bottom: -2px;
+  width: 92px; height: 6px;
+  background: rgba(0,0,0,0.55);
+  border-radius: 50%;
+  filter: blur(2px);
+  animation: cc-shadow-pulse 1.4s ease-in-out infinite;
+}
+@keyframes cc-shadow-pulse {
+  0%, 100% { opacity: 0.6;  transform: scaleX(1);    }
+  50%      { opacity: 0.3;  transform: scaleX(0.78); }
+}
+
+.claude-crab-host svg {
+  display: block;
+  image-rendering: pixelated;
+}
+.cc-sprite svg { filter: drop-shadow(0 2px 0 rgba(0,0,0,0.5)); }
+
+/* Thought bubble — fades in for ~5s of every 5.4s cycle */
+.cc-thought {
+  position: absolute;
+  left: 80px; top: -34px;
+  width: 44px; height: 40px;
+  pointer-events: none;
+  animation: cc-thought-pulse 5.4s ease-in-out infinite;
+  filter: drop-shadow(0 1px 0 rgba(0,0,0,0.45));
+}
+@keyframes cc-thought-pulse {
+  0%   { opacity: 0;   transform: translateY(3px)  scale(0.85); }
+  10%  { opacity: 1;   transform: translateY(0)    scale(1);    }
+  88%  { opacity: 1;   transform: translateY(-1px) scale(1);    }
+  100% { opacity: 0;   transform: translateY(-4px) scale(0.85); }
+}
+
+/* ── Props ──────────────────────────────────────────────── */
+.cc-prop {
+  position: absolute;
+  filter: drop-shadow(0 2px 0 rgba(0,0,0,0.5));
+  pointer-events: none;
+}
+.cc-prop svg { display: block; image-rendering: pixelated; }
+.cc-prop-hammer {
+  left: 70px; top: -50px;
+  animation: cc-prop-hammer-swing 0.9s ease-in-out infinite;
+  transform-origin: 30px 100%;
+}
+@keyframes cc-prop-hammer-swing {
+  0%, 100% { transform: rotate(-18deg); }
+  50%      { transform: rotate(36deg); }
+}
+.cc-prop-broom {
+  left: 90px; top: 50px;
+  animation: cc-prop-broom-sweep 1.2s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+@keyframes cc-prop-broom-sweep {
+  0%, 100% { transform: rotate(10deg)  translateX(0); }
+  50%      { transform: rotate(-6deg) translateX(-6px); }
+}
+.cc-prop-laptop {
+  left: 10px; top: 56px;
+  z-index: 2;
+  animation: cc-prop-laptop-blink 1.4s steps(1, end) infinite;
+}
+@keyframes cc-prop-laptop-blink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0.88; }
+}
+.cc-prop-balls { left: -10px; top: -90px; }
+.cc-ball-a { animation: cc-ball-arc 1.5s ease-in-out infinite; }
+.cc-ball-b { animation: cc-ball-arc 1.5s -0.5s ease-in-out infinite; }
+.cc-ball-c { animation: cc-ball-arc 1.5s -1.0s ease-in-out infinite; }
+@keyframes cc-ball-arc {
+  0%, 100% { transform: translateY(0);    }
+  50%      { transform: translateY(-6px); }
+}
+
+/* ── Leg shuffle ─────────────────────────────────────────── */
+/* Two-phase walk: outer legs (1,4) step opposite to inner legs (2,3).
+   Each leg has a transform composed of a base offset (kept planted /
+   lifted via --cc-leg-y) PLUS a tiny micro-shift for personality.
+   Faster than the bob (0.5s vs 1.4s) so feet patter while the body
+   wave is slow — reads as scuttling, not lockstep. */
+.cc-leg-1, .cc-leg-4 { animation: cc-leg-up 0.5s ease-in-out infinite; }
+.cc-leg-2, .cc-leg-3 { animation: cc-leg-up 0.5s -0.25s ease-in-out infinite; }
+@keyframes cc-leg-up {
   0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-2px); }
+  50%      { transform: translateY(-1px); }
 }
 
-/* Lateral roam — walk left↔right across the spider panel.
-   Stretches calc(100% - 44px) ≈ accounts for drone width. */
-@keyframes ss-drone-roam {
-  0%   { left: 0; transform: scaleX(1); }
-  8%   { transform: scaleX(1); }
-  10%  { transform: scaleX(-1); }   /* flip to face right */
-  45%  { left: calc(100% - 44px); transform: scaleX(-1); }
-  55%  { transform: scaleX(-1); }
-  57%  { transform: scaleX(1); }    /* flip to face left */
-  92%  { left: 0; transform: scaleX(1); }
-  100% { left: 0; transform: scaleX(1); }
+/* ── Eye blink ───────────────────────────────────────────── */
+/* 4.5s cycle with the blink window held 200 ms — long enough to read,
+   short enough to feel involuntary. Uses scaleY squash via fill-box. */
+.cc-eye {
+  animation: cc-eye-blink 4.5s steps(1, end) infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@keyframes cc-eye-blink {
+  0%, 92%, 100% { transform: scaleY(1);   }
+  93%, 97%      { transform: scaleY(0.1); }
 }
 
-/* Eye scan — translateX within the eye track, colour shifts at midpoint */
-@keyframes ss-drone-scan {
-  0%   { transform: translateX(0);  fill: var(--accent); }
-  45%  { transform: translateX(10px); }
-  50%  { fill: var(--bad); }
-  55%  { transform: translateX(10px); }
-  100% { transform: translateX(0);  fill: var(--accent); }
+/* Sleep "Z" pips on the body — hidden by default; only shown in sleep */
+.cc-zz { opacity: 0; }
+
+/* ── Per-state overrides ─────────────────────────────────── */
+/* All state animations write to a DIFFERENT channel from cc-bob, so
+   they layer on top of the base body wave instead of clobbering it. */
+
+/* Sleeping — pause legs, squash body, eyes shut, Zz pips fade */
+.cc-state-sleeping .cc-sprite { animation: cc-bob 1.4s ease-in-out infinite, cc-sleep-squash 3.6s ease-in-out infinite; }
+.cc-state-sleeping .cc-leg-1, .cc-state-sleeping .cc-leg-2,
+.cc-state-sleeping .cc-leg-3, .cc-state-sleeping .cc-leg-4 { animation-play-state: paused; }
+.cc-state-sleeping .cc-eye    { animation: none; transform: scaleY(0.1); }
+.cc-state-sleeping .cc-zz     { animation: cc-zz-fade 2s ease-in-out infinite; }
+.cc-state-sleeping .cc-zz-2   { animation-delay: 1s; }
+@keyframes cc-sleep-squash {
+  0%, 100% { --cc-ext-y: 0px;  --cc-sy: 1;    }
+  50%      { --cc-ext-y: 4px;  --cc-sy: 0.88; }
 }
-@keyframes ss-drone-led {
-  0%, 100% { opacity: 0.35; }
-  50%      { opacity: 1; }
+@keyframes cc-zz-fade {
+  0%, 70%, 100% { opacity: 0; }
+  35%           { opacity: 0.9; }
+}
+
+/* Confused — rocks side-to-side. Layers a rotation on top of the bob. */
+.cc-state-confused .cc-sprite { animation: cc-bob 1.4s ease-in-out infinite, cc-confused-rock 0.8s ease-in-out infinite; }
+@keyframes cc-confused-rock {
+  0%, 100% { --cc-rot: 0deg;  --cc-ext-y: 0px; }
+  25%      { --cc-rot: -4deg; --cc-ext-y: -2px; }
+  75%      { --cc-rot: 4deg;  --cc-ext-y: -2px; }
+}
+
+/* Wizard — extra hop. Adds -4px to ext-y on top of base bob. */
+.cc-state-wizard .cc-sprite { animation: cc-bob 1.4s ease-in-out infinite, cc-wizard-hop 1.4s ease-in-out infinite; }
+@keyframes cc-wizard-hop {
+  0%, 100% { --cc-ext-y: 0px; }
+  50%      { --cc-ext-y: -4px; }
+}
+
+/* Juggling — slow horizontal sway following the balls */
+.cc-state-juggling .cc-sprite { animation: cc-bob 1.4s ease-in-out infinite, cc-juggle-sway 1.5s ease-in-out infinite; }
+@keyframes cc-juggle-sway {
+  0%, 100% { --cc-ext-x: 0px;  }
+  25%      { --cc-ext-x: -2px; }
+  75%      { --cc-ext-x: 2px;  }
+}
+
+/* Sweeping — slight forward tilt, pushed left-then-right */
+.cc-state-sweeping .cc-sprite { animation: cc-bob 1.4s ease-in-out infinite, cc-sweep-tilt 1.2s ease-in-out infinite; }
+@keyframes cc-sweep-tilt {
+  0%, 100% { --cc-rot: 0deg;  --cc-ext-x: 0px;  }
+  50%      { --cc-rot: -3deg; --cc-ext-x: -2px; }
+}
+
+/* Typing / Building — faster leg shuffle for "busy" feel.
+   Targets cc-leg-up via animation-duration override; safe because
+   the override only changes timing, not the keyframes. */
+.cc-state-typing   .cc-leg-1, .cc-state-typing   .cc-leg-2,
+.cc-state-typing   .cc-leg-3, .cc-state-typing   .cc-leg-4,
+.cc-state-building .cc-leg-1, .cc-state-building .cc-leg-2,
+.cc-state-building .cc-leg-3, .cc-state-building .cc-leg-4 { animation-duration: 0.32s; }
+
+/* Debugger — eyes scan side to side instead of straight blinks */
+.cc-state-debugger .cc-eye { animation: cc-eye-dart 1.6s steps(1, end) infinite; transform-origin: center; transform-box: fill-box; }
+@keyframes cc-eye-dart {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(0.3px); }
+  50%      { transform: translateX(-0.3px); }
+  75%      { transform: translateX(0.3px); }
 }
 
 /* Apply glitch to ALL section titles. Existing rules expect data-text
@@ -1491,15 +1711,145 @@ input, select, textarea { font-family: inherit; color: inherit; }
    sec-title. We keep .spider-title and .ipc-title under glitch too. */
 .sec-title.glitch, .spider-title.glitch, .ipc-title.glitch, .ngp-title.glitch { display: inline-block; }
 
-/* Make the spider chart itself pulse subtly — radius scales 100%–104%
-   on a 6s ease-in-out so the chart appears "live". */
-.spider svg {
-  animation: ss-spider-breathe 6s ease-in-out infinite;
-  transform-origin: center;
-}
+/* ============================================================
+   Spider chart — breathing + glitch + threshold pulse.
+   Breathe and flicker are layered as separate animations on the
+   same element (see combined rule near the bottom of the glitch
+   block — the filter animation steps over the drop-shadow during
+   glitch frames, which is intentional).
+   ============================================================ */
 @keyframes ss-spider-breathe {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
-  50%      { transform: scale(1.025); filter: drop-shadow(0 0 8px rgba(255,107,53,0.18)); }
+  0%, 100% { transform: scale(1);     }
+  50%      { transform: scale(1.018); }
+}
+/* ============================================================
+   Spider chart glitch — multi-channel chroma aberration + faster
+   cycle + scanline drift. Triggers a quick CRT-corruption burst
+   every 4.5s; between bursts the chart sits clean.
+   ============================================================ */
+.spider-score-poly {
+  animation: ss-spider-glitch 4.5s steps(1, end) infinite;
+  transform-origin: center;
+  transform-box: view-box;
+}
+@keyframes ss-spider-glitch {
+  0%, 82%, 100% { transform: translate(0,0)    skewX(0);    opacity: 1;   }
+  84%           { transform: translate(3px,0)  skewX(-8deg); opacity: 0.55; }
+  86%           { transform: translate(-2px,0) skewX(6deg);  opacity: 0.85; }
+  88%           { transform: translate(2px,1px) skewX(0);    opacity: 0.4;  }
+  90%           { transform: translate(0,0)    skewX(0);    opacity: 1;    }
+  93%, 95%      { transform: translate(0,0)    skewX(0);    opacity: 1;    }
+  94%           { transform: translate(1px,-1px) skewX(-3deg); opacity: 0.7; }
+}
+.spider-score-poly-ghost {
+  animation: ss-spider-glitch-ghost 4.5s steps(1, end) infinite;
+  transform-origin: center;
+  transform-box: view-box;
+}
+@keyframes ss-spider-glitch-ghost {
+  0%, 82%, 100% { transform: translate(0,0);    opacity: 0; }
+  84%           { transform: translate(-4px,0); opacity: 0.7; }
+  86%           { transform: translate(3px,1px); opacity: 0.5; }
+  88%           { transform: translate(-2px,-1px); opacity: 0.55; }
+  90%           { transform: translate(0,0);    opacity: 0; }
+}
+/* Cyan channel — offset left during glitch */
+.spider-score-poly-cyan {
+  animation: ss-spider-cyan 4.5s steps(1, end) infinite;
+  transform-origin: center;
+  transform-box: view-box;
+}
+@keyframes ss-spider-cyan {
+  0%, 82%, 100% { transform: translate(0,0);    stroke-opacity: 0; }
+  84%           { transform: translate(-5px,0); stroke-opacity: 0.75; }
+  86%           { transform: translate(-3px,0); stroke-opacity: 0.55; }
+  88%           { transform: translate(-4px,1px); stroke-opacity: 0.4; }
+  90%           { transform: translate(0,0);    stroke-opacity: 0; }
+}
+/* Magenta channel — offset right during glitch */
+.spider-score-poly-magenta {
+  animation: ss-spider-magenta 4.5s steps(1, end) infinite;
+  transform-origin: center;
+  transform-box: view-box;
+}
+@keyframes ss-spider-magenta {
+  0%, 82%, 100% { transform: translate(0,0);    stroke-opacity: 0; }
+  84%           { transform: translate(5px,0);  stroke-opacity: 0.75; }
+  86%           { transform: translate(3px,0);  stroke-opacity: 0.55; }
+  88%           { transform: translate(4px,-1px); stroke-opacity: 0.4; }
+  90%           { transform: translate(0,0);    stroke-opacity: 0; }
+}
+/* Scanlines — drift down the chart on a 9s loop, flash brighter during
+   glitch bursts */
+.spider-scanlines {
+  animation: ss-scanline-drift 9s linear infinite, ss-scanline-flash 4.5s steps(1, end) infinite;
+  transform-origin: center;
+  transform-box: view-box;
+  mix-blend-mode: screen;
+}
+@keyframes ss-scanline-drift {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(4px); }
+}
+@keyframes ss-scanline-flash {
+  0%, 82%, 100% { opacity: 1; }
+  84%, 86%      { opacity: 2; }
+  88%           { opacity: 0.6; }
+  90%           { opacity: 1; }
+}
+/* Whole-svg flicker — brief filter pulse on the glitch burst,
+   layered with the existing breathing animation */
+.spider > svg {
+  animation:
+    ss-spider-breathe 6s ease-in-out infinite,
+    ss-spider-svg-flicker 4.5s steps(1, end) infinite;
+}
+@keyframes ss-spider-svg-flicker {
+  0%, 83%, 100% { filter: none; }
+  84%, 85%      { filter: brightness(1.4) contrast(1.2) hue-rotate(-5deg); }
+  86%, 87%      { filter: brightness(0.8) contrast(0.85); }
+  88%           { filter: brightness(1.2) contrast(1.1); }
+  89%           { filter: none; }
+}
+/* Critical threshold ring breathes red */
+.spider-thresh-crit {
+  animation: ss-thresh-pulse 3.4s ease-in-out infinite;
+}
+@keyframes ss-thresh-pulse {
+  0%, 100% { stroke-opacity: 0.4; }
+  50%      { stroke-opacity: 0.85; }
+}
+/* Radar sweep — rotates around chart center, painting the polygon
+   region with a soft accent wedge. */
+.spider-sweep {
+  animation: ss-sweep-rotate 6s linear infinite;
+  pointer-events: none;
+}
+@keyframes ss-sweep-rotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+/* Outer scope brackets — faint pulse with the breathe cycle */
+.spider-brackets {
+  animation: ss-brackets-pulse 6s ease-in-out infinite;
+}
+@keyframes ss-brackets-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+/* Center glyph rotates slowly — like a compass dial. The outer wrap
+   handles translate; the inner .spider-glyph rotates around (0,0) in
+   its local frame, which is the chart center. */
+.spider-glyph {
+  animation: ss-glyph-spin 28s linear infinite;
+  transform-origin: 0 0;
+  opacity: 0.55;
+}
+.spider-svg.type-cve .spider-glyph { animation-duration: 0s; }
+.spider-svg.type-hash .spider-glyph { animation-duration: 0s; }
+@keyframes ss-glyph-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 

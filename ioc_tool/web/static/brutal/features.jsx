@@ -1088,7 +1088,8 @@ function BootScreen({ onDone }) {
   );
 }
 
-window.GeoShodanPanel = GeoShodanPanel;
+window.IpCorePanel = IpCorePanel;
+window.NetworkGeoPanel = NetworkGeoPanel;
 window.FlagStrip = FlagStrip;
 window.Explain = Explain;
 window.BootScreen = BootScreen;

@@ -1,6 +1,40 @@
 // Brutalist — Enrich view with big mono score block, MITRE strip, WHOIS timeline,
 // pivot panel, drill chips, and inline source toggle.
 
+// Counter-up hook — animates a number from its previous value to
+// `target` over `dur` ms when target changes. Used for the giant
+// score reveal so switching IOCs feels earned. Uses requestAnimationFrame.
+function useCounter(target, dur = 700) {
+  const [val, setVal] = React.useState(target);
+  const prev = React.useRef(target);
+  const raf = React.useRef(0);
+  React.useEffect(() => {
+    const start = performance.now();
+    const from = prev.current;
+    const to = target;
+    cancelAnimationFrame(raf.current);
+    const tick = (t) => {
+      const k = Math.min(1, (t - start) / dur);
+      // easeOutQuart
+      const eased = 1 - Math.pow(1 - k, 4);
+      setVal(Math.round(from + (to - from) * eased));
+      if (k < 1) raf.current = requestAnimationFrame(tick);
+      else prev.current = to;
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [target, dur]);
+  return val;
+}
+
+// Crab event bus — UI components fire `cc:state` events with a state
+// label; ClaudeCrab listens and overrides its random cycle for ~3s
+// before falling back to the cycle. This wires the mascot to real
+// activity instead of a dumb timer.
+const fireCrabState = (label) => {
+  try { window.dispatchEvent(new CustomEvent("cc:state", { detail: label })); } catch {}
+};
+
 function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, setDisabledSources, onPivot }) {
   if (!ioc) return null;
 
@@ -17,6 +51,21 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
   const sev = sevOf(adjustedScore);
   const symbolicFlags = window.IOC_FLAGS(ioc);
   const hasGeo = !!(ioc.geo || window.SHODAN_DATA[ioc.id]);
+
+  // Animated score — counts up from previous IOC's score on each switch
+  const animatedScore = useCounter(adjustedScore, 700);
+
+  // Wire crab to real activity:
+  //   IOC switch    → 'debugger' (eyes scan)
+  //   disable src   → 'confused' (rocks)
+  //   re-enable all → 'happy' / 'building'
+  React.useEffect(() => { fireCrabState("debugger"); }, [ioc.id]);
+  const prevDisabled = React.useRef(disabledSources.size);
+  React.useEffect(() => {
+    if (disabledSources.size > prevDisabled.current) fireCrabState("confused");
+    else if (disabledSources.size === 0 && prevDisabled.current > 0) fireCrabState("building");
+    prevDisabled.current = disabledSources.size;
+  }, [disabledSources]);
 
   const toggleSource = (name) => {
     const next = new Set(disabledSources);
@@ -53,16 +102,19 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
           {symbolicFlags.length > 0 && <FlagStrip ioc={ioc} />}
 
           <div className="hero-grid">
-            {/* Brutalist score block + IP CORE stacked below */}
             <div className="score-stack">
               <div className="score-block" style={{ borderColor: sev.fg }}>
                 <div className="score-top">
                   <span>SCORE / 100</span>
                   <span className="dim">{ioc.type}</span>
                 </div>
-                <div className="score-num-big" style={{ color: sev.fg }}>{String(adjustedScore).padStart(2, "0")}</div>
+                <div
+                  className={`score-num-big ${animatedScore !== adjustedScore ? "is-tweening" : ""}`}
+                  style={{ color: sev.fg }}
+                  data-score={adjustedScore}
+                >{String(animatedScore).padStart(2, "0")}</div>
                 <div className="score-bar">
-                  <div className="score-bar-fill" style={{ width: `${adjustedScore}%`, background: sev.fg }} />
+                  <div className="score-bar-fill" style={{ width: `${animatedScore}%`, background: sev.fg }} />
                   <span className="score-tick" style={{ left: "20%" }} />
                   <span className="score-tick" style={{ left: "40%" }} />
                   <span className="score-tick" style={{ left: "60%" }} />
@@ -79,8 +131,6 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
                   </div>
                 )}
               </div>
-
-              {hasGeo && <IpCorePanel ioc={ioc} fmt={fmt} />}
             </div>
 
             <div className="hero-meta">
@@ -113,6 +163,8 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
               </div>
             </div>
           </div>
+
+          {hasGeo && <IpCorePanel ioc={ioc} fmt={fmt} />}
         </div>
 
         <HeroSplitter />
@@ -177,36 +229,233 @@ const _SPIDER_RELEVANT_BY_TYPE = {
 };
 
 
-// Pixel mascot — brutalist scanner drone. Idle bob + scanning eye +
-// LED indicators. SVG inline so the CSS keyframes drive the
-// animation; no external assets, no JS update loop.
-function ScopeDrone() {
+// Pixel mascot — Claude Crab in the clawd-tank style.
+// Locked to the upper-right of the .spider panel. Square head, 4
+// peg legs, side claw stubs. Cycles through clawd-tank states each
+// with its own prop + body animation: idle, debugger, typing,
+// building, sweeping, wizard, beacon, sleeping, confused, juggling.
+// A horizontal sway (cc-sway) gives the impression of motion without
+// the crab actually leaving its parking spot.
+const CRAB_STATES = [
+  { label: "thinking", glyph: "?",  desc: "reasoning"             },
+  { label: "debugger", glyph: "/",  desc: "Read · Grep · Glob"    },
+  { label: "typing",   glyph: "✎",  desc: "Edit · Write",   prop: "laptop"   },
+  { label: "building", glyph: "$",  desc: "Bash",            prop: "hammer"   },
+  { label: "sweeping", glyph: "≋",  desc: "PreCompact",      prop: "broom"    },
+  { label: "wizard",   glyph: "✦",  desc: "WebSearch · WebFetch" },
+  { label: "beacon",   glyph: "⌁",  desc: "MCP · LSP"            },
+  { label: "juggling", glyph: "◌",  desc: "subagents",       prop: "balls"    },
+  { label: "confused", glyph: "!?", desc: "no input · 60s"       },
+  { label: "sleeping", glyph: "z",  desc: "no sessions"          },
+];
+
+// Props that sit beside the crab — rendered as small inline SVGs at
+// fixed positions relative to the host. Each lives in its own slot
+// so it can animate independently of the body.
+function CrabProp({ kind }) {
+  // Inline-style fills below — Dark Reader can't easily override
+  // styles set as React `style={{ fill: ... }}` once a darkreader-lock
+  // meta tag is present, so the dark visuals stay intact.
+  const fillInk = { fill: "#1a1a1a" };
+  const fillAccent = { fill: "var(--accent)" };
+  switch (kind) {
+    case "hammer":
+      // Hammer being swung in the right claw. Handle is 1 pixel wide.
+      return (
+        <span className="cc-prop cc-prop-hammer">
+          <svg viewBox="0 0 7 9" width="70" height="90" shapeRendering="crispEdges">
+            <rect x="2" y="3" width="1" height="6" style={fillInk} />
+            <rect x="1" y="1" width="3" height="2" style={{ fill: "#9aa3ad" }} />
+            <rect x="0" y="0" width="5" height="3" style={{ fill: "#b8c1cc" }} />
+            <rect x="0" y="0" width="5" height="1" style={{ fill: "#dde3eb" }} />
+          </svg>
+        </span>
+      );
+    case "broom":
+      // Yellow broom being pushed along the ground.
+      return (
+        <span className="cc-prop cc-prop-broom">
+          <svg viewBox="0 0 5 9" width="50" height="90" shapeRendering="crispEdges">
+            <rect x="2" y="0" width="1" height="6" style={{ fill: "#8c5a2a" }} />
+            <rect x="0" y="6" width="5" height="2" style={{ fill: "#f4c447" }} />
+            <rect x="0" y="8" width="1" height="1" style={{ fill: "#c8970f" }} />
+            <rect x="2" y="8" width="1" height="1" style={{ fill: "#c8970f" }} />
+            <rect x="4" y="8" width="1" height="1" style={{ fill: "#c8970f" }} />
+          </svg>
+        </span>
+      );
+    case "laptop":
+      // Tiny pixel laptop with a glowing blue screen.
+      return (
+        <span className="cc-prop cc-prop-laptop">
+          <svg viewBox="0 0 12 7" width="120" height="70" shapeRendering="crispEdges">
+            <rect x="1" y="0" width="10" height="5" style={{ fill: "#3a4554" }} />
+            <rect x="2" y="1" width="8"  height="3" style={{ fill: "#5a7ea8" }} />
+            <rect x="5" y="2" width="2"  height="1" style={{ fill: "#dde9f5" }} />
+            <rect x="0" y="5" width="12" height="1" style={{ fill: "#2a3340" }} />
+            <rect x="0" y="6" width="12" height="1" style={{ fill: "#1a2028" }} />
+          </svg>
+        </span>
+      );
+    case "balls":
+      // Three small juggling balls floating above the crab.
+      return (
+        <span className="cc-prop cc-prop-balls">
+          <svg viewBox="0 0 16 10" width="160" height="100" shapeRendering="crispEdges">
+            <rect className="cc-ball cc-ball-a" x="2"  y="0" width="2" height="2" style={fillAccent} />
+            <rect className="cc-ball cc-ball-b" x="7"  y="2" width="2" height="2" style={fillAccent} />
+            <rect className="cc-ball cc-ball-c" x="12" y="0" width="2" height="2" style={fillAccent} />
+          </svg>
+        </span>
+      );
+    default:
+      return null;
+  }
+}
+
+function ClaudeCrab() {
+  const [stateIdx, setStateIdx] = React.useState(0);
+  // Override label — set briefly by external events ("debugger" when
+  // user switches IOCs, "confused" when sources change, etc).
+  // null = follow the random cycle; otherwise stick on this label.
+  const [override, setOverride] = React.useState(null);
+
+  React.useEffect(() => {
+    const t = setInterval(() => setStateIdx(i => (i + 1) % CRAB_STATES.length), 5400);
+    return () => clearInterval(t);
+  }, []);
+
+  React.useEffect(() => {
+    let clearTimer;
+    const onState = (e) => {
+      setOverride(e.detail);
+      clearTimeout(clearTimer);
+      clearTimer = setTimeout(() => setOverride(null), 2800);
+    };
+    window.addEventListener("cc:state", onState);
+    return () => {
+      window.removeEventListener("cc:state", onState);
+      clearTimeout(clearTimer);
+    };
+  }, []);
+
+  const state = override
+    ? (CRAB_STATES.find(s => s.label === override) || CRAB_STATES[stateIdx])
+    : CRAB_STATES[stateIdx];
+
   return (
-    <span className="scope-drone" title="scope-drone idle · scanning sources" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="28" height="28" shapeRendering="crispEdges">
-        {/* antenna */}
-        <rect x="11" y="1" width="2" height="2" fill="var(--accent)" />
-        <rect x="11" y="3" width="2" height="2" fill="var(--ink-2)" />
-        {/* body shell */}
-        <rect x="4"  y="5"  width="16" height="14" fill="#1a1a1a" stroke="#3a3a3a" />
-        <rect x="5"  y="6"  width="14" height="3"  fill="#2a2a2a" />
-        {/* scanning eye track */}
-        <rect x="5"  y="9"  width="14" height="4"  fill="#0a0a0a" />
-        <rect className="sd-eye" x="6" y="9" width="3" height="4" fill="var(--accent)" />
-        {/* mouth grille */}
-        <rect x="6"  y="14" width="2" height="1" fill="#3a3a3a" />
-        <rect x="9"  y="14" width="2" height="1" fill="#3a3a3a" />
-        <rect x="12" y="14" width="2" height="1" fill="#3a3a3a" />
-        <rect x="15" y="14" width="2" height="1" fill="#3a3a3a" />
-        {/* LED indicators */}
-        <rect className="sd-led sd-led-a" x="6"  y="16" width="2" height="2" fill="var(--safe)" />
-        <rect className="sd-led sd-led-b" x="16" y="16" width="2" height="2" fill="var(--bad)" />
-        {/* legs / mount */}
-        <rect x="6"  y="19" width="2" height="3" fill="#2a2a2a" />
-        <rect x="16" y="19" width="2" height="3" fill="#2a2a2a" />
-      </svg>
+    <span
+      className={`claude-crab-host cc-state-${state.label}`}
+      aria-hidden="true"
+      title={`clawd · ${state.label} (${state.desc})`}
+    >
+      <span className="cc-shadow" />
+      {state.prop && <CrabProp kind={state.prop} />}
+      {!state.prop && (
+        <span className={`cc-thought cc-thought-${state.label}`}>
+          <svg viewBox="0 0 12 11" width="44" height="40" shapeRendering="crispEdges">
+            {/* Cloud body — chunky pixel bubble; inline-style fills survive Dark Reader */}
+            <rect x="2" y="0" width="8"  height="1" style={{ fill: "#e8e8e8" }} />
+            <rect x="1" y="1" width="10" height="5" style={{ fill: "#e8e8e8" }} />
+            <rect x="2" y="6" width="8"  height="1" style={{ fill: "#e8e8e8" }} />
+            <rect x="3" y="8" width="2"  height="1" style={{ fill: "#e8e8e8" }} />
+            <rect x="5" y="10" width="1" height="1" style={{ fill: "#e8e8e8" }} />
+            <text
+              x="6" y="5"
+              textAnchor="middle"
+              fontFamily="JetBrains Mono"
+              fontSize={state.glyph.length > 1 ? 4.2 : 5.2}
+              fontWeight="800"
+              style={{ fill: "#0a0a0a" }}
+            >{state.glyph}</text>
+          </svg>
+        </span>
+      )}
+      <span className="cc-sprite">
+        <svg viewBox="0 0 14 12" width="140" height="120" shapeRendering="crispEdges">
+          {/* Square head — rows 0..4 */}
+          <rect x="2" y="0" width="10" height="5" style={{ fill: "var(--accent)" }} />
+          {/* Side claw stubs — rows 3..4 */}
+          <rect x="0"  y="3" width="2" height="2" style={{ fill: "var(--accent)" }} />
+          <rect x="12" y="3" width="2" height="2" style={{ fill: "var(--accent)" }} />
+          {/* Eyes — two black squares (inline style survives Dark Reader) */}
+          <rect className="cc-eye cc-eye-l" x="4" y="2" width="1" height="1" style={{ fill: "#0a0a0a" }} />
+          <rect className="cc-eye cc-eye-r" x="9" y="2" width="1" height="1" style={{ fill: "#0a0a0a" }} />
+          {/* Sleep-mouth — drawn only when sleeping; small M curve */}
+          <rect className="cc-zz cc-zz-1" x="5" y="3" width="1" height="1" style={{ fill: "#0a0a0a" }} />
+          <rect className="cc-zz cc-zz-2" x="8" y="3" width="1" height="1" style={{ fill: "#0a0a0a" }} />
+          {/* Body middle — rows 5..7 */}
+          <rect x="2" y="5" width="10" height="3" style={{ fill: "var(--accent)" }} />
+          {/* Four peg legs — 2 on each side of center */}
+          <rect className="cc-leg cc-leg-1" x="3"  y="8" width="1" height="4" style={{ fill: "var(--accent)" }} />
+          <rect className="cc-leg cc-leg-2" x="5"  y="8" width="1" height="4" style={{ fill: "var(--accent)" }} />
+          <rect className="cc-leg cc-leg-3" x="8"  y="8" width="1" height="4" style={{ fill: "var(--accent)" }} />
+          <rect className="cc-leg cc-leg-4" x="10" y="8" width="1" height="4" style={{ fill: "var(--accent)" }} />
+        </svg>
+      </span>
     </span>
   );
+}
+
+// Decorative type-glyph that sits at the spider chart center.
+// Stylised so each IOC family has a distinct visual signature.
+function SpiderTypeGlyph({ type, sev }) {
+  const fg = sev?.fg || "var(--accent)";
+  const cx = 140, cy = 132;
+  const g = (children) => (
+    <g className="spider-glyph-wrap" transform={`translate(${cx} ${cy})`}>
+      <g className="spider-glyph">{children}</g>
+    </g>
+  );
+  switch (type) {
+    case "ip":
+      return g(
+        <>
+          <circle r="14" fill="none" stroke={fg} strokeWidth="0.6" strokeDasharray="2 3" opacity="0.5" />
+          <circle r="9"  fill="none" stroke={fg} strokeWidth="0.6" strokeDasharray="1 2" opacity="0.7" />
+          <circle r="3"  fill={fg} opacity="0.85" />
+          <line x1="-16" y1="0" x2="16" y2="0" stroke={fg} strokeWidth="0.5" opacity="0.35" />
+          <line x1="0" y1="-16" x2="0" y2="16" stroke={fg} strokeWidth="0.5" opacity="0.35" />
+        </>
+      );
+    case "domain":
+      return g(
+        <>
+          <polygon points="0,-14 12,0 0,14 -12,0" fill="none" stroke={fg} strokeWidth="0.7" opacity="0.6" />
+          <polygon points="0,-7 6,0 0,7 -6,0" fill={fg} opacity="0.85" />
+          <text textAnchor="middle" y="2.5" fill="#0a0a0a" fontSize="6" fontWeight="800" fontFamily="JetBrains Mono">.</text>
+        </>
+      );
+    case "url":
+      return g(
+        <>
+          <rect x="-13" y="-5" width="26" height="10" rx="5" fill="none" stroke={fg} strokeWidth="0.7" opacity="0.6" />
+          <circle cx="-7" cy="0" r="2" fill={fg} opacity="0.85" />
+          <line x1="-3" y1="0" x2="11" y2="0" stroke={fg} strokeWidth="0.6" opacity="0.5" />
+          <line x1="-3" y1="-2" x2="6" y2="-2" stroke={fg} strokeWidth="0.4" opacity="0.3" />
+        </>
+      );
+    case "hash":
+      return g(
+        <>
+          <line x1="-5" y1="-14" x2="-5" y2="14" stroke={fg} strokeWidth="1" opacity="0.7" />
+          <line x1="5"  y1="-14" x2="5"  y2="14" stroke={fg} strokeWidth="1" opacity="0.7" />
+          <line x1="-14" y1="-5" x2="14" y2="-5" stroke={fg} strokeWidth="1" opacity="0.7" />
+          <line x1="-14" y1="5"  x2="14" y2="5"  stroke={fg} strokeWidth="1" opacity="0.7" />
+          <text textAnchor="middle" y="2" fill={fg} fontSize="6" fontWeight="800" fontFamily="JetBrains Mono" opacity="0.6">SHA</text>
+        </>
+      );
+    case "cve":
+      return g(
+        <>
+          <polygon points="0,-14 13,9 -13,9" fill="none" stroke={fg} strokeWidth="0.8" opacity="0.65" />
+          <line x1="0" y1="-5" x2="0" y2="4" stroke={fg} strokeWidth="1.4" />
+          <circle cx="0" cy="7" r="1.1" fill={fg} />
+        </>
+      );
+    default:
+      return g(<circle r="3" fill={fg} opacity="0.6" />);
+  }
 }
 
 
@@ -241,40 +490,160 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
     <div className="spider">
       <div className="spider-head">
         <span className="spider-title glitch" data-text="SOURCE PROFILE">SOURCE PROFILE</span>
-        <span className="spider-meta">{N} axes · radius = score</span>
+        <span className="spider-meta">{N} axes · radius = score · type {ioc.type}</span>
       </div>
-      <svg viewBox="0 0 280 280" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 280 280" preserveAspectRatio="xMidYMid meet" className={`spider-svg type-${ioc.type}`}>
+        <defs>
+          {/* Subtle radial glow under the polygon */}
+          <radialGradient id={`spider-glow-${ioc.id || "x"}`} cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor={sev.fg} stopOpacity="0.18" />
+            <stop offset="70%" stopColor={sev.fg} stopOpacity="0.02" />
+            <stop offset="100%" stopColor={sev.fg} stopOpacity="0" />
+          </radialGradient>
+          {/* Radar sweep wedge — rotates around the chart center */}
+          <radialGradient id={`spider-sweep-${ioc.id || "x"}`} cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stopColor={sev.fg} stopOpacity="0.0" />
+            <stop offset="60%"  stopColor={sev.fg} stopOpacity="0.08" />
+            <stop offset="100%" stopColor={sev.fg} stopOpacity="0.22" />
+          </radialGradient>
+          {/* Diagonal hatch pattern for the outer ring */}
+          <pattern id={`spider-hatch-${ioc.id || "x"}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="#2a2a2a" strokeWidth="0.7" />
+          </pattern>
+          {/* Scanline pattern — horizontal flicker lines */}
+          <pattern id={`spider-scanlines-${ioc.id || "x"}`} width="4" height="4" patternUnits="userSpaceOnUse">
+            <rect x="0" y="0" width="4" height="1" fill="#ffffff" fillOpacity="0.025" />
+          </pattern>
+        </defs>
+
+        {/* Scope corner brackets — 4 L-shaped brackets framing the chart */}
+        <g className="spider-brackets" stroke="#3a3a3a" strokeWidth="1.5" fill="none">
+          <path d="M 22 22 L 22 36 M 22 22 L 36 22" />
+          <path d="M 258 22 L 258 36 M 258 22 L 244 22" />
+          <path d="M 22 242 L 22 228 M 22 242 L 36 242" />
+          <path d="M 258 242 L 258 228 M 258 242 L 244 242" />
+        </g>
+
+        {/* Outer ring filled with subtle hatch */}
+        <polygon
+          points={entries.map((_, i) => { const p = point(i, 1.0); return `${p.x},${p.y}`; }).join(" ")}
+          fill={`url(#spider-hatch-${ioc.id || "x"})`}
+          fillOpacity="0.18"
+          stroke="none"
+        />
+
+        {/* Radar sweep — rotating wedge that paints the polygon area */}
+        <g className="spider-sweep" style={{ transformOrigin: `${cx}px ${cy}px` }}>
+          <path
+            d={`M ${cx} ${cy} L ${cx + R + 16} ${cy} A ${R + 16} ${R + 16} 0 0 1 ${cx + (R + 16) * Math.cos(Math.PI / 3.5)} ${cy + (R + 16) * Math.sin(Math.PI / 3.5)} Z`}
+            fill={`url(#spider-sweep-${ioc.id || "x"})`}
+          />
+        </g>
+
+        {/* Background type glyph at center */}
+        <SpiderTypeGlyph type={ioc.type} sev={sev} />
+
         {rings.map(r => (
           <polygon key={r.frac}
             points={entries.map((_, i) => { const p = point(i, r.frac); return `${p.x},${p.y}`; }).join(" ")}
             fill="none"
             stroke={r.frac === 1 ? "#3a3a3a" : "#202020"}
-            strokeWidth="1"
+            strokeWidth={r.frac === 1 ? 1.2 : 1}
           />
         ))}
+
+        {/* Tick marks at each axis × ring intersection */}
+        {entries.flatMap((_, i) =>
+          [0.2, 0.4, 0.6, 0.8, 1.0].map(frac => {
+            const a = angle(i);
+            const inner = point(i, frac - 0.018);
+            const outer = point(i, frac + 0.018);
+            return (
+              <line key={`tk-${i}-${frac}`}
+                x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y}
+                stroke="#3a3a3a" strokeWidth="1.2"
+              />
+            );
+          })
+        )}
+
+        {/* Threshold rings */}
         <polygon
           points={entries.map((_, i) => { const p = point(i, 0.6); return `${p.x},${p.y}`; }).join(" ")}
           fill="none" stroke="#fb923c" strokeOpacity="0.35" strokeWidth="1" strokeDasharray="3 4"
         />
         <polygon
+          className="spider-thresh-crit"
           points={entries.map((_, i) => { const p = point(i, 0.8); return `${p.x},${p.y}`; }).join(" ")}
-          fill="none" stroke="#f43f5e" strokeOpacity="0.4" strokeWidth="1" strokeDasharray="3 4"
+          fill="none" stroke="#f43f5e" strokeOpacity="0.55" strokeWidth="1" strokeDasharray="3 4"
         />
         {[20, 40, 60, 80, 100].map((label, i) => (
-          <text key={label} x={cx + 3} y={cy - R * (label/100) + 3} fill="#3a3a3a" fontFamily="JetBrains Mono" fontSize="8">{label}</text>
+          <text key={label} x={cx + 4} y={cy - R * (label/100) + 3} fill="#4a4a4a" fontFamily="JetBrains Mono" fontSize="7.5" letterSpacing="0.05em">{label}</text>
         ))}
         {entries.map(([name], i) => {
           const end = point(i, 1);
-          return <line key={"a"+i} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="#222" strokeWidth="1" />;
+          return <line key={"a"+i} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="#2a2a2a" strokeWidth="1" />;
         })}
-        <polygon points={polyPoints} fill={sev.fg} fillOpacity="0.18" stroke={sev.fg} strokeWidth="1.5" strokeLinejoin="miter" />
+        {/* Center crosshair pip */}
+        <circle cx={cx} cy={cy} r="1.6" fill="#3a3a3a" />
+        <circle cx={cx} cy={cy} r="3.5" fill="none" stroke="#2a2a2a" strokeWidth="0.6" />
+        {/* Score polygon with glow under — main draw layer */}
+        <polygon
+          className="spider-score-poly"
+          points={polyPoints}
+          fill={`url(#spider-glow-${ioc.id || "x"})`}
+          stroke={sev.fg}
+          strokeWidth="1.5"
+          strokeLinejoin="miter"
+        />
+        {/* Chromatic-aberration ghosts — cyan and magenta channels
+            offset during glitch frames for CRT/data-corruption feel */}
+        <polygon
+          className="spider-score-poly-cyan"
+          points={polyPoints}
+          fill="none"
+          stroke="#3df6ff"
+          strokeOpacity="0.0"
+          strokeWidth="1.2"
+          strokeLinejoin="miter"
+        />
+        <polygon
+          className="spider-score-poly-magenta"
+          points={polyPoints}
+          fill="none"
+          stroke="#ff3da7"
+          strokeOpacity="0.0"
+          strokeWidth="1.2"
+          strokeLinejoin="miter"
+        />
+        {/* Glitch ghost — same polygon, slight offset, low opacity */}
+        <polygon
+          className="spider-score-poly-ghost"
+          points={polyPoints}
+          fill="none"
+          stroke={sev.fg}
+          strokeOpacity="0.4"
+          strokeWidth="1"
+          strokeLinejoin="miter"
+        />
+        {/* Scanline overlay — horizontal lines drift down the chart */}
+        <rect className="spider-scanlines" x="20" y="20" width="240" height="240" fill={`url(#spider-scanlines-${ioc.id || "x"})`} pointerEvents="none" />
         {entries.map(([name, m], i) => {
           const off = disabledSources.has(name);
           const frac = off ? 0.015 : Math.max(0.015, m.score / 100);
           const p = point(i, frac);
           const s = sevOf(m.score);
+          const crit = !off && m.score >= 80;
           return (
-            <rect key={"v"+i} x={p.x - 3} y={p.y - 3} width="6" height="6" fill="#0a0a0a" stroke={off ? "var(--line-2)" : s.fg} strokeWidth="1.5" />
+            <g key={"v"+i}>
+              {crit && (
+                <circle cx={p.x} cy={p.y} r="7" fill="none" stroke={s.fg} strokeWidth="0.6" opacity="0.4">
+                  <animate attributeName="r" values="4;9;4" dur="2.2s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.65;0;0.65" dur="2.2s" repeatCount="indefinite" />
+                </circle>
+              )}
+              <rect x={p.x - 3} y={p.y - 3} width="6" height="6" fill="#0a0a0a" stroke={off ? "var(--line-2)" : s.fg} strokeWidth="1.5" />
+            </g>
           );
         })}
         {entries.map(([name, m], i) => {
@@ -299,7 +668,8 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
         <span><span className="swatch-line" style={{background: "#fb923c"}}/> threshold 60</span>
         <span><span className="swatch-line" style={{background: "#f43f5e"}}/> threshold 80</span>
       </div>
-      <ScopeDrone />
+      {/* Pixel-art Claude Crab — lives in the panel, roams outside the web */}
+      <ClaudeCrab />
     </div>
   );
 }
