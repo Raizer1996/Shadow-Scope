@@ -699,3 +699,42 @@ def test_enrich_ioc_swallows_source_exceptions(monkeypatch, tmp_path):
     # Crashed source omitted, but the orchestrator returned cleanly.
     assert "VirusTotal" not in result["modules"]
     assert result["final_score"] == 0
+
+
+def test_enrich_injects_nrd_heuristic_for_fresh_domain(monkeypatch, tmp_path):
+    """Domain enrichment surfaces a Heuristics.nrd entry when WHOIS is fresh."""
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    from ioc_tool.core import database as _db
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
+    _db.init_db()
+
+    _stub_all_network(monkeypatch)
+
+    fresh = _dt.now() - _td(days=3)
+    from ioc_tool.modules import whois_mod as _whois
+    monkeypatch.setattr(
+        _whois, "get_whois_data",
+        lambda v: {"creation_date": fresh, "domain_name": v},
+    )
+
+    result = _enrich_mod.enrich_ioc("just-registered.example", "domain")
+    assert "Heuristics" in result["modules"]
+    nrd = result["modules"]["Heuristics"]["data"]["nrd"]
+    assert nrd["bucket"] == "fresh"
+    assert nrd["score"] == 95
+    # Composite must include heuristic score
+    assert result["final_score"] > 0
+
+
+def test_enrich_skips_heuristics_when_no_whois(monkeypatch, tmp_path):
+    """No WHOIS creation_date → no Heuristics module entry (silent skip)."""
+    from ioc_tool.core import database as _db
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
+    _db.init_db()
+
+    _stub_all_network(monkeypatch)  # WHOIS already stubbed to return None
+
+    result = _enrich_mod.enrich_ioc("example.com", "domain")
+    assert "Heuristics" not in result["modules"]
