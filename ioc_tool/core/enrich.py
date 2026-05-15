@@ -39,7 +39,9 @@ from typing import Any
 
 from ..modules import (
     abuseipdb,
+    crtsh,
     epss,
+    feodo,
     greynoise,
     ip_quality_score,
     ipinfo_mod,
@@ -48,6 +50,7 @@ from ..modules import (
     nvd,
     otx,
     shodan_mod,
+    sslbl,
     threatfox,
     tor,
     urlhaus,
@@ -385,6 +388,30 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             _run_source, ioc_id, 'malwarebazaar', 'MalwareBazaar',
             lambda: malwarebazaar.enrich_hash(value),
             score.calculate_malwarebazaar_score,
+        ))
+
+    # --- abuse.ch Feodo Tracker — IP only (botnet C2 blocklist) ---
+    if ioc_type == 'ip':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'feodo', 'Feodo',
+            lambda: feodo.enrich_ip(value),
+            score.calculate_feodo_score,
+        ))
+
+    # --- abuse.ch SSL Blacklist — hash only (SHA-1 cert fingerprints) ---
+    if ioc_type == 'hash':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'sslbl', 'SSLBL',
+            lambda: sslbl.enrich_hash(value),
+            score.calculate_sslbl_score,
+        ))
+
+    # --- crt.sh certificate transparency — domain only ---
+    if ioc_type == 'domain':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'crtsh', 'crt.sh',
+            lambda: crtsh.enrich_domain(value),
+            score.calculate_crtsh_score,
         ))
 
     # --- WHOIS — domain only (datetime serialisation hook) ---
