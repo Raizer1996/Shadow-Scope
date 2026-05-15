@@ -447,7 +447,7 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
     {"id": "OTX",           "env": "OTX_API_KEY",               "types": ["ip", "domain", "url", "hash"]},
     {"id": "URLscan",       "env": "URLSCAN_API_KEY",           "types": ["ip", "domain", "url"]},
     {"id": "Pulsedive",     "env": "PULSEDIVE_API_KEY",         "types": ["ip", "domain", "url"], "anonymous_ok": True},
-    {"id": "AbstractAPI",   "env": "ABSTRACT_API_KEY",          "types": ["ip"]},
+    {"id": "AbstractAPI",   "env": "ABSTRACT_IP_INTELLIGENCE",  "types": ["ip"]},
     {"id": "URLhaus",       "env": None,                        "types": ["url", "domain", "ip"]},
     {"id": "ThreatFox",     "env": None,                        "types": ["ip", "domain", "url", "hash"]},
     {"id": "MalwareBazaar", "env": None,                        "types": ["hash"]},
