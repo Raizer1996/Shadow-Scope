@@ -109,6 +109,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .src-dot.deg  { background: var(--med); }
 .src-dot.down { background: var(--crit); }
 .src-dot.nokey { background: var(--dim); }
+.src-dot.anon { background: var(--accent); opacity: 0.7; }
 
 /* ─── Input bar ─── */
 .inputbar {

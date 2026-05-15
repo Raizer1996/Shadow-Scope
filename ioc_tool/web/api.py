@@ -421,6 +421,83 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
     return shaped
 
 
+_SOURCE_REGISTRY: list[dict[str, Any]] = [
+    # (id, env var or None for no-auth, IOC types it covers)
+    {"id": "VirusTotal",    "env": "VT_API_KEY",                "types": ["ip", "domain", "url", "hash"]},
+    {"id": "AbuseIPDB",     "env": "ABUSEIPDB_API_KEY",         "types": ["ip"]},
+    {"id": "Shodan",        "env": "SHODAN_API_KEY",            "types": ["ip"]},
+    {"id": "IPQS",          "env": "IPQS_API_KEY",              "types": ["ip"]},
+    {"id": "IPinfo",        "env": "IPINFO_API_KEY",            "types": ["ip"],            "anonymous_ok": True},
+    {"id": "GreyNoise",     "env": "GREYNOISE_API_KEY",         "types": ["ip"]},
+    {"id": "OTX",           "env": "OTX_API_KEY",               "types": ["ip", "domain", "url", "hash"]},
+    {"id": "URLscan",       "env": "URLSCAN_API_KEY",           "types": ["ip", "domain", "url"]},
+    {"id": "Pulsedive",     "env": "PULSEDIVE_API_KEY",         "types": ["ip", "domain", "url"], "anonymous_ok": True},
+    {"id": "URLhaus",       "env": None,                        "types": ["url", "domain", "ip"]},
+    {"id": "ThreatFox",     "env": None,                        "types": ["ip", "domain", "url", "hash"]},
+    {"id": "MalwareBazaar", "env": None,                        "types": ["hash"]},
+    {"id": "Feodo",         "env": None,                        "types": ["ip"]},
+    {"id": "SSLBL",         "env": None,                        "types": ["hash"]},
+    {"id": "WHOIS",         "env": None,                        "types": ["domain"]},
+    {"id": "crt.sh",        "env": None,                        "types": ["domain"]},
+    {"id": "Tor",           "env": None,                        "types": ["ip"]},
+    {"id": "NVD",           "env": None,                        "types": ["cve"]},
+    {"id": "EPSS",          "env": None,                        "types": ["cve"]},
+    {"id": "KEV",           "env": None,                        "types": ["cve"]},
+    {"id": "ASN",           "env": None,                        "types": ["asn"]},
+    {"id": "Heuristics",    "env": None,                        "types": ["domain"], "local": True},
+]
+
+
+@app.get("/api/ui/sources", dependencies=[Depends(require_token)])
+def ui_sources() -> dict[str, Any]:
+    """Real-time source status — drives the dashboard's OPS / Sources panel.
+
+    Reports per-source: key state (present / missing / anonymous / local /
+    none-required), supported IOC types, and human-readable status that
+    the UI colour-codes.
+
+    Status semantics:
+      ``ok``        — key present (or none required) and module installed
+      ``anonymous`` — works without a key but a key would unlock more
+      ``no_key``    — key required but not present in env
+      ``local``     — runs locally, no upstream HTTP at all
+    """
+    sources: list[dict[str, Any]] = []
+    for src in _SOURCE_REGISTRY:
+        env_name = src.get("env")
+        if src.get("local"):
+            status = "local"
+            key = "local"
+        elif env_name is None:
+            status = "anonymous"
+            key = "none-required"
+        elif os.getenv(env_name, "").strip():
+            status = "ok"
+            key = "present"
+        elif src.get("anonymous_ok"):
+            status = "anonymous"
+            key = "anonymous"
+        else:
+            status = "no_key"
+            key = "missing"
+
+        sources.append({
+            "id": src["id"],
+            "status": status,
+            "key": key,
+            "env": env_name,
+            "ioc_types": src["types"],
+        })
+
+    return {
+        "sources": sources,
+        "total": len(sources),
+        "ok": sum(1 for s in sources if s["status"] in ("ok", "local")),
+        "anonymous": sum(1 for s in sources if s["status"] == "anonymous"),
+        "no_key": sum(1 for s in sources if s["status"] == "no_key"),
+    }
+
+
 @app.get("/api/ui/enrich", dependencies=[Depends(require_token)])
 async def ui_enrich(
     ioc: str = Query(..., description="IOC value (auto-detected, refanged)"),
