@@ -13,6 +13,17 @@ env/
 venv/
 .venv/
 
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Threat-feed caches (auto-refreshed; not source-controlled)
+ioc_tool/data/feodo_blocklist.json
+ioc_tool/data/sslbl_blacklist.json
+ioc_tool/data/tor_nodes.txt
+
 # IDEs
 .vscode/
 .idea/

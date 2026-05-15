@@ -134,8 +134,8 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ## v1.0 — Packaging & Distribution
 
-- [ ] **PyPI package** — `pip install shadowscope` + `shadowscope` entry point. **[issue]**
-- [ ] **pipx install** docs. **[issue]**
+- [x] **PyPI package** — `pyproject.toml` ships a buildable wheel via `setuptools.build_meta`: dependencies pinned (`requests`, `rich`, `python-dotenv`, `python-whois`, `fastapi`, `uvicorn[standard]`), optional `dev` extras, package-data carries `web/static/*` and `data/*.json`, console_scripts entry `shadowscope = ioc_tool.main:main`. Verified locally: 100 KB wheel, 24 modules, entry point + static files included. Upload to PyPI is a separate `twine upload` step.
+- [ ] **pipx install** docs — straightforward once on PyPI: `pipx install shadowscope`.
 <!-- Moved to Done 2026-05-14 — Docker image (multi-stage python:3.12-slim, non-root, healthcheck) -->
 <!-- Moved to Done 2026-05-14 — Docker Compose stack (Redis backend deferred — single-container SQLite is sufficient for current scale) -->
 - [ ] **Kubernetes Helm chart**. **[issue]**
