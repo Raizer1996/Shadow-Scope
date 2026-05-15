@@ -94,7 +94,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [x] **Notes per IOC** — `--note` flag on `tag` subcommand upserts on conflict.
 - [ ] **History view** — past queries, score over time, change alerts. **[issue]**
 - [x] **Allowlist** — `ALLOWLIST_CIDRS` + `ALLOWLIST_DOMAINS` env vars short-circuit the enrichment pipeline for org-internal IPs / domains / URLs (subdomain-aware, IPv4+IPv6 CIDR support)
-- [ ] **Watch mode** — re-enrich daily, alert on score change > threshold. **[issue]**
+- [x] **Watch mode** — `shadowscope watch [--case=name] [--threshold=N] [--webhook=URL] [--json]` re-enriches every IOC (or just one case), diffs vs stored `last_score`, emits deltas above the threshold to stdout / webhook. Cron-friendly with `--json` (one event per line).
 - [ ] **Multiple workspaces** — isolate cases / engagements. **[issue]**
 - [ ] **Compare two IOCs** (`shadowscope diff <ioc1> <ioc2>`). **[issue]**
 - [ ] **Risk score history graph** (ASCII / terminal). **[issue]**

@@ -30,6 +30,7 @@ Public surface:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 from collections.abc import Callable
@@ -523,6 +524,11 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             scores.append(composite)
 
     final_score = score.calculate_final_risk(scores)
+    # Stamp the latest composite onto the iocs row — drives watch-mode
+    # delta detection. Cheap UPDATE, fire-and-forget; failures are ignored
+    # by the database layer so this never blocks a return.
+    with contextlib.suppress(Exception):
+        database.update_last_score(ioc_id, final_score)
     return {
         'ioc': value,
         'type': ioc_type,

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import sqlite3
@@ -31,9 +32,13 @@ def init_db():
             type TEXT NOT NULL,
             first_seen TIMESTAMP,
             last_seen TIMESTAMP,
-            tags TEXT
+            tags TEXT,
+            last_score INTEGER
         )
     ''')
+    # Migration for pre-watch-mode DBs that already exist without the column.
+    with contextlib.suppress(sqlite3.OperationalError):
+        cursor.execute('ALTER TABLE iocs ADD COLUMN last_score INTEGER')
 
     # Table: enrichments
     cursor.execute('''
@@ -167,6 +172,39 @@ def list_tags() -> list[dict]:
         ORDER BY ioc_count DESC, tag ASC
         '''
     )
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def update_last_score(ioc_id: int, score: int) -> None:
+    """Persist the latest composite score on the iocs row. Drives watch-mode diffing."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE iocs SET last_score = ? WHERE id = ?', (int(score), ioc_id))
+    conn.commit()
+    conn.close()
+
+
+def list_iocs(case: str | None = None) -> list[dict]:
+    """Return every IOC, optionally filtered to a single case."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if case:
+        cursor.execute(
+            '''
+            SELECT DISTINCT i.id, i.value, i.type, i.last_score, i.last_seen
+            FROM iocs i
+            JOIN ioc_tags t ON t.ioc_id = i.id
+            WHERE t.case_name = ?
+            ORDER BY i.last_seen DESC
+            ''',
+            (case,),
+        )
+    else:
+        cursor.execute(
+            'SELECT id, value, type, last_score, last_seen FROM iocs ORDER BY last_seen DESC'
+        )
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
