@@ -987,6 +987,126 @@ def handle_cases(args: argparse.Namespace) -> None:
     console.print(t)
 
 
+_SPARK_CHARS = " ▁▂▃▄▅▆▇█"
+
+
+def _sparkline(values: list[int]) -> str:
+    """ASCII sparkline of a 0-100 series. Empty input → empty string.
+
+    Each value maps to one of 9 Unicode block characters, picked by which
+    8th of the 0-100 range the value lands in. Stable bucketing — same
+    series always renders the same way.
+    """
+    if not values:
+        return ""
+    out = []
+    for v in values:
+        idx = max(0, min(8, int(round(v / 100 * 8))))
+        out.append(_SPARK_CHARS[idx])
+    return "".join(out)
+
+
+def handle_history(args: argparse.Namespace) -> None:
+    """Show every cached enrichment for an IOC + per-source score sparklines.
+
+    Layout:
+      - header banner with IOC + type
+      - one row per source: source | latest score | sparkline | last seen
+      - bottom row: composite trend across all sources combined chronologically
+    """
+    database.init_db()
+    ioc_id = database.get_ioc_id(args.ioc)
+    if ioc_id is None:
+        console.print(f"[yellow]IOC {args.ioc} not in cache. Run `shadowscope enrich {args.ioc}` first.[/yellow]")
+        return
+
+    rows = database.get_all_enrichments(ioc_id)
+    if args.source:
+        rows = [r for r in rows if r.get('source', '').lower() == args.source.lower()]
+    if not rows:
+        console.print(f"[dim]No enrichment history for {args.ioc}[/dim]")
+        return
+
+    # Group by source, preserving chronological order within each.
+    by_source: dict[str, list[dict]] = {}
+    for row in rows:
+        by_source.setdefault(row['source'], []).append(row)
+
+    from rich.table import Table
+    t = Table(title=f"Enrichment history — {args.ioc}")
+    t.add_column("Source")
+    t.add_column("Latest", justify="right")
+    t.add_column("Samples", justify="right")
+    t.add_column("Sparkline")
+    t.add_column("First seen")
+    t.add_column("Last seen")
+    for source, entries in sorted(by_source.items()):
+        scores = [int(e.get('score') or 0) for e in entries]
+        t.add_row(
+            source,
+            str(scores[-1]) if scores else "",
+            str(len(entries)),
+            _sparkline(scores),
+            str(entries[0].get('timestamp') or ''),
+            str(entries[-1].get('timestamp') or ''),
+        )
+    console.print(t)
+
+
+def handle_diff(args: argparse.Namespace) -> None:
+    """Side-by-side comparison of two IOCs' module scores.
+
+    Shows every source that has data for either IOC; rows where both have
+    a score get a delta column. Useful for asking "are these two IOCs
+    behaving similarly?" — overlap on URLhaus + ThreatFox + Pulsedive
+    suggests shared infrastructure.
+    """
+    database.init_db()
+    id_a = database.get_ioc_id(args.ioc_a)
+    id_b = database.get_ioc_id(args.ioc_b)
+    if id_a is None:
+        console.print(f"[yellow]{args.ioc_a} not in cache — run enrich first[/yellow]")
+        return
+    if id_b is None:
+        console.print(f"[yellow]{args.ioc_b} not in cache — run enrich first[/yellow]")
+        return
+
+    def _latest_by_source(ioc_id: int) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for row in database.get_all_enrichments(ioc_id):
+            out[row['source']] = int(row.get('score') or 0)
+        return out
+
+    a = _latest_by_source(id_a)
+    b = _latest_by_source(id_b)
+    sources = sorted(set(a) | set(b))
+    if not sources:
+        console.print("[dim]Neither IOC has cached enrichments yet.[/dim]")
+        return
+
+    from rich.table import Table
+    t = Table(title=f"Diff: {args.ioc_a}  vs  {args.ioc_b}")
+    t.add_column("Source")
+    t.add_column(args.ioc_a, justify="right")
+    t.add_column(args.ioc_b, justify="right")
+    t.add_column("Δ", justify="right")
+    for source in sources:
+        sa = a.get(source)
+        sb = b.get(source)
+        if sa is None and sb is None:
+            continue
+        sa_str = "" if sa is None else str(sa)
+        sb_str = "" if sb is None else str(sb)
+        if sa is not None and sb is not None:
+            delta = sb - sa
+            sign = "+" if delta > 0 else ""
+            delta_str = f"{sign}{delta}"
+        else:
+            delta_str = "—"
+        t.add_row(source, sa_str, sb_str, delta_str)
+    console.print(t)
+
+
 def handle_watch(args: argparse.Namespace) -> None:
     """Re-enrich a watchlist of IOCs and emit deltas.
 
@@ -1354,6 +1474,26 @@ def build_parser() -> argparse.ArgumentParser:
         help='List IOCs in this case (default: list all cases)',
     )
 
+    # history — show all past enrichments for an IOC, with ASCII sparkline
+    p_history = subparsers.add_parser(
+        'history',
+        help='Show chronological enrichment history for an IOC',
+    )
+    p_history.add_argument('ioc', help='IOC value to look up')
+    p_history.add_argument(
+        '--source',
+        default=None,
+        help='Restrict history to a single source (e.g. VirusTotal)',
+    )
+
+    # diff — side-by-side compare two IOCs' module scores
+    p_diff = subparsers.add_parser(
+        'diff',
+        help='Compare two IOCs side-by-side across every cached source',
+    )
+    p_diff.add_argument('ioc_a', help='First IOC')
+    p_diff.add_argument('ioc_b', help='Second IOC')
+
     # watch — re-enrich a set of cached IOCs and emit deltas
     p_watch = subparsers.add_parser(
         'watch',
@@ -1456,6 +1596,10 @@ def main() -> None:
         handle_cases(args)
     elif args.command == 'watch':
         handle_watch(args)
+    elif args.command == 'history':
+        handle_history(args)
+    elif args.command == 'diff':
+        handle_diff(args)
     else:
         parser_arg.print_help()
 
