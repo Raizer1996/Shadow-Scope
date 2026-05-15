@@ -17,9 +17,9 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ## v0.3 — Output + Bulk (analyst usability)
 
 ### Output formats
-- [ ] **STIX 2.1 export** (`--stix`) for threat-intel sharing. **[issue]**
-- [ ] **Markdown report** (`--md`) for case documentation. **[issue]**
-- [ ] **PDF report** (`--pdf`) — exec-style with score banner, table, links. **[issue]**
+- [x] **STIX 2.1 export** (`--stix`) — hand-rolled bundle with indicator SDOs (stable uuid5 IDs, score-mapped indicator_types, ShadowScope labels)
+- [x] **Markdown report** (`--md`) — case-doc with score banner, per-source table, heuristics block, optional LLM verdict
+- [ ] **PDF report** (`--pdf`) — exec-style with score banner, table, links. **[issue — needs `fpdf2` dependency]**
 
 ### Bulk + I/O
 - [ ] **Bulk mode** (`-f iocs.txt`) — one IOC per line, parallel enrich, combined report. **[issue]**
