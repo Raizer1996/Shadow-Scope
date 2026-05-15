@@ -228,12 +228,26 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .hero-right > :last-child { border-right: none; }
 .hero-right .spider svg { max-width: 100%; max-height: 360px; }
 
-/* Score column on the left stacks SCORE on top of IP CORE */
-.score-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* SCORE block + IP CORE share one row inside hero-left.
+   SCORE is fixed-natural-width on the left; IP CORE expands to fill
+   whatever's free on the right (where there used to be empty space).
+   Collapses back to stacked on narrow viewports. */
+.score-stack {
+  display: grid;
+  grid-template-columns: minmax(220px, max-content) minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  align-items: stretch;
+}
+.score-stack > .score-block { min-width: 220px; }
 .score-stack > .ip-core-panel {
   border: 1px solid var(--line-2);
   background: var(--bg-2);
   padding: 12px 14px;
+  min-width: 0;
+}
+@media (max-width: 920px) {
+  .score-stack { grid-template-columns: 1fr; }
 }
 
 /* Score column wraps to full width on narrow viewports */

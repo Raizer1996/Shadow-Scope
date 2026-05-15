@@ -780,7 +780,10 @@ function ThreatSurfacePanel({ ioc }) {
     // explicitly checked and denied by ≥2 sources (so the analyst sees
     // "we checked Tor with 3 sources and they all said no"). Skip
     // flags with zero coverage entirely.
-    .filter(r => r.result.confirmed.length > 0 || r.result.denied.length >= 2);
+    // Only show flags that ≥1 source confirmed. Per user feedback,
+    // "checked and clean" denied rows add noise without value —
+    // analysts only care about what fired.
+    .filter(r => r.result.confirmed.length > 0);
 
   const operators = _collectOperators(ioc);
   const hostnames = _collectHostnames(ioc);
@@ -795,24 +798,18 @@ function ThreatSurfacePanel({ ioc }) {
       </div>
       {rows.length > 0 && (
         <div className="ts-flag-rows">
-          {rows.map(r => {
-            const yes = r.result.confirmed.length > 0;
-            return (
-              <div key={r.k} className={`ts-flag-row ${yes ? "yes" : "no"}`}>
-                <span className="ts-flag-name" style={{ color: yes ? r.color : "var(--ink-3)" }}>
-                  {yes ? "✓" : "·"} {r.k}
-                </span>
-                <span className="ts-source-chips">
-                  {r.result.confirmed.map(s => (
-                    <span key={"y"+s} className="ts-source-chip confirmed" style={{ borderColor: r.color, color: r.color }}>{s}</span>
-                  ))}
-                  {r.result.denied.map(s => (
-                    <span key={"n"+s} className="ts-source-chip denied">{s}</span>
-                  ))}
-                </span>
-              </div>
-            );
-          })}
+          {rows.map(r => (
+            <div key={r.k} className="ts-flag-row yes">
+              <span className="ts-flag-name" style={{ color: r.color }}>
+                ✓ {r.k}
+              </span>
+              <span className="ts-source-chips">
+                {r.result.confirmed.map(s => (
+                  <span key={"y"+s} className="ts-source-chip confirmed" style={{ borderColor: r.color, color: r.color }}>{s}</span>
+                ))}
+              </span>
+            </div>
+          ))}
         </div>
       )}
       {(operators.length > 0 || hostnames.length > 0) && (
