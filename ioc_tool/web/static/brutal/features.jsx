@@ -969,10 +969,39 @@ function IpCorePanel({ ioc, fmt }) {
   );
 }
 
+// Known VPN providers — org-name substrings → brand label. Used as a
+// free-tier fallback for VPN brand detection when IPinfo Privacy or
+// IPQS isn't available. Case-insensitive substring match.
+const _VPN_BRAND_MAP = [
+  [/unredacted/i,            "ProtonVPN"],
+  [/proton(\s|technol)/i,    "ProtonVPN"],
+  [/tefincom|tefin/i,        "NordVPN"],
+  [/express\s*vpn/i,         "ExpressVPN"],
+  [/surfshark/i,             "Surfshark"],
+  [/private\s*internet/i,    "Private Internet Access"],
+  [/\bpia\b/i,               "Private Internet Access"],
+  [/mullvad/i,               "Mullvad"],
+  [/\bivpn\b/i,              "IVPN"],
+  [/cyberghost/i,            "CyberGhost"],
+  [/hotspot\s*shield/i,      "Hotspot Shield"],
+  [/perfect\s*privacy/i,     "Perfect Privacy"],
+  [/windscribe/i,            "Windscribe"],
+  [/tunnelbear/i,            "TunnelBear"],
+  [/torguard/i,              "TorGuard"],
+  [/vyprvpn|golden\s*frog/i, "VyprVPN"],
+  [/airvpn/i,                "AirVPN"],
+];
+function _brandFromOrg(org) {
+  if (!org || typeof org !== "string") return null;
+  for (const [re, name] of _VPN_BRAND_MAP) if (re.test(org)) return name;
+  return null;
+}
+
 // Build anonymization signals — VPN / Proxy / Tor / Hosting — from
 // AbstractAPI.security, Shodan.tags, IPinfo.privacy (if Privacy tier),
 // and the standalone TOR module. Each kind reports source attribution
-// and, when available (IPinfo Privacy), the VPN service brand.
+// and, when available, the VPN service brand (IPinfo Privacy `service`
+// when present, else heuristic match on the org/ISP string).
 function _anonFor(ioc) {
   const mods = ioc.modules || {};
   const ab = ((mods.AbstractAPI || {}).data || {}).security || {};
@@ -994,7 +1023,12 @@ function _anonFor(ioc) {
   if (ab.is_vpn) vpnSrc.push("AbstractAPI");
   if (shTags.includes("vpn")) vpnSrc.push("Shodan");
   if (ipPriv.vpn) vpnSrc.push("IPinfo");
-  push("VPN", "#fb923c", vpnSrc, ipPriv.service || null);
+  // Brand: prefer IPinfo Privacy `service` (paid tier); otherwise
+  // heuristic match on org/ISP from Shodan / IPinfo / AbstractAPI.
+  const orgPool = [sh.org, sh.isp, ip.org, (((ab.company || {})).name) || ((ab.asn || {}).name)]
+    .filter(Boolean).join(" ");
+  const brand = ipPriv.service || (vpnSrc.length ? _brandFromOrg(orgPool) : null);
+  push("VPN", "#fb923c", vpnSrc, brand);
 
   // PROXY
   const proxySrc = [];
