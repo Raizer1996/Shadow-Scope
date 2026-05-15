@@ -98,7 +98,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [ ] **Multiple workspaces** — isolate cases / engagements. **[issue]**
 - [ ] **Compare two IOCs** (`shadowscope diff <ioc1> <ioc2>`). **[issue]**
 - [ ] **Risk score history graph** (ASCII / terminal). **[issue]**
-- [ ] **Source agreement matrix** — which sources flagged vs missed. **[issue]**
+- [x] **Source agreement matrix** — `consensus_summary()` in output module: counts flagged vs missed across opinion sources (excludes Shodan / IPinfo / crt.sh / Heuristics / Allowlist); 4-tier consensus (high ≥70%, medium ≥40%, low >0, none); surfaces in Markdown reports
 
 ---
 

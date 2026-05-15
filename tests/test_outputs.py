@@ -177,3 +177,102 @@ def test_md_multiple_iocs_get_separators():
     md = output_mod.to_markdown([_ip_result(), _domain_result()])
     # Three '---' separators: top + after IOC 1 + after IOC 2
     assert md.count("---") >= 3
+
+
+# ---------------------------------------------------------------------------
+# Source agreement / consensus matrix
+# ---------------------------------------------------------------------------
+
+
+def test_consensus_empty_modules():
+    summary = output_mod.consensus_summary({"modules": {}})
+    assert summary["sources_total"] == 0
+    assert summary["consensus"] == "none"
+
+
+def test_consensus_excludes_info_only_modules():
+    """Shodan, IPinfo, Heuristics, Allowlist, crt.sh shouldn't count as opinion sources."""
+    result = {
+        "modules": {
+            "Shodan": {"score": 0, "data": {}},
+            "IPinfo": {"score": 0, "data": {}},
+            "Heuristics": {"score": 50, "data": {}},
+            "Allowlist": {"score": 0, "data": {}},
+            "crt.sh": {"score": 15, "data": {}},
+            "VirusTotal": {"score": 0, "data": {}},
+        }
+    }
+    summary = output_mod.consensus_summary(result)
+    # Only VirusTotal counts — the rest are non-opinion.
+    assert summary["sources_total"] == 1
+    assert {r["source"] for r in summary["rows"]} == {"VirusTotal"}
+
+
+def test_consensus_high_when_most_sources_flag():
+    """≥70% flagged → high consensus."""
+    result = {
+        "modules": {
+            "VirusTotal": {"score": 60, "data": {}},
+            "AbuseIPDB": {"score": 50, "data": {}},
+            "URLhaus": {"score": 80, "data": {}},
+            "OTX": {"score": 0, "data": {}},
+        }
+    }
+    summary = output_mod.consensus_summary(result)
+    assert summary["sources_flagged"] == 3
+    assert summary["sources_total"] == 4
+    assert summary["consensus"] == "high"
+
+
+def test_consensus_medium_when_split():
+    """40-70% flagged → medium."""
+    result = {
+        "modules": {
+            "VirusTotal": {"score": 60, "data": {}},
+            "AbuseIPDB": {"score": 0, "data": {}},
+            "URLhaus": {"score": 50, "data": {}},
+            "OTX": {"score": 0, "data": {}},
+        }
+    }
+    summary = output_mod.consensus_summary(result)
+    assert summary["consensus"] == "medium"
+
+
+def test_consensus_low_when_one_source_only():
+    """<40% but >0 → low — the anti-false-positive bucket."""
+    result = {
+        "modules": {
+            "VirusTotal": {"score": 50, "data": {}},
+            "AbuseIPDB": {"score": 0, "data": {}},
+            "URLhaus": {"score": 0, "data": {}},
+            "OTX": {"score": 0, "data": {}},
+            "ThreatFox": {"score": 0, "data": {}},
+        }
+    }
+    summary = output_mod.consensus_summary(result)
+    assert summary["sources_flagged"] == 1
+    assert summary["consensus"] == "low"
+
+
+def test_consensus_none_when_zero_flagged():
+    result = {
+        "modules": {
+            "VirusTotal": {"score": 0, "data": {}},
+            "AbuseIPDB": {"score": 0, "data": {}},
+        }
+    }
+    summary = output_mod.consensus_summary(result)
+    assert summary["consensus"] == "none"
+    assert summary["sources_flagged"] == 0
+
+
+def test_md_includes_consensus_block():
+    """The Markdown renderer should surface the consensus tag for an IOC with sources."""
+    md = output_mod.to_markdown([_domain_result()])
+    assert "Source agreement" in md
+    assert "consensus" in md.lower()
+
+
+def test_md_skips_consensus_when_no_sources():
+    md = output_mod.to_markdown([{"ioc": "x", "type": "ip", "final_score": 0, "modules": {}}])
+    assert "Source agreement" not in md
