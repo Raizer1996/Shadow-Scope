@@ -49,6 +49,7 @@ from ..modules import (
     malwarebazaar,
     nvd,
     otx,
+    pulsedive,
     shodan_mod,
     sslbl,
     threatfox,
@@ -394,6 +395,14 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             _run_source, ioc_id, 'urlscan', 'URLscan',
             lambda: urlscan.enrich(value, ioc_type),
             score.calculate_urlscan_score,
+        ))
+
+    # --- Pulsedive — IP / domain / URL (free, no key required) ---
+    if ioc_type in ('ip', 'domain', 'url'):
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'pulsedive', 'Pulsedive',
+            lambda: pulsedive.enrich(value, ioc_type),
+            score.calculate_pulsedive_score,
         ))
 
     # --- MalwareBazaar — hash only ---

@@ -303,6 +303,28 @@ def calculate_crtsh_score(data: dict | None) -> int:
     return 0
 
 
+def calculate_pulsedive_score(data: dict | None) -> int:
+    """Map Pulsedive's ``risk`` string into our 0–100 scale.
+
+    Pulsedive uses a coarse tier rather than a numeric score. We map:
+
+    - ``critical`` → 95
+    - ``high``     → 80
+    - ``medium``   → 55
+    - ``low``      → 25
+    - ``none`` / ``unknown`` / missing → 0
+    """
+    if not data:
+        return 0
+    risk = str(data.get("risk") or "").strip().lower()
+    return {
+        "critical": 95,
+        "high": 80,
+        "medium": 55,
+        "low": 25,
+    }.get(risk, 0)
+
+
 def calculate_final_risk(scores):
     """
     Average of all module scores

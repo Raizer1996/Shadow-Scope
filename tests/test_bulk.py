@@ -33,6 +33,7 @@ def _stub_all_network(monkeypatch):
         ipinfo_mod,
         malwarebazaar,
         otx,
+        pulsedive,
         shodan_mod,
         sslbl,
         threatfox,
@@ -49,6 +50,7 @@ def _stub_all_network(monkeypatch):
     monkeypatch.setattr(ip_quality_score, "enrich_ip", lambda v: None)
     monkeypatch.setattr(malwarebazaar, "enrich_hash", lambda v: None)
     monkeypatch.setattr(otx, "enrich", lambda v, t: None)
+    monkeypatch.setattr(pulsedive, "enrich", lambda v, t: None)
     monkeypatch.setattr(shodan_mod, "host_search", lambda v: {"error": "stub"})
     monkeypatch.setattr(sslbl, "enrich_hash", lambda v: None)
     monkeypatch.setattr(threatfox, "enrich", lambda v: None)
