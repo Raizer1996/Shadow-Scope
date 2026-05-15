@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "shadowscope"
 version = "1.0.0"
@@ -17,13 +21,39 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Security",
 ]
+dependencies = [
+    "requests>=2.32",
+    "rich>=13.9",
+    "python-dotenv>=1.2",
+    "python-whois>=0.9",
+    "fastapi>=0.118",
+    "uvicorn[standard]>=0.38",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "ruff>=0.15",
+    "mypy>=2.1",
+    "types-requests",
+    "responses>=0.26",
+    "httpx>=0.28",
+]
 
 [project.urls]
 Homepage = "https://github.com/Raizer1996/Shadow-Scope"
 Issues = "https://github.com/Raizer1996/Shadow-Scope/issues"
+Changelog = "https://github.com/Raizer1996/Shadow-Scope/blob/main/CHANGELOG.md"
 
 [project.scripts]
 shadowscope = "ioc_tool.main:main"
+
+[tool.setuptools.packages.find]
+include = ["ioc_tool*"]
+exclude = ["tests*", "build*", "dist*"]
+
+[tool.setuptools.package-data]
+"ioc_tool" = ["web/static/*", "data/*.json"]
 
 [tool.ruff]
 line-length = 100

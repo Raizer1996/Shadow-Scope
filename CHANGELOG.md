@@ -7,7 +7,20 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- (placeholder — next release in progress)
+- **Pulsedive** enrichment source (free tier; `PULSEDIVE_API_KEY` for
+  higher quota). Risk-tier → 0-100 score mapping.
+- **Tags + cases** — `shadowscope tag <ioc> --tag X --case Y --note Z`,
+  `shadowscope cases`. New `ioc_tags` table with idempotent UNIQUE
+  constraint + note upsert on conflict.
+- **Watch mode** — `shadowscope watch [--case=X] [--threshold=N]
+  [--webhook=URL] [--json]` re-enriches IOCs, diffs vs stored
+  `last_score`, emits deltas. Cron-friendly.
+- **Source agreement matrix** — `output.consensus_summary()` reports
+  flagged-vs-missed across opinion sources. Markdown reports surface
+  a one-line consensus tag.
+- **PyPI packaging** — `pyproject.toml` ships a buildable wheel via
+  `setuptools.build_meta`. Dependencies pinned, `web/static/*` and
+  `data/*.json` shipped as package-data, console_scripts entry.
 
 ### Fixed
 
