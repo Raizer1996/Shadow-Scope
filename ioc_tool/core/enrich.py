@@ -490,3 +490,35 @@ def enrich_ioc(value: str, ioc_type: str, *, no_cache: bool = False) -> dict:
     from the SQLite cache, matching the ``--no-cache`` CLI flag.
     """
     return asyncio.run(enrich_ioc_async(value, ioc_type, no_cache=no_cache))
+
+
+async def enrich_many_async(
+    iocs: list[tuple[str, str]],
+    *,
+    no_cache: bool = False,
+) -> list[dict]:
+    """Enrich a batch of (value, ioc_type) pairs in parallel.
+
+    Fans out one ``enrich_ioc_async`` coroutine per IOC, awaited with
+    :func:`asyncio.gather(return_exceptions=True)` so a single crashing
+    IOC can't take down the batch — failed entries are dropped silently
+    (matching the per-source never-crash contract one level up). Order
+    of the returned list matches input order, minus any crashes.
+
+    The wall-clock win is meaningful for SOC bulk-enrichment workflows:
+    20 IOCs sequentially is 20 × max(per-IOC latency); with this fan-out
+    it's still ~max(per-IOC latency) — the source fan-out within each
+    IOC dominates over the per-IOC dimension.
+    """
+    tasks = [enrich_ioc_async(value, ioc_type, no_cache=no_cache) for value, ioc_type in iocs]
+    raw = await asyncio.gather(*tasks, return_exceptions=True)
+    return [item for item in raw if not isinstance(item, BaseException)]
+
+
+def enrich_many(
+    iocs: list[tuple[str, str]],
+    *,
+    no_cache: bool = False,
+) -> list[dict]:
+    """Sync wrapper for :func:`enrich_many_async` — used by the bulk CLI path."""
+    return asyncio.run(enrich_many_async(iocs, no_cache=no_cache))
