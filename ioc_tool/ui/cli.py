@@ -599,6 +599,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
     """
     want_json = getattr(args, 'json', False)
     want_csv = getattr(args, 'csv', False)
+    no_cache = bool(getattr(args, 'no_cache', False))
     machine_readable = want_json or want_csv
     msg_console = err_console if machine_readable else console
 
@@ -669,7 +670,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
                 msg_console.print(f"[yellow]Skipping unknown IOC type: {ioc}[/yellow]")
                 continue
 
-            result = enrich.enrich_ioc(ioc, ioc_type)
+            result = enrich.enrich_ioc(ioc, ioc_type, no_cache=no_cache)
             results.append(result)
     else:
         with console.status("[bold green]Enriching IOCs...[/bold green]"):
@@ -1019,6 +1020,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help='Append an LLM-generated natural-language verdict (requires local Ollama)',
     )
+    parser_arg.add_argument(
+        '--no-cache',
+        dest='no_cache',
+        action='store_true',
+        default=False,
+        help='Bypass the SQLite enrichment cache — every source refetches fresh data',
+    )
     subparsers = parser_arg.add_subparsers(dest='command', metavar='<command>')
 
     # enrich
@@ -1064,6 +1072,13 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         default=argparse.SUPPRESS,
         help='Append an LLM-generated natural-language verdict (requires local Ollama)',
+    )
+    p_enrich.add_argument(
+        '--no-cache',
+        dest='no_cache',
+        action='store_true',
+        default=argparse.SUPPRESS,
+        help='Bypass the SQLite enrichment cache — every source refetches fresh data',
     )
 
     # analyze
