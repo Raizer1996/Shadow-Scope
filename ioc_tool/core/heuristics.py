@@ -276,6 +276,91 @@ def _avg_bigram(s: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# IDN / punycode — homograph attack detection
+# ---------------------------------------------------------------------------
+#
+# Internationalised Domain Names (IDN) can encode non-ASCII characters
+# via "punycode" (RFC 3492): ``xn--80akhbyknj4f.com`` → ``испытание.com``.
+# Attackers exploit this by registering visually-confusable names — the
+# canonical example is Cyrillic 'а' (U+0430) standing in for Latin 'a'
+# in ``аpple.com``, which is browser-rendered identical to ``apple.com``.
+#
+# We score on three escalating signals:
+#   1. Raw domain contains ``xn--`` (punycode-encoded)            → 70
+#   2. Decoded form has only non-ASCII letters (legit IDN)         → 50
+#   3. Mix of ASCII Latin + non-ASCII confusable letters (script   → 90
+#      mixing — the classic homograph attack)
+#
+# We deliberately use ``encodings.idna`` from the stdlib rather than the
+# third-party ``idna`` package. Stdlib can't fully roundtrip everything
+# (some emoji-style labels fail), but it's free of dependencies and
+# correctly handles the ASCII-confusable subset that matters here.
+
+
+def _has_mixed_script(s: str) -> bool:
+    """True when the string contains both ASCII Latin letters and non-ASCII letters.
+
+    Catches the homograph-attack pattern: a label that mixes Latin 'pa' with
+    Cyrillic 'а' to impersonate "paypal". A label that's entirely in one
+    script (full Cyrillic, full Greek, full Latin) is *not* a homograph
+    even if non-ASCII — it could be a legitimate international name.
+    """
+    has_ascii_alpha = any(c.isascii() and c.isalpha() for c in s)
+    has_non_ascii_alpha = any((not c.isascii()) and c.isalpha() for c in s)
+    return has_ascii_alpha and has_non_ascii_alpha
+
+
+def idn_check(domain: str) -> dict | None:
+    """Detect IDN-encoded / unicode-bearing domains and flag homograph risks.
+
+    Returns ``None`` for pure ASCII inputs (vast majority). For any
+    domain containing ``xn--`` punycode-encoded labels or non-ASCII
+    characters, returns a dict describing both forms plus a mixed-script
+    flag. Decoding failures degrade gracefully — we still flag, just
+    without the unicode rendering.
+    """
+    raw = domain.strip().lower().rstrip(".")
+    if not raw:
+        return None
+
+    has_punycode = "xn--" in raw
+    has_non_ascii = any(ord(c) > 127 for c in raw)
+
+    if not has_punycode and not has_non_ascii:
+        return None
+
+    decoded: str | None = raw
+    if has_punycode:
+        try:
+            decoded = raw.encode("ascii").decode("idna")
+        except (UnicodeError, UnicodeDecodeError):
+            decoded = None
+
+    # Mixed-script check on the *registrable label only* — including the
+    # Latin TLD would false-positive on every legitimate Cyrillic/Greek
+    # IDN (e.g. ``испытание.com`` would otherwise look "mixed").
+    mixed = False
+    if decoded:
+        label = _extract_label(decoded)
+        mixed = _has_mixed_script(label)
+
+    if mixed:
+        score = 90  # homograph — most dangerous bucket
+    elif has_punycode:
+        score = 70  # punycode-encoded — suspicious by default
+    else:
+        score = 50  # raw non-ASCII — likely legit IDN, mild flag
+
+    return {
+        "score": score,
+        "raw": raw,
+        "ascii": raw if has_punycode else None,
+        "unicode": decoded,
+        "mixed_script": mixed,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Typosquat / homograph detection
 # ---------------------------------------------------------------------------
 #

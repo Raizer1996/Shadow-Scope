@@ -206,3 +206,62 @@ def test_typosquat_reads_watchlist_from_env(monkeypatch):
 def test_typosquat_returns_none_when_env_unset(monkeypatch):
     monkeypatch.delenv("WATCHLIST_DOMAINS", raising=False)
     assert heuristics.typosquat_check("paypa1.com") is None
+
+
+# ---------------------------------------------------------------------------
+# IDN / punycode
+# ---------------------------------------------------------------------------
+
+
+def test_idn_returns_none_for_pure_ascii():
+    assert heuristics.idn_check("apple.com") is None
+    assert heuristics.idn_check("paypal.com") is None
+    assert heuristics.idn_check("8.8.8.8") is None  # not a domain shape, still ASCII
+
+
+def test_idn_decodes_punycode_to_unicode():
+    """Pure Cyrillic IDN (испытание.com) — legit, score 70 (punycode-encoded)."""
+    result = heuristics.idn_check("xn--80akhbyknj4f.com")
+    assert result is not None
+    assert result["unicode"] == "испытание.com"
+    assert result["mixed_script"] is False
+    assert result["score"] == 70
+
+
+def test_idn_flags_mixed_script_homograph_raw():
+    """Cyrillic 'а' inside Latin context = classic homograph attack."""
+    # 'аpple.com' — first char is U+0430 (Cyrillic), rest are Latin.
+    result = heuristics.idn_check("аpple.com")
+    assert result is not None
+    assert result["mixed_script"] is True
+    assert result["score"] == 90
+
+
+def test_idn_flags_mixed_script_homograph_punycode():
+    """Same homograph but punycode-encoded — should still flag at 90."""
+    result = heuristics.idn_check("xn--pple-43d.com")
+    assert result is not None
+    assert result["mixed_script"] is True
+    assert result["score"] == 90
+
+
+def test_idn_legitimate_pure_script_label():
+    """A label entirely in one non-Latin script is legit IDN — score 50."""
+    result = heuristics.idn_check("мир.рф")
+    assert result is not None
+    assert result["mixed_script"] is False
+    assert result["score"] == 50
+
+
+def test_idn_exposes_both_forms():
+    """ASCII (punycode) and unicode forms both appear in the output."""
+    result = heuristics.idn_check("xn--80akhbyknj4f.com")
+    assert result["ascii"] == "xn--80akhbyknj4f.com"
+    assert result["unicode"] == "испытание.com"
+
+
+def test_idn_decoding_failure_still_flags():
+    """Garbage punycode that can't be decoded still gets flagged at 70."""
+    result = heuristics.idn_check("xn--zzz.com")
+    assert result is not None
+    assert result["score"] == 70

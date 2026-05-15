@@ -31,7 +31,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Callable
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -55,13 +57,39 @@ from ..modules import (
 )
 from . import database, heuristics, parser, score
 
+# Per-call ``--no-cache`` toggle — propagates from enrich_ioc{,_async}
+# into _run_source via a ContextVar so we don't have to thread the flag
+# through every per-source asyncio.to_thread call site. ``asyncio.to_thread``
+# preserves the active context for the worker thread, so a value set in
+# the orchestrator is visible to the source worker without any glue.
+no_cache_ctx: ContextVar[bool] = ContextVar("no_cache_ctx", default=False)
+
+
+# Cache TTL — how long a cached row is considered fresh before we refetch.
+# Defaults to 24 h to match the historical behaviour; can be tuned via the
+# ``CACHE_TTL_HOURS`` env var (float supported for sub-hour increments).
+# Unparseable or non-positive values fall back to 24 h.
+_DEFAULT_CACHE_TTL_HOURS = 24.0
+
+
+def _cache_ttl_hours() -> float:
+    """Resolve the cache TTL in hours from the env, with a 24 h fallback."""
+    raw = os.getenv("CACHE_TTL_HOURS", "").strip()
+    if not raw:
+        return _DEFAULT_CACHE_TTL_HOURS
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_CACHE_TTL_HOURS
+    return value if value > 0 else _DEFAULT_CACHE_TTL_HOURS
+
 # ---------------------------------------------------------------------------
 # Cache freshness
 # ---------------------------------------------------------------------------
 
 
 def should_refresh(timestamp_str: str | None) -> bool:
-    """Return True if the cached row is stale (older than 24 h) or unparseable."""
+    """Return True when the cached row is older than ``CACHE_TTL_HOURS`` or unparseable."""
     if not timestamp_str:
         return True
     try:
@@ -77,7 +105,7 @@ def should_refresh(timestamp_str: str | None) -> bool:
         except Exception:
             return True
 
-    return datetime.now() - last_check > timedelta(hours=24)
+    return datetime.now() - last_check > timedelta(hours=_cache_ttl_hours())
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +138,7 @@ def _run_source(
     info_only: bool = False,
     cache_filter: Callable[[dict], dict | None] | None = None,
     post_process: Callable[[dict], tuple[dict, int]] | None = None,
+    no_cache: bool = False,
 ) -> _SourceResult | None:
     """Run a single enrichment source: cache → fetch → score → persist.
 
@@ -122,11 +151,16 @@ def _run_source(
       contains :class:`datetime` objects that must be normalised to ISO
       strings before JSON-encoding into SQLite. Returns the
       ``(serialisable_data, score)`` pair to persist + return.
+    * ``no_cache`` (or :data:`no_cache_ctx` set to ``True``) bypasses the
+      cache-hit branch and always refetches. Fresh data is still written
+      to the cache so subsequent calls without the flag benefit from the
+      new row.
     """
-    cached = database.get_latest_enrichment(ioc_id, source_key)
-    if cached and not should_refresh(cached['timestamp']):
-        data = json.loads(cached['data'])
-        return (display_name, data, cached['score'], not info_only)
+    if not (no_cache or no_cache_ctx.get()):
+        cached = database.get_latest_enrichment(ioc_id, source_key)
+        if cached and not should_refresh(cached['timestamp']):
+            data = json.loads(cached['data'])
+            return (display_name, data, cached['score'], not info_only)
 
     data = fetcher()
     if cache_filter is not None and data is not None:
@@ -226,7 +260,12 @@ def _tor_check(value: str) -> _SourceResult | None:
 # ---------------------------------------------------------------------------
 
 
-async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
+async def enrich_ioc_async(
+    value: str,
+    ioc_type: str,
+    *,
+    no_cache: bool = False,
+) -> dict:
     """Run every applicable enrichment source for ``value`` in parallel.
 
     Each source is delegated to :func:`asyncio.to_thread` so its blocking
@@ -234,7 +273,19 @@ async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
     awaited with :func:`asyncio.gather(return_exceptions=True)` — any
     single-source crash is swallowed and that source is skipped, matching
     the historical "API failures return None — never crash the CLI" rule.
+
+    Set ``no_cache=True`` to force a fresh fetch from every source,
+    bypassing the SQLite cache.
     """
+    token = no_cache_ctx.set(no_cache) if no_cache else None
+    try:
+        return await _enrich_ioc_inner(value, ioc_type)
+    finally:
+        if token is not None:
+            no_cache_ctx.reset(token)
+
+
+async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     # Canonicalise the value for types that require it (currently just
     # CVE → uppercased) so the DB cache key, the per-source lookups,
     # and the returned ``ioc`` field all agree on one shape.
@@ -407,6 +458,11 @@ async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
             heuristics_data['typosquat'] = typo
             heuristics_scores.append(typo['score'])
 
+        idn = heuristics.idn_check(value)
+        if idn is not None:
+            heuristics_data['idn'] = idn
+            heuristics_scores.append(idn['score'])
+
     if heuristics_data:
         composite = (
             int(sum(heuristics_scores) / len(heuristics_scores))
@@ -425,10 +481,12 @@ async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
     }
 
 
-def enrich_ioc(value: str, ioc_type: str) -> dict:
+def enrich_ioc(value: str, ioc_type: str, *, no_cache: bool = False) -> dict:
     """Sync wrapper: drives :func:`enrich_ioc_async` via :func:`asyncio.run`.
 
     Existing call sites (``cli.handle_enrich``, ``cli.handle_show``) stay
-    unchanged — only the internals are now parallel.
+    unchanged — only the internals are now parallel. The optional
+    ``no_cache`` flag forces every source to refetch rather than reading
+    from the SQLite cache, matching the ``--no-cache`` CLI flag.
     """
-    return asyncio.run(enrich_ioc_async(value, ioc_type))
+    return asyncio.run(enrich_ioc_async(value, ioc_type, no_cache=no_cache))
