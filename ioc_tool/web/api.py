@@ -224,14 +224,28 @@ def root() -> ServiceInfoResponseWithUI:
 
 @app.get("/ui", include_in_schema=False)
 def ui() -> FileResponse:
-    """Serve the dashboard single-page UI.
+    """Serve the brutalist dashboard (default).
 
     The HTML itself is harmless — the JSON data behind it is auth-gated by
     the ``require_token`` dependency on each fetch the JS makes. The route
     intentionally has **no** auth dependency so an unauthenticated browser
     can still load the shell and prompt the user for a token.
+
+    The current build is a React+Babel-standalone prototype using mock data
+    from ``shared/data.js``. Backend wiring lands in a follow-up.
     """
     return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+
+
+@app.get("/ui-classic", include_in_schema=False)
+def ui_classic() -> FileResponse:
+    """Serve the legacy vanilla dashboard at ``/ui-classic``.
+
+    Kept reachable so the previous backend-wired UI stays available while
+    the brutalist React prototype gets its API integration. Will be
+    removed once the brutalist UI is fully wired to the real endpoints.
+    """
+    return FileResponse(STATIC_DIR / "classic" / "index.html", media_type="text/html")
 
 
 @app.get("/health", response_model=HealthResponse)

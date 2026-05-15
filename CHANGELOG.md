@@ -7,6 +7,11 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Brutalist React dashboard** at `/ui` — terminal-grade aesthetic
+  (orange accent, dense monospace, score-coded ticker, score banner,
+  tab nav: Enrich / Batch / Watch / Cases / Diff). React 18 +
+  Babel-standalone in-browser, currently mock data; backend wiring is
+  a follow-up. Legacy vanilla UI preserved at `/ui-classic`.
 - **Pulsedive** enrichment source (free tier; `PULSEDIVE_API_KEY` for
   higher quota). Risk-tier → 0-100 score mapping.
 - **Tags + cases** — `shadowscope tag <ioc> --tag X --case Y --note Z`,
