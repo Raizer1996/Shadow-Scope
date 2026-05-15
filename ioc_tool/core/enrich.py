@@ -53,7 +53,7 @@ from ..modules import (
     vt,
     whois_mod,
 )
-from . import database, parser, score
+from . import database, heuristics, parser, score
 
 # ---------------------------------------------------------------------------
 # Cache freshness
@@ -381,6 +381,40 @@ async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
         results[display_name] = {'score': src_score, 'data': data}
         if contributes:
             scores.append(src_score)
+
+    # ---------------------------------------------------------------------
+    # Local heuristics — pure functions on data we already have.
+    # Bundled under a single 'Heuristics' module entry so they surface in
+    # the output without changing the per-source schema.
+    # ---------------------------------------------------------------------
+    heuristics_data: dict[str, Any] = {}
+    heuristics_scores: list[int] = []
+
+    if ioc_type == 'domain':
+        whois_entry = results.get('WHOIS', {}).get('data') or {}
+        nrd = heuristics.nrd_check(whois_entry.get('creation_date'))
+        if nrd is not None:
+            heuristics_data['nrd'] = nrd
+            heuristics_scores.append(nrd['score'])
+
+        dga = heuristics.dga_check(value)
+        if dga is not None:
+            heuristics_data['dga'] = dga
+            heuristics_scores.append(dga['score'])
+
+        typo = heuristics.typosquat_check(value)
+        if typo is not None:
+            heuristics_data['typosquat'] = typo
+            heuristics_scores.append(typo['score'])
+
+    if heuristics_data:
+        composite = (
+            int(sum(heuristics_scores) / len(heuristics_scores))
+            if heuristics_scores else 0
+        )
+        results['Heuristics'] = {'score': composite, 'data': heuristics_data}
+        if composite > 0:
+            scores.append(composite)
 
     final_score = score.calculate_final_risk(scores)
     return {
