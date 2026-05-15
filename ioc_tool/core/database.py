@@ -1,10 +1,58 @@
 import contextlib
+import glob
 import json
 import os
 import sqlite3
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'ioc.db')
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+
+# Default DB lives at ioc_tool/data/ioc.db — same path as before so any
+# user who never sets --workspace keeps working off their existing cache.
+DB_PATH = os.path.join(DATA_DIR, 'ioc.db')
+
+
+def workspace_db_path(name: str) -> str:
+    """Return the SQLite file path for a named workspace.
+
+    Named workspaces live alongside the default DB in the same data dir
+    (so the Docker volume mount at ``/app/ioc_tool/data`` continues to
+    persist all of them).
+    """
+    safe = "".join(c for c in name if c.isalnum() or c in ("-", "_")) or "default"
+    return os.path.join(DATA_DIR, f"ioc-{safe}.db")
+
+
+def set_workspace(name: str | None) -> str:
+    """Switch the active SQLite file by workspace name.
+
+    ``name`` is read from the CLI ``--workspace`` flag (or
+    ``SHADOWSCOPE_WORKSPACE`` env). ``None`` / empty string reverts to
+    the default ``ioc.db``. Returns the resolved DB path so callers can
+    log it if they want.
+    """
+    global DB_PATH
+    DB_PATH = os.path.join(DATA_DIR, 'ioc.db') if not name else workspace_db_path(name)
+    return DB_PATH
+
+
+def list_workspaces() -> list[dict]:
+    """Enumerate every workspace DB present on disk.
+
+    The default workspace appears as ``"default"`` (file ``ioc.db``).
+    Named workspaces are derived from ``ioc-<name>.db``. Each entry
+    carries the file path and on-disk byte size — useful for
+    ``shadowscope workspaces`` to show analysts what's available.
+    """
+    out: list[dict] = []
+    legacy = os.path.join(DATA_DIR, 'ioc.db')
+    if os.path.exists(legacy):
+        out.append({"name": "default", "path": legacy, "size": os.path.getsize(legacy)})
+    for path in sorted(glob.glob(os.path.join(DATA_DIR, "ioc-*.db"))):
+        base = os.path.basename(path)
+        name = base[len("ioc-"):-len(".db")]
+        out.append({"name": name, "path": path, "size": os.path.getsize(path)})
+    return out
 
 # Python 3.12 deprecated the default datetime → SQLite adapter and the
 # inverse text → datetime converter. Register an explicit handler so the
