@@ -883,6 +883,109 @@ def handle_analyze(
             console.print(Panel(str(res), title=title, border_style=style))
 
 
+def handle_tag(args: argparse.Namespace) -> None:
+    """Attach / remove / list tags on an IOC.
+
+    Three modes:
+
+    * ``--list`` (or any invocation with no --tag/--case/--remove):
+      print every tag row attached to ``ioc``.
+    * ``--remove`` with ``--tag``/``--case``: delete the matching row.
+    * default: insert (or upsert if ``--note`` differs) a tag row.
+    """
+    if not getattr(args, 'ioc', None):
+        console.print("[yellow]Usage: shadowscope tag <ioc> [--tag X] [--case Y] [--note Z] [--list|--remove][/yellow]")
+        return
+
+    database.init_db()
+    ioc_id = database.get_ioc_id(args.ioc)
+    if ioc_id is None:
+        # Auto-create the IOC row so analysts can pre-tag before enriching.
+        ioc_type = parser.detect_type(args.ioc)
+        if ioc_type == 'unknown':
+            console.print(f"[red]Cannot tag — unable to detect IOC type for {args.ioc}[/red]")
+            return
+        ioc_id = database.add_or_update_ioc(args.ioc, ioc_type)
+
+    if args.list or (not args.tag and not args.case and not args.remove):
+        rows = database.get_tags_for_ioc(ioc_id)
+        if not rows:
+            console.print(f"[dim]No tags attached to {args.ioc}[/dim]")
+            return
+        from rich.table import Table
+        t = Table(title=f"Tags for {args.ioc}")
+        t.add_column("Tag")
+        t.add_column("Case")
+        t.add_column("Note")
+        t.add_column("Created")
+        for row in rows:
+            t.add_row(
+                row.get('tag') or '',
+                row.get('case_name') or '',
+                row.get('note') or '',
+                str(row.get('created') or ''),
+            )
+        console.print(t)
+        return
+
+    if args.remove:
+        deleted = database.remove_tag(ioc_id, args.tag, args.case)
+        if deleted:
+            console.print(f"[green]Removed {deleted} tag row(s) from {args.ioc}[/green]")
+        else:
+            console.print(f"[yellow]No matching tag row found on {args.ioc}[/yellow]")
+        return
+
+    if not args.tag and not args.case:
+        console.print("[yellow]Pass at least --tag or --case to attach a label[/yellow]")
+        return
+    database.tag_ioc(ioc_id, tag=args.tag, case=args.case, note=args.note)
+    parts = []
+    if args.tag:
+        parts.append(f"tag={args.tag}")
+    if args.case:
+        parts.append(f"case={args.case}")
+    console.print(f"[green]Attached {', '.join(parts)} to {args.ioc}[/green]")
+
+
+def handle_cases(args: argparse.Namespace) -> None:
+    """List all cases, or list IOCs in a single case via ``--case <name>``."""
+    database.init_db()
+
+    if args.case:
+        rows = database.list_iocs_for_case(args.case)
+        if not rows:
+            console.print(f"[dim]No IOCs found in case '{args.case}'[/dim]")
+            return
+        from rich.table import Table
+        t = Table(title=f"IOCs in case '{args.case}'")
+        t.add_column("IOC")
+        t.add_column("Type")
+        t.add_column("First seen")
+        t.add_column("Last seen")
+        for row in rows:
+            t.add_row(
+                row.get('value') or '',
+                row.get('type') or '',
+                str(row.get('first_seen') or ''),
+                str(row.get('last_seen') or ''),
+            )
+        console.print(t)
+        return
+
+    rows = database.list_cases()
+    if not rows:
+        console.print("[dim]No cases recorded yet.[/dim]")
+        return
+    from rich.table import Table
+    t = Table(title="Cases")
+    t.add_column("Case")
+    t.add_column("IOCs", justify="right")
+    for row in rows:
+        t.add_row(row.get('case_name') or '', str(row.get('ioc_count') or 0))
+    console.print(t)
+
+
 def handle_serve(args: argparse.Namespace) -> None:
     """Launch the FastAPI app under uvicorn.
 
@@ -1142,6 +1245,39 @@ def build_parser() -> argparse.ArgumentParser:
         help='Append an LLM-generated natural-language verdict (requires local Ollama)',
     )
 
+    # tag — attach a tag and/or case to an IOC; with no flags, list tags
+    p_tag = subparsers.add_parser(
+        'tag',
+        help='Attach a tag / case / note to an IOC, or list existing tags',
+    )
+    p_tag.add_argument('ioc', nargs='?', default=None, help='IOC value to tag')
+    p_tag.add_argument('--tag', default=None, help='Free-form tag (e.g. phishing, lazarus)')
+    p_tag.add_argument('--case', default=None, help='Case / campaign name (e.g. campaign-x)')
+    p_tag.add_argument('--note', default=None, help='Free-form note to attach with the tag')
+    p_tag.add_argument(
+        '--remove',
+        action='store_true',
+        default=False,
+        help='Remove the matching tag row (use with --tag and/or --case)',
+    )
+    p_tag.add_argument(
+        '--list',
+        action='store_true',
+        default=False,
+        help='List tags attached to the given IOC',
+    )
+
+    # cases — list cases or list IOCs for a case
+    p_cases = subparsers.add_parser(
+        'cases',
+        help='List cases / show IOCs in a specific case',
+    )
+    p_cases.add_argument(
+        '--case',
+        default=None,
+        help='List IOCs in this case (default: list all cases)',
+    )
+
     # serve — REST API
     p_serve = subparsers.add_parser(
         'serve',
@@ -1210,6 +1346,10 @@ def main() -> None:
         handle_show(args)
     elif args.command == 'serve':
         handle_serve(args)
+    elif args.command == 'tag':
+        handle_tag(args)
+    elif args.command == 'cases':
+        handle_cases(args)
     else:
         parser_arg.print_help()
 
