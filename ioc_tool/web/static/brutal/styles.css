@@ -210,36 +210,77 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 .hero-right {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   min-width: 0;
 }
-.hero-right > .spider {
+/* 3-column row when an IP IOC has geo data — IP CORE | SOURCE PROFILE | NETWORK GEO */
+.hero-right.has-geo {
+  grid-template-columns: minmax(220px, 1.1fr) minmax(0, 1.6fr) minmax(260px, 1.3fr);
+}
+.hero-right > .ip-core-panel,
+.hero-right > .spider,
+.hero-right > .net-geo-panel {
   padding: 14px 16px;
-  border-right: 1px solid var(--line-2);
   display: flex; flex-direction: column;
   min-width: 0;
+  border-right: 1px solid var(--line-2);
 }
-.hero-right > .geo-panel {
-  border: none;
-  margin: 0;
-  min-width: 0;
-}
-.hero-right .spider svg { max-width: 100%; max-height: 480px; }
-.hero-right .geo-map svg { max-height: none; }
-
-/* When map isn't present (non-IP IOC), spider fills the right side */
-.hero-right:not(:has(.geo-panel)) { grid-template-columns: 1fr; }
-.hero-right:not(:has(.geo-panel)) > .spider { border-right: none; }
+.hero-right > :last-child { border-right: none; }
+.hero-right .spider svg { max-width: 100%; max-height: 360px; }
 
 /* When score column wraps */
 @media (max-width: 1280px) {
   .hero { grid-template-columns: 1fr; }
   .hero-left { border-right: none; border-bottom: 1px solid var(--line-2); }
 }
-@media (max-width: 880px) {
-  .hero-right { grid-template-columns: 1fr; }
+@media (max-width: 1080px) {
+  .hero-right.has-geo { grid-template-columns: 1fr 1fr; }
+  .hero-right.has-geo > .net-geo-panel { grid-column: 1 / -1; border-top: 1px solid var(--line-2); }
+}
+@media (max-width: 720px) {
+  .hero-right.has-geo { grid-template-columns: 1fr; }
+  .hero-right > .ip-core-panel,
   .hero-right > .spider { border-right: none; border-bottom: 1px solid var(--line-2); }
 }
+
+/* IP Core panel */
+.ip-core-panel { gap: 10px; }
+.ipc-head { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 6px; border-bottom: 1px dotted var(--line); }
+.ipc-title { font-size: 10.5px; letter-spacing: 0.18em; color: var(--ink); font-weight: 700; }
+.ipc-meta { font-size: 10px; color: var(--ink-3); letter-spacing: 0.04em; }
+.ipc-grid { display: grid; gap: 6px; }
+.ipc-row { display: grid; grid-template-columns: 76px 1fr; gap: 8px; font-size: 11.5px; }
+.ipc-k { color: var(--ink-3); letter-spacing: 0.08em; font-size: 10px; padding-top: 2px; }
+.ipc-v { color: var(--ink); word-break: break-word; }
+.ipc-v .flag-cc { background: var(--accent); color: var(--bg); padding: 1px 4px; font-weight: 800; letter-spacing: 0.05em; margin-right: 4px; }
+.ipc-ports { margin-top: 4px; padding-top: 8px; border-top: 1px dotted var(--line); display: flex; flex-direction: column; gap: 4px; }
+.ipc-ports-head { display: flex; align-items: baseline; justify-content: space-between; }
+.ipc-ports-title { font-size: 10px; letter-spacing: 0.14em; color: var(--ink-2); font-weight: 700; }
+.ipc-ports-meta { font-size: 9.5px; color: var(--ink-3); }
+.ipc-ports-list { display: grid; gap: 3px; }
+.port-row { display: grid; grid-template-columns: 48px 1fr 32px; gap: 6px; font-size: 11px; align-items: center; }
+.port-num { display: inline-block; padding: 0 4px; border: 1px solid; text-align: center; font-weight: 800; font-size: 10.5px; }
+.port-svc { color: var(--ink-2); font-size: 10.5px; }
+.port-risk { font-size: 10px; font-weight: 700; text-align: right; }
+.ipc-tags { display: flex; gap: 4px; flex-wrap: wrap; padding-top: 6px; border-top: 1px dotted var(--line); }
+.geo-tag { background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-2); font-size: 10px; padding: 1px 6px; letter-spacing: 0.04em; }
+
+/* Network geo panel (Leaflet) */
+.net-geo-panel { gap: 8px; }
+.ngp-head { display: flex; align-items: baseline; justify-content: space-between; padding-bottom: 6px; border-bottom: 1px dotted var(--line); }
+.ngp-title { font-size: 10.5px; letter-spacing: 0.18em; color: var(--ink); font-weight: 700; }
+.ngp-meta { font-size: 10px; color: var(--ink-3); letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.ngp-map {
+  width: 100%;
+  height: 240px;
+  border: 1px solid var(--line-2);
+  background: #0a0a0a;
+  filter: grayscale(0.4) brightness(0.85) contrast(1.05);
+}
+.ngp-map .leaflet-control-attribution {
+  background: rgba(0,0,0,0.6); color: var(--ink-3); font-size: 9px;
+}
+.ngp-map .ss-tile { filter: hue-rotate(180deg) invert(0.9); }
 
 .hero-ioc-row {
   display: flex; align-items: stretch; gap: 0;
@@ -361,10 +402,12 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .swatch-line { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 4px; }
 
 /* Source table */
-.sources-block { border: 1px solid var(--line-2); background: var(--bg-2); padding: 14px 18px; }
-.src-table { width: 100%; border-collapse: collapse; }
-.src-table th { text-align: left; font-weight: 700; color: var(--ink-2); font-size: 10.5px; letter-spacing: 0.16em; padding: 0 10px 6px 0; border-bottom: 1px solid var(--ink-3); }
-.src-table td { padding: 6px 10px 6px 0; border-bottom: 1px dotted var(--line); font-size: 12px; vertical-align: middle; }
+.sources-block { border: 1px solid var(--line-2); background: var(--bg-2); padding: 16px 20px; }
+.src-table { width: 100%; border-collapse: separate; border-spacing: 0 2px; }
+.src-table th { text-align: left; font-weight: 700; color: var(--ink-2); font-size: 10.5px; letter-spacing: 0.16em; padding: 0 14px 10px 0; border-bottom: 1px solid var(--ink-3); }
+.src-table td { padding: 11px 14px 11px 0; border-bottom: 1px dotted var(--line); font-size: 12px; vertical-align: middle; }
+.src-table tr + tr td { padding-top: 11px; }
+.src-table td:last-child, .src-table th:last-child { padding-right: 0; }
 .src-table tr:hover td { background: var(--bg-3); }
 .src-table tr.muted td { opacity: 0.35; }
 .src-name { font-weight: 700; color: var(--ink); }
