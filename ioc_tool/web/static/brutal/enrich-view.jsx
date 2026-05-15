@@ -123,6 +123,7 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
         </div>
       </section>
 
+      <NamedThreatStrip ioc={ioc} />
       <CveBlock ioc={ioc} />
       <MitreStrip ioc={ioc} onPivot={onPivot} />
       <WhoisTimeline ioc={ioc} fmt={fmt} />
