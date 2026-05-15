@@ -122,3 +122,87 @@ def test_dga_reports_entropy():
     result = heuristics.dga_check("aaaaaaaa.com")  # zero entropy
     assert result is not None
     assert result["entropy"] < 0.1
+
+
+# ---------------------------------------------------------------------------
+# Typosquat / homograph
+# ---------------------------------------------------------------------------
+
+
+_WATCH = ["paypal", "google", "microsoft", "amazon"]
+
+
+def test_typosquat_returns_none_with_empty_watchlist():
+    assert heuristics.typosquat_check("paypa1.com", watchlist=[]) is None
+
+
+def test_typosquat_returns_none_for_exact_match():
+    """Brand on its own domain is not a squat."""
+    assert heuristics.typosquat_check("paypal.com", watchlist=_WATCH) is None
+
+
+def test_typosquat_returns_none_for_unrelated_domain():
+    assert heuristics.typosquat_check("github.com", watchlist=_WATCH) is None
+
+
+def test_typosquat_visual_substitution_scores_95():
+    """Confusable-only lookalike (1→l) is the most dangerous bucket."""
+    result = heuristics.typosquat_check("paypa1.com", watchlist=_WATCH)
+    assert result is not None
+    assert result["score"] == 95
+    assert result["match"] == "paypal"
+    assert result["distance"] == 0
+    assert "1→l" in result["confusables"]
+
+
+def test_typosquat_rn_to_m_substitution():
+    result = heuristics.typosquat_check("rnicrosoft.com", watchlist=_WATCH)
+    assert result is not None
+    assert result["score"] == 95
+    assert result["match"] == "microsoft"
+    assert "rn→m" in result["confusables"]
+
+
+def test_typosquat_zero_to_o():
+    result = heuristics.typosquat_check("g00gle.com", watchlist=_WATCH)
+    assert result is not None
+    assert result["score"] == 95
+    assert "0→o" in result["confusables"]
+
+
+def test_typosquat_real_typo_distance_1_scores_85():
+    """One-character real edit (no visual confusable) lands at 85."""
+    result = heuristics.typosquat_check("paypall.com", watchlist=_WATCH)
+    assert result is not None
+    assert result["score"] == 85
+    assert result["distance"] == 1
+    assert result["confusables"] == []
+
+
+def test_typosquat_handles_subdomain():
+    """Subdomain doesn't matter — we score the registrable label."""
+    result = heuristics.typosquat_check("login.paypa1.com", watchlist=_WATCH)
+    assert result is not None
+    assert result["score"] == 95
+
+
+def test_typosquat_distance_3_skipped():
+    """Too distant — not a typosquat."""
+    assert heuristics.typosquat_check("paypalwhatever.com", watchlist=_WATCH) is None
+
+
+def test_typosquat_short_label_skipped():
+    """Labels < 4 chars can't be meaningfully scored."""
+    assert heuristics.typosquat_check("pp.com", watchlist=_WATCH) is None
+
+
+def test_typosquat_reads_watchlist_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHLIST_DOMAINS", "paypal.com,google.com")
+    result = heuristics.typosquat_check("paypa1.com")
+    assert result is not None
+    assert result["match"] == "paypal"
+
+
+def test_typosquat_returns_none_when_env_unset(monkeypatch):
+    monkeypatch.delenv("WATCHLIST_DOMAINS", raising=False)
+    assert heuristics.typosquat_check("paypa1.com") is None

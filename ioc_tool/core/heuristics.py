@@ -17,9 +17,30 @@ entry silently.
 from __future__ import annotations
 
 import math
+import os
 from collections import Counter
 from datetime import datetime
 from typing import Any
+
+# Visually-confusable character pairs. Lookalike attacks substitute these
+# to register near-identical-looking domains (paypa1.com, rnicrosoft.com,
+# arnazon.com). Each entry maps a substring → the "canonical" character
+# it impersonates. Applied symmetrically when computing edit distance so
+# 'rn' ↔ 'm' costs 0, not 2.
+_CONFUSABLES = {
+    "rn": "m",   # rnicrosoft → microsoft
+    "vv": "w",   # vvalmart → walmart
+    "cl": "d",   # not common, but appears
+    "ii": "u",
+    "nn": "m",
+    "1": "l",    # paypa1 → paypal
+    "0": "o",    # g00gle → google
+    "5": "s",
+    "3": "e",
+    "4": "a",
+    "7": "t",
+    "8": "b",
+}
 
 # We use a "fraction of common bigrams" approach rather than per-bigram
 # log-probabilities — robust to table size and matches the analyst's
@@ -252,3 +273,167 @@ def _avg_bigram(s: str) -> float:
     pairs = [s[i:i + 2] for i in range(len(s) - 1)]
     uncommon = sum(1 for p in pairs if p not in _COMMON_ENGLISH_BIGRAMS)
     return uncommon / len(pairs)
+
+
+# ---------------------------------------------------------------------------
+# Typosquat / homograph detection
+# ---------------------------------------------------------------------------
+#
+# Attackers register lookalikes of trusted org domains for phishing or
+# credential capture (paypa1.com for paypal.com, rnicrosoft.com for
+# microsoft.com, g00gle.com for google.com). We detect by comparing the
+# registrable label against a watchlist (env-configured) under a
+# **confusable-aware Damerau-Levenshtein** distance: visually-similar
+# substitutions ('rn'→'m', '1'→'l', '0'→'o') cost 0, real edits cost 1.
+#
+# A label is flagged when it is within distance 2 of any watchlist entry
+# AND is not identical (we don't flag the brand on its own domain). The
+# match also includes the longest visual-substitution that fired so
+# analysts can see *why* it was flagged.
+
+
+def _canonicalise(s: str) -> str:
+    """Apply confusable substitutions so visual lookalikes collapse to one shape."""
+    out = s.lower()
+    for substr, canon in _CONFUSABLES.items():
+        out = out.replace(substr, canon)
+    return out
+
+
+def _damerau_levenshtein(a: str, b: str) -> int:
+    """Classic Damerau-Levenshtein edit distance (insert / delete / sub / transpose)."""
+    la, lb = len(a), len(b)
+    if la == 0:
+        return lb
+    if lb == 0:
+        return la
+    # Two-row DP — we only need the previous two rows for the transpose check.
+    prev2 = [0] * (lb + 1)
+    prev = list(range(lb + 1))
+    cur = [0] * (lb + 1)
+    for i in range(1, la + 1):
+        cur[0] = i
+        for j in range(1, lb + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            cur[j] = min(
+                prev[j] + 1,           # deletion
+                cur[j - 1] + 1,        # insertion
+                prev[j - 1] + cost,    # substitution
+            )
+            if (
+                i > 1 and j > 1
+                and a[i - 1] == b[j - 2]
+                and a[i - 2] == b[j - 1]
+            ):
+                cur[j] = min(cur[j], prev2[j - 2] + cost)
+        prev2, prev, cur = prev, cur[:], prev2
+    return prev[lb]
+
+
+def _confusable_distance(a: str, b: str) -> int:
+    """DLD between the confusable-canonicalised forms of two strings."""
+    return _damerau_levenshtein(_canonicalise(a), _canonicalise(b))
+
+
+def _detected_confusables(label: str, brand: str) -> list[str]:
+    """Return any confusable substitutions present in ``label`` that map toward ``brand``."""
+    hits = []
+    for substr, canon in _CONFUSABLES.items():
+        if substr in label.lower() and canon in brand.lower():
+            hits.append(f"{substr}→{canon}")
+    return hits
+
+
+def _watchlist() -> list[str]:
+    """Read ``WATCHLIST_DOMAINS`` env var → list of lowercase eTLD+1 labels.
+
+    Format: comma-separated domains. We strip the eTLD (last dot-segment)
+    and keep only the registrable label, since that's what attackers
+    impersonate. ``""`` / unset → empty list (heuristic skipped).
+    """
+    raw = os.getenv("WATCHLIST_DOMAINS", "").strip()
+    if not raw:
+        return []
+    out = []
+    for entry in raw.split(","):
+        cleaned = entry.strip().lower().rstrip(".")
+        if not cleaned:
+            continue
+        label = _extract_label(cleaned)
+        if label and label not in out:
+            out.append(label)
+    return out
+
+
+def typosquat_check(domain: str, watchlist: list[str] | None = None) -> dict | None:
+    """Flag the domain when its label is close to any watchlist brand.
+
+    ``watchlist`` defaults to whatever ``_watchlist()`` reads from
+    ``WATCHLIST_DOMAINS``. Returns ``None`` when no brand is within
+    distance 2 (or the watchlist is empty, or the input is too short to
+    score meaningfully). Identical matches are skipped — the brand on its
+    own domain is not a typosquat.
+
+    Score mapping:
+        distance 1, confusable-only  → 95  (visual phish — most dangerous)
+        distance 1                   → 85
+        distance 2, confusable-only  → 75
+        distance 2                   → 55
+    """
+    if watchlist is None:
+        watchlist = _watchlist()
+    if not watchlist:
+        return None
+
+    label = _extract_label(domain)
+    if len(label) < 4:
+        return None
+
+    # For each brand we track (raw_distance, canon_distance, brand, confusables).
+    # Visual phish: raw differs but canon collapses to 0 — strongest signal.
+    # Regular typo: raw == canon == 1 or 2 — also flagged but lower score.
+    best: tuple[int, int, str, list[str]] | None = None
+    for brand in watchlist:
+        if label == brand:
+            return None  # raw exact match — not a squat
+        raw_d = _damerau_levenshtein(label.lower(), brand.lower())
+        canon_d = _confusable_distance(label, brand)
+        effective = min(raw_d, canon_d)
+        if effective == 0 or effective > 2:
+            # canon == 0 means a *confusable-only* lookalike — keep it.
+            # canon > 2 (and raw > 2) means too far apart to flag.
+            if canon_d == 0:
+                effective = 0
+            else:
+                continue
+        confusables = _detected_confusables(label, brand)
+        candidate = (effective, raw_d, brand, confusables)
+        if best is None or candidate < best:
+            best = candidate
+
+    if best is None:
+        return None
+
+    distance, raw_d, brand, confusables = best
+    # "Confusable-only" = canon collapses entirely to the brand (distance 0
+    # in canon-space) OR raw distance exceeds confusable distance (so the
+    # edits are all visual substitutions).
+    confusable_only = bool(confusables) and distance == 0
+
+    if confusable_only:
+        score = 95         # pure visual phish — most dangerous
+    elif distance == 1:
+        score = 85
+    elif distance == 2 and bool(confusables):
+        score = 75
+    else:
+        score = 55
+
+    return {
+        "score": score,
+        "label": label,
+        "match": brand,
+        "distance": distance,
+        "raw_distance": raw_d,
+        "confusables": confusables,
+    }
