@@ -123,8 +123,10 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
         </div>
       </section>
 
+      <CveBlock ioc={ioc} />
       <MitreStrip ioc={ioc} onPivot={onPivot} />
       <WhoisTimeline ioc={ioc} fmt={fmt} />
+      <CrtshBlock ioc={ioc} fmt={fmt} />
 
       <div className="enrich-split">
         <section className="sources-block">
