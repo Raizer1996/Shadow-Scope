@@ -93,7 +93,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [ ] **Tags + cases** — `shadowscope tag <ioc> --case=campaign-x`. **[issue]**
 - [ ] **Notes per IOC** — append free-text notes stored in DB. **[issue]**
 - [ ] **History view** — past queries, score over time, change alerts. **[issue]**
-- [ ] **Allowlist** — skip enrichment for org-internal CIDRs. **[issue]**
+- [x] **Allowlist** — `ALLOWLIST_CIDRS` + `ALLOWLIST_DOMAINS` env vars short-circuit the enrichment pipeline for org-internal IPs / domains / URLs (subdomain-aware, IPv4+IPv6 CIDR support)
 - [ ] **Watch mode** — re-enrich daily, alert on score change > threshold. **[issue]**
 - [ ] **Multiple workspaces** — isolate cases / engagements. **[issue]**
 - [ ] **Compare two IOCs** (`shadowscope diff <ioc1> <ioc2>`). **[issue]**

@@ -58,7 +58,7 @@ from ..modules import (
     vt,
     whois_mod,
 )
-from . import database, heuristics, parser, score
+from . import allowlist, database, heuristics, parser, score
 
 # Per-call ``--no-cache`` toggle — propagates from enrich_ioc{,_async}
 # into _run_source via a ContextVar so we don't have to thread the flag
@@ -293,6 +293,20 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     # CVE → uppercased) so the DB cache key, the per-source lookups,
     # and the returned ``ioc`` field all agree on one shape.
     value = parser.normalize_value(value, ioc_type)
+
+    # Allowlist short-circuit — skip every external source for known-internal
+    # / trusted IOCs. Saves API quota on bulk enrichment of corp ranges.
+    # The result still flows through the same shape (modules dict) so output
+    # adapters (CSV/STIX/MD) treat it uniformly.
+    allow_hit = allowlist.is_allowlisted(value, ioc_type)
+    if allow_hit is not None:
+        return {
+            'ioc': value,
+            'type': ioc_type,
+            'modules': {'Allowlist': {'score': 0, 'data': allow_hit}},
+            'final_score': 0,
+            'allowlisted': True,
+        }
 
     ioc_id = database.add_or_update_ioc(value, ioc_type)
     tasks: list = []
