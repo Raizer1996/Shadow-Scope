@@ -26,12 +26,15 @@ def _stub_all_network(monkeypatch):
     """Force every source to return None — same stub used in test_smoke."""
     from ioc_tool.modules import (
         abuseipdb,
+        crtsh,
+        feodo,
         greynoise,
         ip_quality_score,
         ipinfo_mod,
         malwarebazaar,
         otx,
         shodan_mod,
+        sslbl,
         threatfox,
         urlhaus,
         urlscan,
@@ -39,12 +42,15 @@ def _stub_all_network(monkeypatch):
         whois_mod,
     )
     monkeypatch.setattr(abuseipdb, "enrich_ip", lambda v: None)
+    monkeypatch.setattr(crtsh, "enrich_domain", lambda v: None)
+    monkeypatch.setattr(feodo, "enrich_ip", lambda v: None)
     monkeypatch.setattr(greynoise, "enrich_ip", lambda v: None)
     monkeypatch.setattr(ipinfo_mod, "enrich_ip", lambda v: None)
     monkeypatch.setattr(ip_quality_score, "enrich_ip", lambda v: None)
     monkeypatch.setattr(malwarebazaar, "enrich_hash", lambda v: None)
     monkeypatch.setattr(otx, "enrich", lambda v, t: None)
     monkeypatch.setattr(shodan_mod, "host_search", lambda v: {"error": "stub"})
+    monkeypatch.setattr(sslbl, "enrich_hash", lambda v: None)
     monkeypatch.setattr(threatfox, "enrich", lambda v: None)
     monkeypatch.setattr(urlhaus, "enrich_url", lambda v: None)
     monkeypatch.setattr(urlhaus, "enrich_host", lambda v: None)

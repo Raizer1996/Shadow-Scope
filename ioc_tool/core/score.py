@@ -263,6 +263,46 @@ def calculate_kev_score(data: dict | None) -> int:
     return 100
 
 
+def calculate_feodo_score(data: dict | None) -> int:
+    """Feodo Tracker hit = live botnet C2. Online status weighs heavier than offline.
+
+    - ``None`` / no data            → 0
+    - status == 'offline_24h'+     → 70
+    - status == 'online' or other  → 95
+    """
+    if not data:
+        return 0
+    status = (data.get("status") or "").lower()
+    if "offline" in status:
+        return 70
+    return 95
+
+
+def calculate_sslbl_score(data: dict | None) -> int:
+    """SSLBL hit = malicious TLS cert. Always a strong signal — score 95."""
+    if not data:
+        return 0
+    return 95
+
+
+def calculate_crtsh_score(data: dict | None) -> int:
+    """crt.sh data is informational by default — used for pivots, not risk-tier.
+
+    We emit a modest score when the issuance count is *very* large (the
+    target domain is heavily certificated, which mildly correlates with
+    spread-out attacker infrastructure / phishing kits), but in general
+    crt.sh is info-only and should not push composite tiers around.
+    """
+    if not data:
+        return 0
+    total = int(data.get("total") or 0)
+    if total >= 1000:
+        return 30
+    if total >= 100:
+        return 15
+    return 0
+
+
 def calculate_final_risk(scores):
     """
     Average of all module scores

@@ -36,9 +36,9 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ## v0.4 — New Sources (intel breadth)
 
 ### Free / freemium IOC sources
-- [ ] **abuse.ch Feodo Tracker** — botnet C2 list. **[issue]**
-- [ ] **abuse.ch SSL Blacklist** — malicious cert fingerprints. **[issue]**
-- [ ] **crt.sh certificate transparency** — pivot from cert to related domains. **[issue]**
+- [x] **abuse.ch Feodo Tracker** — botnet C2 IP blocklist, mirrored to disk with `FEODO_LIST_TTL_HOURS` env (default 24 h); scored 95 online / 70 offline
+- [x] **abuse.ch SSL Blacklist** — SHA-1 cert fingerprints, mirrored to disk; short-circuits non-SHA1 inputs; hit → 95
+- [x] **crt.sh certificate transparency** — subdomain enumeration + recent-issuance metadata; info-only score (15 ≥100 certs, 30 ≥1000)
 - [ ] **SecurityTrails** — passive DNS, historical WHOIS, subdomain enum. **[issue]**
 - [ ] **Pulsedive** — aggregator with built-in risk scoring. **[issue]**
 - [ ] **IBM X-Force Exchange** — free tier reputation. **[issue]**
