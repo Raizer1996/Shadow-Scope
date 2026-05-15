@@ -10,8 +10,15 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 - **Brutalist React dashboard** at `/ui` — terminal-grade aesthetic
   (orange accent, dense monospace, score-coded ticker, score banner,
   tab nav: Enrich / Batch / Watch / Cases / Diff). React 18 +
-  Babel-standalone in-browser, currently mock data; backend wiring is
-  a follow-up. Legacy vanilla UI preserved at `/ui-classic`.
+  Babel-standalone in-browser. Legacy vanilla UI preserved at
+  `/ui-classic`.
+- **Live backend wiring** for the brutalist dashboard. New
+  `GET /api/ui/enrich` endpoint synthesises the UI-shape fields
+  (stable `id`, pre-computed `agreement`, per-module `detail`
+  summaries, `prev_score` from `iocs.last_score`) around the raw
+  orchestrator output. Frontend `window.shadowscopeFetch()` helper +
+  rewired `onEnrich` flow; mock data stays as a fallback when the
+  request fails.
 - **Pulsedive** enrichment source (free tier; `PULSEDIVE_API_KEY` for
   higher quota). Risk-tier → 0-100 score mapping.
 - **Tags + cases** — `shadowscope tag <ioc> --tag X --case Y --note Z`,

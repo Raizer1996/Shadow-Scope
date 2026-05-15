@@ -455,3 +455,30 @@ window.IOC_HISTORY = {
   ioc_05: [85, 85, 86, 86, 87, 87, 88, 88, 88, 88, 88, 88, 88, 88],
   ioc_07: [95, 95, 95, 95, 95, 95, 95, 95, 95, 95, 95, 95, 95, 95]
 };
+
+// -----------------------------------------------------------------------------
+// Live backend fetch — points the brutalist UI at the real /api/ui/enrich
+// endpoint. Returns a Promise resolving to a record in the same shape as
+// window.IOC_DB entries. Errors bubble up — the caller falls back to
+// fabricateRecord() to keep the dashboard responsive.
+//
+// Token: read from sessionStorage (if the auth banner has captured one).
+// -----------------------------------------------------------------------------
+window.shadowscopeFetch = async function (ioc, opts) {
+  opts = opts || {};
+  const params = new URLSearchParams({ ioc: String(ioc).trim() });
+  if (opts.defang)   params.set("defang", "true");
+  if (opts.summary)  params.set("summary", "true");
+  if (opts.no_cache) params.set("no_cache", "true");
+  const headers = {};
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const r = await fetch("/api/ui/enrich?" + params.toString(), { headers });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error("HTTP " + r.status + " " + body.slice(0, 200));
+  }
+  return await r.json();
+};
