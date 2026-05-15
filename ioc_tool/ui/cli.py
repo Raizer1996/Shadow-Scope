@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 from typing import Any
@@ -986,6 +987,81 @@ def handle_cases(args: argparse.Namespace) -> None:
     console.print(t)
 
 
+def handle_watch(args: argparse.Namespace) -> None:
+    """Re-enrich a watchlist of IOCs and emit deltas.
+
+    Iterates over IOCs in the local DB (optionally filtered to a single
+    ``--case``), re-runs the enrichment pipeline with ``no_cache=True``,
+    compares the new composite to the stored ``last_score``, and emits a
+    delta event whenever ``|new - old| >= threshold``.
+
+    Cron-friendly: with ``--json`` every delta is one JSON line on stdout,
+    so wrappers can pipe into Telegram / Slack / Splunk / etc. Optional
+    ``--webhook`` posts the same event to an HTTP endpoint.
+    """
+    database.init_db()
+    iocs = database.list_iocs(case=args.case)
+    if not iocs:
+        target = f"case '{args.case}'" if args.case else "the watchlist"
+        console.print(f"[dim]No IOCs in {target}[/dim]")
+        return
+
+    threshold = max(0, int(args.threshold))
+    webhook = args.webhook
+
+    deltas: list[dict[str, Any]] = []
+    for row in iocs:
+        value = row['value']
+        ioc_type = row['type']
+        prev = row.get('last_score')
+        try:
+            result = enrich.enrich_ioc(value, ioc_type, no_cache=True)
+        except Exception as exc:
+            err_console.print(f"[red]watch: {value} crashed — {exc}[/red]")
+            continue
+        new = int(result.get('final_score') or 0)
+        prev_int = int(prev) if prev is not None else 0
+        delta = new - prev_int
+        if abs(delta) < threshold:
+            continue
+        event = {
+            'ioc': value,
+            'type': ioc_type,
+            'previous_score': prev_int if prev is not None else None,
+            'new_score': new,
+            'delta': delta,
+            'risk_tier': output_mod._risk_tier(new) if hasattr(output_mod, '_risk_tier') else None,
+        }
+        deltas.append(event)
+        if webhook:
+            try:
+                import requests as _requests
+                _requests.post(webhook, json=event, timeout=10)
+            except Exception:
+                err_console.print(f"[yellow]webhook post failed for {value}[/yellow]")
+        if args.json:
+            print(json.dumps(event))
+
+    if not args.json:
+        if not deltas:
+            console.print(
+                f"[dim]Watched {len(iocs)} IOCs — no deltas above threshold {threshold}[/dim]"
+            )
+            return
+        from rich.table import Table
+        t = Table(title=f"Score deltas (|Δ| >= {threshold})")
+        t.add_column("IOC")
+        t.add_column("Type")
+        t.add_column("Was", justify="right")
+        t.add_column("Now", justify="right")
+        t.add_column("Δ", justify="right")
+        for event in deltas:
+            prev_str = "" if event['previous_score'] is None else str(event['previous_score'])
+            sign = "+" if event['delta'] > 0 else ""
+            t.add_row(event['ioc'], event['type'], prev_str, str(event['new_score']), f"{sign}{event['delta']}")
+        console.print(t)
+
+
 def handle_serve(args: argparse.Namespace) -> None:
     """Launch the FastAPI app under uvicorn.
 
@@ -1278,6 +1354,34 @@ def build_parser() -> argparse.ArgumentParser:
         help='List IOCs in this case (default: list all cases)',
     )
 
+    # watch — re-enrich a set of cached IOCs and emit deltas
+    p_watch = subparsers.add_parser(
+        'watch',
+        help='Re-enrich cached IOCs and emit score deltas (cron-friendly)',
+    )
+    p_watch.add_argument(
+        '--case',
+        default=None,
+        help='Restrict to IOCs tagged with this case (default: every IOC in the DB)',
+    )
+    p_watch.add_argument(
+        '--threshold',
+        type=int,
+        default=10,
+        help='Only emit deltas with |new - old| >= THRESHOLD (default: 10)',
+    )
+    p_watch.add_argument(
+        '--webhook',
+        default=None,
+        help='POST each delta event to this URL as JSON',
+    )
+    p_watch.add_argument(
+        '--json',
+        action='store_true',
+        default=False,
+        help='Emit one JSON object per line on stdout (cron-friendly)',
+    )
+
     # serve — REST API
     p_serve = subparsers.add_parser(
         'serve',
@@ -1350,6 +1454,8 @@ def main() -> None:
         handle_tag(args)
     elif args.command == 'cases':
         handle_cases(args)
+    elif args.command == 'watch':
+        handle_watch(args)
     else:
         parser_arg.print_help()
 
