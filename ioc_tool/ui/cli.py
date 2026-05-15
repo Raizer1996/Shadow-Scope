@@ -599,8 +599,10 @@ def handle_enrich(args: argparse.Namespace) -> None:
     """
     want_json = getattr(args, 'json', False)
     want_csv = getattr(args, 'csv', False)
+    want_stix = getattr(args, 'stix', False)
+    want_md = getattr(args, 'md', False)
     no_cache = bool(getattr(args, 'no_cache', False))
-    machine_readable = want_json or want_csv
+    machine_readable = want_json or want_csv or want_stix or want_md
     msg_console = err_console if machine_readable else console
 
     iocs_to_process: list[str] = []
@@ -731,6 +733,12 @@ def handle_enrich(args: argparse.Namespace) -> None:
                     lines[i] = lines[i] + "," + buf.getvalue()
             csv_text = "\n".join(lines) + ("\n" if trailing_blank else "")
         sys.stdout.write(csv_text)
+        return
+    if want_stix:
+        print(output_mod.to_stix(results))
+        return
+    if want_md:
+        print(output_mod.to_markdown(results, include_summaries=summaries if want_summary else None))
         return
 
     print_aggregated_table(results, should_defang=getattr(args, 'defang', False))
@@ -1062,6 +1070,16 @@ def build_parser() -> argparse.ArgumentParser:
         '--csv',
         action='store_true',
         help='Output as CSV instead of rich table (stdout stays parse-clean)',
+    )
+    output_group.add_argument(
+        '--stix',
+        action='store_true',
+        help='Output as STIX 2.1 bundle (indicator SDOs) for SIEM / TIP ingestion',
+    )
+    output_group.add_argument(
+        '--md',
+        action='store_true',
+        help='Output as a Markdown report for case documentation',
     )
     # --summary is also exposed on the top-level parser (above) so it works
     # before the subcommand (`--summary enrich 8.8.8.8`); duplicating it on the
