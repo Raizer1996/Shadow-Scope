@@ -40,7 +40,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [x] **abuse.ch SSL Blacklist** — SHA-1 cert fingerprints, mirrored to disk; short-circuits non-SHA1 inputs; hit → 95
 - [x] **crt.sh certificate transparency** — subdomain enumeration + recent-issuance metadata; info-only score (15 ≥100 certs, 30 ≥1000)
 - [ ] **SecurityTrails** — passive DNS, historical WHOIS, subdomain enum. **[issue]**
-- [ ] **Pulsedive** — aggregator with built-in risk scoring. **[issue]**
+- [x] **Pulsedive** — free aggregator, anonymous tier works; optional `PULSEDIVE_API_KEY` unlocks higher quota; risk-tier mapped to 0-100 (critical=95, high=80, medium=55, low=25)
 - [ ] **IBM X-Force Exchange** — free tier reputation. **[issue]**
 - [ ] **Cisco Talos** — IP/domain reputation. **[issue]**
 - [ ] **Censys** — alternative to Shodan, free academic tier. **[issue]**
