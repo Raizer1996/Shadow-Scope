@@ -75,9 +75,9 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ## v0.6 — Smart Features (analyst intelligence)
 
-- [ ] **DGA detection** — entropy / ML scoring for algorithmically generated domains. **[issue]**
-- [ ] **NRD flag** — newly registered domain (< 30 days) → bump score. **[issue]**
-- [ ] **Typosquatting / homograph detection** — alert on lookalikes of org domains. **[issue]**
+- [x] **DGA detection** — entropy + bigram improbability + consonant-run scoring (domain IOCs)
+- [x] **NRD flag** — newly registered domain via WHOIS creation_date → 4 buckets (fresh/nrd/recent/mature)
+- [x] **Typosquatting / homograph detection** — confusable-aware Damerau-Levenshtein vs `WATCHLIST_DOMAINS` env (rn→m, 1→l, 0→o, etc.)
 - [ ] **Pivot suggestions** — given IP, surface related domains via PDNS / cert overlap. **[issue]**
 - [ ] **Reverse DNS** lookup on every IP. **[issue]**
 - [ ] **Suspicious TLD scoring** — `.tk / .top / .xyz / .surf` bump. **[issue]**
