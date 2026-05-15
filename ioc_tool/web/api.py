@@ -350,8 +350,45 @@ def _ui_record_id(ioc: str, ioc_type: str) -> str:
     return f"ioc_{digest}"
 
 
+def _synthesize_geo(modules_raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Build a unified geo block for the dashboard from Shodan + IPinfo data.
+
+    Returns ``None`` when no geo data is available (e.g. non-IP IOC, or both
+    sources empty). The dashboard renders the IP CORE + NETWORK GEO panels
+    only when this is populated.
+    """
+    shodan = (modules_raw.get("Shodan") or {}).get("data") or {}
+    ipinfo = (modules_raw.get("IPinfo") or {}).get("data") or {}
+
+    lat = shodan.get("latitude") or ipinfo.get("loc", "").split(",")[0] if ipinfo.get("loc") else shodan.get("latitude")
+    lon = shodan.get("longitude") or (ipinfo.get("loc", "").split(",")[1] if ipinfo.get("loc") else None)
+    try:
+        lat = float(lat) if lat is not None and lat != "" else None
+        lon = float(lon) if lon is not None and lon != "" else None
+    except (TypeError, ValueError):
+        lat = lon = None
+
+    country = shodan.get("country_code") or ipinfo.get("country")
+    if not country and not lat and not lon:
+        return None
+
+    return {
+        "country": country,
+        "country_name": shodan.get("country_name") or ipinfo.get("country") or "",
+        "city": shodan.get("city") or ipinfo.get("city") or "",
+        "region": shodan.get("region_code") or ipinfo.get("region") or "",
+        "lat": lat,
+        "lon": lon,
+        "asn": shodan.get("asn") or ipinfo.get("org", "").split()[0] if ipinfo.get("org", "").startswith("AS") else shodan.get("asn") or "",
+        "org": shodan.get("org") or shodan.get("isp") or ipinfo.get("org") or "",
+        "hostnames": shodan.get("hostnames") or ([ipinfo.get("hostname")] if ipinfo.get("hostname") else []),
+        "ports": shodan.get("ports") or [],
+        "tags": shodan.get("tags") or [],
+    }
+
+
 def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, Any]:
-    """Add ``id``, ``agreement``, per-module ``detail``, and ``enriched_at`` to a raw enrichment."""
+    """Add ``id``, ``agreement``, per-module ``detail``, ``enriched_at``, and ``geo`` to a raw enrichment."""
     ioc = result.get("ioc", "")
     ioc_type = result.get("type", "")
     modules_raw = result.get("modules") or {}
@@ -367,7 +404,7 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
             "data": data,
         }
 
-    return {
+    shaped: dict[str, Any] = {
         "id": _ui_record_id(ioc, ioc_type),
         "ioc": ioc,
         "type": ioc_type,
@@ -377,6 +414,11 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
         "agreement": output.consensus_summary(result),
         "modules": modules_ui,
     }
+    if ioc_type == "ip":
+        geo = _synthesize_geo(modules_raw)
+        if geo is not None:
+            shaped["geo"] = geo
+    return shaped
 
 
 @app.get("/api/ui/enrich", dependencies=[Depends(require_token)])

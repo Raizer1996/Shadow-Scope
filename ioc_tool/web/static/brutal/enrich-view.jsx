@@ -16,7 +16,7 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
   const adjustedScore = disabledSources.size > 0 ? window.recomputeComposite(ioc, disabledSources) : ioc.final_score;
   const sev = sevOf(adjustedScore);
   const symbolicFlags = window.IOC_FLAGS(ioc);
-  const hasGeo = !!window.SHODAN_DATA[ioc.id];
+  const hasGeo = !!(ioc.geo || window.SHODAN_DATA[ioc.id]);
 
   const toggleSource = (name) => {
     const next = new Set(disabledSources);
@@ -111,9 +111,10 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
           </div>
         </div>
 
-        <div className="hero-right">
+        <div className={`hero-right ${hasGeo ? "has-geo" : ""}`}>
+          {hasGeo && <IpCorePanel ioc={ioc} fmt={fmt} />}
           <SpiderChart ioc={ioc} sev={sev} disabledSources={disabledSources} />
-          {hasGeo && <GeoShodanPanel ioc={ioc} />}
+          {hasGeo && <NetworkGeoPanel ioc={ioc} />}
         </div>
       </section>
 

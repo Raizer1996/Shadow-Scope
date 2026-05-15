@@ -332,246 +332,170 @@ function PatternDefs() {
 
 window.recomputeComposite = recomputeComposite;
 
-// ─────────── Geo + Shodan panel (right of spider) ───────────
+// ─────────── IP Core + Network Geo (split-panel, Leaflet-backed) ───────────
+//
+// IpCorePanel renders the IP identity column (country, ASN, org, hostnames,
+// open ports, tags). NetworkGeoPanel renders the Leaflet map. Both consume
+// ioc.geo (live backend) when present, and fall back to the mock
+// window.SHODAN_DATA[ioc.id] used by the design prototype so screenshots
+// still render with the canned eight-IOC set.
 
-function GeoShodanPanel({ ioc }) {
-  const data = window.SHODAN_DATA[ioc.id];
-  if (!data) return null;
-
-  // Equirectangular projection — 360w × 180h viewBox keeps math trivial
-  const W = 360, H = 180;
-  const project = (lon, lat) => ({
-    x: ((lon + 180) / 360) * W,
-    y: ((90 - lat) / 180) * H
-  });
-  const pos = project(data.lon, data.lat);
-
-  // Dense dot grid — 144x72 = 10,368 candidate cells, ~3000 over land
-  const GX = 144, GY = 72;
-  const dots = [];
-  for (let i = 0; i < GX; i++) {
-    for (let j = 0; j < GY; j++) {
-      const lon = (i / GX) * 360 - 180;
-      const lat = 90 - (j / GY) * 180;
-      if (!isLand(lon, lat)) continue;
-      const p = project(lon, lat);
-      dots.push({ x: p.x, y: p.y });
-    }
+function _geoFor(ioc) {
+  if (ioc.geo && (ioc.geo.lat != null || ioc.geo.country)) return ioc.geo;
+  const mock = window.SHODAN_DATA && window.SHODAN_DATA[ioc.id];
+  if (mock) {
+    return {
+      country: mock.country,
+      country_name: mock.country_name,
+      city: mock.city,
+      region: mock.region || "",
+      lat: mock.lat,
+      lon: mock.lon,
+      asn: mock.asn,
+      org: mock.org,
+      hostnames: mock.hostnames || [],
+      ports: (mock.ports || []).map(p => typeof p === "object" ? p : { port: p }),
+      tags: mock.tags || []
+    };
   }
+  return null;
+}
 
+function IpCorePanel({ ioc, fmt }) {
+  const g = _geoFor(ioc);
+  if (!g) return null;
+  const ports = g.ports || [];
   return (
-    <div className="geo-panel">
-      <div className="geo-head">
-        <span className="geo-title">NETWORK · GEO</span>
-        <span className="geo-meta">shodan · maxmind · {dots.length.toLocaleString()} land cells</span>
+    <div className="ip-core-panel">
+      <div className="ipc-head">
+        <span className="ipc-title">IP CORE</span>
+        <span className="ipc-meta">identity · routing</span>
       </div>
-      <div className="geo-map">
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-          {/* Graticule — meridians + parallels at 30° */}
-          {[-150,-120,-90,-60,-30,0,30,60,90,120,150].map(lon => {
-            const x = ((lon + 180) / 360) * W;
-            return <line key={"m"+lon} x1={x} y1="0" x2={x} y2={H} stroke="#171717" strokeWidth="0.4" />;
-          })}
-          {[-60,-30,0,30,60].map(lat => {
-            const y = ((90 - lat) / 180) * H;
-            return <line key={"p"+lat} x1="0" y1={y} x2={W} y2={y} stroke="#171717" strokeWidth="0.4" />;
-          })}
-          {/* Equator + prime meridian bolder */}
-          <line x1="0" y1={H/2} x2={W} y2={H/2} stroke="#262626" strokeWidth="0.6" />
-          <line x1={W/2} y1="0" x2={W/2} y2={H} stroke="#262626" strokeWidth="0.6" />
-          {/* Tropics + arctic circles (dashed) */}
-          {[23.5, -23.5, 66.5, -66.5].map(lat => {
-            const y = ((90 - lat) / 180) * H;
-            return <line key={"tr"+lat} x1="0" y1={y} x2={W} y2={y} stroke="#202020" strokeWidth="0.3" strokeDasharray="1 2" />;
-          })}
-
-          {/* Land dots */}
-          {dots.map((d, i) => (
-            <rect key={i} x={d.x} y={d.y} width="1.2" height="1.2" fill="#3a3a3a" />
-          ))}
-
-          {/* Highlight cells near target — emphasis */}
-          {dots.filter(d => Math.hypot(d.x - pos.x, d.y - pos.y) < 18).map((d, i) => (
-            <rect key={"h"+i} x={d.x} y={d.y} width="1.2" height="1.2" fill="var(--accent)" opacity="0.5" />
-          ))}
-
-          {/* Crosshair */}
-          <line x1={pos.x} y1="0" x2={pos.x} y2={H} stroke="var(--accent)" strokeOpacity="0.35" strokeWidth="0.5" strokeDasharray="2 2" />
-          <line x1="0" y1={pos.y} x2={W} y2={pos.y} stroke="var(--accent)" strokeOpacity="0.35" strokeWidth="0.5" strokeDasharray="2 2" />
-
-          {/* Pulse */}
-          <circle cx={pos.x} cy={pos.y} r="2" fill="none" stroke="var(--accent)" strokeWidth="0.8">
-            <animate attributeName="r" from="2" to="14" dur="2.4s" repeatCount="indefinite" />
-            <animate attributeName="stroke-opacity" from="1" to="0" dur="2.4s" repeatCount="indefinite" />
-          </circle>
-          {/* Target dot */}
-          <circle cx={pos.x} cy={pos.y} r="2.5" fill="var(--accent)" />
-          <rect x={pos.x - 1.5} y={pos.y - 1.5} width="3" height="3" fill="var(--bg)" />
-          <rect x={pos.x - 0.6} y={pos.y - 0.6} width="1.2" height="1.2" fill="var(--accent)" />
-
-          {/* Country code label near point */}
-          <g transform={`translate(${pos.x + 6}, ${pos.y - 4})`}>
-            <rect x="0" y="-6" width={data.country.length * 4 + 4} height="8" fill="var(--accent)" />
-            <text x="2" y="0" fill="var(--bg)" fontFamily="JetBrains Mono" fontSize="6" fontWeight="800">{data.country}</text>
-          </g>
-        </svg>
-        <div className="geo-coords">
-          <span>{data.lat.toFixed(4)}° N · {data.lon.toFixed(4)}° E</span>
-        </div>
-        <div className="geo-scale">
-          <span className="gs-tick">0</span>
-          <span className="gs-line" />
-          <span className="gs-tick">EQUATOR</span>
-          <span className="gs-line" />
-          <span className="gs-tick">{W}°</span>
-        </div>
-      </div>
-
-      <div className="geo-meta-grid">
-        <div className="gm-row">
-          <span className="gm-k">COUNTRY</span>
-          <span className="gm-v">
-            <span className="flag-cc">{data.country}</span> {data.country_name}
-          </span>
-        </div>
-        <div className="gm-row">
-          <span className="gm-k">CITY</span>
-          <span className="gm-v">{data.city}</span>
-        </div>
-        <div className="gm-row">
-          <span className="gm-k">ASN</span>
-          <span className="gm-v"><Copyable text={data.asn}>{data.asn}</Copyable></span>
-        </div>
-        <div className="gm-row">
-          <span className="gm-k">ORG</span>
-          <span className="gm-v">{data.org}</span>
-        </div>
-        {data.hostnames.length > 0 && (
-          <div className="gm-row">
-            <span className="gm-k">RDNS</span>
-            <span className="gm-v">{data.hostnames.join(", ")}</span>
+      <div className="ipc-grid">
+        {g.country && (
+          <div className="ipc-row">
+            <span className="ipc-k">COUNTRY</span>
+            <span className="ipc-v">
+              <span className="flag-cc">{g.country}</span>{g.country_name ? " " + g.country_name : ""}
+            </span>
+          </div>
+        )}
+        {g.city && (
+          <div className="ipc-row">
+            <span className="ipc-k">CITY</span>
+            <span className="ipc-v">{g.city}{g.region ? " · " + g.region : ""}</span>
+          </div>
+        )}
+        {g.asn && (
+          <div className="ipc-row">
+            <span className="ipc-k">ASN</span>
+            <span className="ipc-v"><Copyable text={String(g.asn)}>{g.asn}</Copyable></span>
+          </div>
+        )}
+        {g.org && (
+          <div className="ipc-row">
+            <span className="ipc-k">ORG</span>
+            <span className="ipc-v">{g.org}</span>
+          </div>
+        )}
+        {g.hostnames && g.hostnames.length > 0 && (
+          <div className="ipc-row">
+            <span className="ipc-k">RDNS</span>
+            <span className="ipc-v">{g.hostnames.filter(Boolean).join(", ")}</span>
           </div>
         )}
       </div>
 
-      <div className="ports-block">
-        <div className="ports-head">
-          <span className="ports-title">OPEN PORTS</span>
-          <span className="ports-meta">{data.ports.length} services · last scan 4h ago</span>
+      {ports.length > 0 && (
+        <div className="ipc-ports">
+          <div className="ipc-ports-head">
+            <span className="ipc-ports-title">OPEN PORTS</span>
+            <span className="ipc-ports-meta">{ports.length} services</span>
+          </div>
+          <div className="ipc-ports-list">
+            {ports.slice(0, 8).map((p, i) => {
+              const port = typeof p === "object" ? p.port : p;
+              const svc = (typeof p === "object" && p.service) ? p.service : "";
+              const risk = (typeof p === "object" && typeof p.risk === "number") ? p.risk : 0;
+              const s = sevOf(risk);
+              return (
+                <div key={port + ":" + i} className="port-row" title={typeof p === "object" ? p.banner : ""}>
+                  <span className="port-num" style={{ borderColor: s.fg, color: s.fg }}>{port}</span>
+                  <span className="port-svc">{svc || "·"}</span>
+                  <span className="port-risk" style={{ color: s.fg }}>{risk > 0 ? `r${risk}` : ""}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <div className="ports-list">
-          {data.ports.map(p => {
-            const s = sevOf(p.risk);
-            return (
-              <div key={p.port} className="port-row" title={p.banner}>
-                <span className="port-num" style={{borderColor: s.fg, color: s.fg}}>{p.port}</span>
-                <span className="port-svc">{p.service}</span>
-                <span className="port-banner">{p.banner}</span>
-                <span className="port-risk" style={{color: s.fg}}>{p.risk > 0 ? `risk ${p.risk}` : "·"}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      )}
 
-      {data.tags.length > 0 && (
-        <div className="geo-tags">
-          {data.tags.map(t => <span key={t} className="geo-tag">#{t}</span>)}
+      {g.tags && g.tags.length > 0 && (
+        <div className="ipc-tags">
+          {g.tags.slice(0, 6).map(t => <span key={t} className="geo-tag">#{t}</span>)}
         </div>
       )}
     </div>
   );
 }
 
-// Land-mask — more accurate continent boundaries.
-function isLand(lon, lat) {
-  // ─ NORTH AMERICA ─
-  // Alaska
-  if (lon >= -170 && lon <= -141 && lat >= 54 && lat <= 71) return true;
-  // Yukon / NWT / mainland Canada
-  if (lon >= -141 && lon <= -53 && lat >= 49 && lat <= 70) {
-    if (lon > -75 && lat > 60) return lat <= 67; // Quebec
-    if (lon > -65 && lat < 55) return false; // Atlantic
-    return true;
-  }
-  // Lower 48 + Mexico
-  if (lon >= -125 && lon <= -67 && lat >= 25 && lat <= 49) {
-    if (lon < -120 && lat < 32) return false; // baja gap
-    return true;
-  }
-  // Baja California
-  if (lon >= -118 && lon <= -109 && lat >= 22 && lat <= 33) return true;
-  // Mexico mainland
-  if (lon >= -109 && lon <= -86 && lat >= 14 && lat <= 33) return true;
-  // Central America
-  if (lon >= -92 && lon <= -77 && lat >= 8 && lat <= 18) return true;
-  // Greenland
-  if (lon >= -55 && lon <= -22 && lat >= 60 && lat <= 83) return true;
-  // Caribbean (sparse — Cuba, Hispaniola)
-  if (lon >= -85 && lon <= -74 && lat >= 19 && lat <= 23) return true; // Cuba
-  if (lon >= -75 && lon <= -68 && lat >= 17 && lat <= 20) return true; // Hispaniola
+// Leaflet map panel — real OpenStreetMap tiles. Initialised once per IOC
+// via useEffect; cleaned up when the IOC changes so we don't leak handles.
+function NetworkGeoPanel({ ioc }) {
+  const g = _geoFor(ioc);
+  const ref = React.useRef(null);
+  const mapRef = React.useRef(null);
 
-  // ─ SOUTH AMERICA ─
-  if (lon >= -82 && lon <= -34 && lat >= -56 && lat <= 13) {
-    // tapered Patagonia
-    if (lat < -38 && lon < -72) return false;
-    if (lat < -50 && lon > -65) return false;
-    return true;
-  }
+  React.useEffect(() => {
+    if (!g || g.lat == null || g.lon == null) return;
+    if (typeof L === "undefined") return;  // Leaflet not loaded — silent skip
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+    const map = L.map(ref.current, {
+      center: [g.lat, g.lon],
+      zoom: 4,
+      zoomControl: true,
+      attributionControl: true,
+      preferCanvas: true,
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18,
+      attribution: '© OSM',
+      className: "ss-tile",
+    }).addTo(map);
+    L.circleMarker([g.lat, g.lon], {
+      radius: 8,
+      color: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ff6b35",
+      weight: 2,
+      fillOpacity: 0.5,
+    }).addTo(map).bindPopup(`<b>${ioc.ioc}</b><br>${g.city || ""} ${g.country || ""}`);
+    mapRef.current = map;
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [ioc.id, g && g.lat, g && g.lon]);
 
-  // ─ EUROPE ─
-  // Iberian + France + Italy + Balkans + central
-  if (lon >= -10 && lon <= 30 && lat >= 36 && lat <= 60) return true;
-  // British Isles
-  if (lon >= -10 && lon <= 2 && lat >= 50 && lat <= 60) return true;
-  // Scandinavia
-  if (lon >= 4 && lon <= 32 && lat >= 55 && lat <= 71) return true;
-  // Russia (west)
-  if (lon >= 30 && lon <= 60 && lat >= 42 && lat <= 70) return true;
-
-  // ─ AFRICA ─
-  // North Africa
-  if (lon >= -17 && lon <= 36 && lat >= 4 && lat <= 36) return true;
-  // Horn of Africa
-  if (lon >= 36 && lon <= 52 && lat >= 0 && lat <= 18) return true;
-  // Central + southern
-  if (lon >= 8 && lon <= 42 && lat >= -36 && lat <= 4) return true;
-  // West Africa coast bulge
-  if (lon >= -17 && lon <= 8 && lat >= -6 && lat <= 16) return true;
-  // Madagascar
-  if (lon >= 43 && lon <= 51 && lat >= -26 && lat <= -12) return true;
-
-  // ─ ASIA ─
-  // Middle East
-  if (lon >= 34 && lon <= 65 && lat >= 12 && lat <= 42) return true;
-  // Russia (siberia) — wide band
-  if (lon >= 60 && lon <= 180 && lat >= 50 && lat <= 75) return true;
-  // China + Mongolia
-  if (lon >= 73 && lon <= 135 && lat >= 18 && lat <= 50) return true;
-  // India / subcontinent
-  if (lon >= 68 && lon <= 92 && lat >= 7 && lat <= 36) return true;
-  // SE Asia (Thailand, Vietnam)
-  if (lon >= 92 && lon <= 110 && lat >= 5 && lat <= 28) return true;
-  // Korea + Japan
-  if (lon >= 124 && lon <= 146 && lat >= 30 && lat <= 46) return true;
-  // Indonesia / Philippines (sparse archipelago)
-  if (lon >= 95 && lon <= 142 && lat >= -10 && lat <= 6) {
-    // skip a couple sea gaps
-    if (lon > 105 && lon < 110 && lat > -2 && lat < 3) return false;
-    return true;
-  }
-  // Philippines
-  if (lon >= 117 && lon <= 127 && lat >= 5 && lat <= 19) return true;
-
-  // ─ OCEANIA ─
-  if (lon >= 113 && lon <= 154 && lat >= -39 && lat <= -10) return true;
-  // New Zealand
-  if (lon >= 165 && lon <= 179 && lat >= -47 && lat <= -34) return true;
-  // PNG
-  if (lon >= 140 && lon <= 152 && lat >= -10 && lat <= -2) return true;
-
-  return false;
+  if (!g) return null;
+  return (
+    <div className="net-geo-panel">
+      <div className="ngp-head">
+        <span className="ngp-title">NETWORK GEO</span>
+        <span className="ngp-meta">
+          {g.lat != null && g.lon != null
+            ? `${g.lat.toFixed(3)}° · ${g.lon.toFixed(3)}°`
+            : "no coords"}
+        </span>
+      </div>
+      <div ref={ref} className="ngp-map" />
+    </div>
+  );
 }
+
 
 // ─────────── Flag strip (symbolic indicators) ───────────
 
