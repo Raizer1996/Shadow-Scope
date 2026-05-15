@@ -53,30 +53,34 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
           {symbolicFlags.length > 0 && <FlagStrip ioc={ioc} />}
 
           <div className="hero-grid">
-            {/* Brutalist score block */}
-            <div className="score-block" style={{ borderColor: sev.fg }}>
-              <div className="score-top">
-                <span>SCORE / 100</span>
-                <span className="dim">{ioc.type}</span>
-              </div>
-              <div className="score-num-big" style={{ color: sev.fg }}>{String(adjustedScore).padStart(2, "0")}</div>
-              <div className="score-bar">
-                <div className="score-bar-fill" style={{ width: `${adjustedScore}%`, background: sev.fg }} />
-                <span className="score-tick" style={{ left: "20%" }} />
-                <span className="score-tick" style={{ left: "40%" }} />
-                <span className="score-tick" style={{ left: "60%" }} />
-                <span className="score-tick" style={{ left: "80%" }} />
-              </div>
-              <div className="score-tier-banner" style={{ background: sev.fg, color: "var(--bg)" }}>
-                <span className="stb-glyph">{sev.label === "CRITICAL" ? "[!!!]" : sev.label === "HIGH" ? "[!!]" : sev.label === "MEDIUM" ? "[!]" : sev.label === "LOW" ? "[·]" : "[ok]"}</span>
-                <span className="stb-label glitch" data-text={sev.label}>{sev.label}</span>
-              </div>
-              {disabledSources.size > 0 && (
-                <div className="score-adjusted">
-                  <span>ADJUSTED · {disabledSources.size} src excluded</span>
-                  <button onClick={resetSources}>reset</button>
+            {/* Brutalist score block + IP CORE stacked below */}
+            <div className="score-stack">
+              <div className="score-block" style={{ borderColor: sev.fg }}>
+                <div className="score-top">
+                  <span>SCORE / 100</span>
+                  <span className="dim">{ioc.type}</span>
                 </div>
-              )}
+                <div className="score-num-big" style={{ color: sev.fg }}>{String(adjustedScore).padStart(2, "0")}</div>
+                <div className="score-bar">
+                  <div className="score-bar-fill" style={{ width: `${adjustedScore}%`, background: sev.fg }} />
+                  <span className="score-tick" style={{ left: "20%" }} />
+                  <span className="score-tick" style={{ left: "40%" }} />
+                  <span className="score-tick" style={{ left: "60%" }} />
+                  <span className="score-tick" style={{ left: "80%" }} />
+                </div>
+                <div className="score-tier-banner" style={{ background: sev.fg, color: "var(--bg)" }}>
+                  <span className="stb-glyph">{sev.label === "CRITICAL" ? "[!!!]" : sev.label === "HIGH" ? "[!!]" : sev.label === "MEDIUM" ? "[!]" : sev.label === "LOW" ? "[·]" : "[ok]"}</span>
+                  <span className="stb-label glitch" data-text={sev.label}>{sev.label}</span>
+                </div>
+                {disabledSources.size > 0 && (
+                  <div className="score-adjusted">
+                    <span>ADJUSTED · {disabledSources.size} src excluded</span>
+                    <button onClick={resetSources}>reset</button>
+                  </div>
+                )}
+              </div>
+
+              {hasGeo && <IpCorePanel ioc={ioc} fmt={fmt} />}
             </div>
 
             <div className="hero-meta">
@@ -111,8 +115,9 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
           </div>
         </div>
 
+        <HeroSplitter />
+
         <div className={`hero-right ${hasGeo ? "has-geo" : ""}`}>
-          {hasGeo && <IpCorePanel ioc={ioc} fmt={fmt} />}
           <SpiderChart ioc={ioc} sev={sev} disabledSources={disabledSources} />
           {hasGeo && <NetworkGeoPanel ioc={ioc} />}
         </div>
@@ -299,6 +304,85 @@ function CaseChip({ caseId }) {
       <span className="chip-meta dim small">{c?.iocs?.length || 1} IOC</span>
       <span className="chip-help" title={explain}>?</span>
     </div>
+  );
+}
+
+// Draggable column splitter between hero-left (score + IP core) and hero-right
+// (source profile + map). Drag → updates --hero-left-fr / --hero-right-fr CSS
+// vars on :root. Choice persists to localStorage so a return visit keeps the
+// analyst's preferred split.
+function HeroSplitter() {
+  const dragging = React.useRef(false);
+  const heroRef = React.useRef(null);
+  const dividerRef = React.useRef(null);
+
+  React.useEffect(() => {
+    try {
+      const saved = localStorage.getItem("ss_hero_split");
+      if (saved) {
+        const v = parseFloat(saved);
+        if (!isNaN(v) && v >= 0.15 && v <= 0.65) {
+          document.documentElement.style.setProperty("--hero-left-fr", v.toFixed(3) + "fr");
+          document.documentElement.style.setProperty("--hero-right-fr", (1 - v).toFixed(3) + "fr");
+        }
+      }
+    } catch (e) {}
+  }, []);
+
+  React.useEffect(() => {
+    if (dividerRef.current) {
+      heroRef.current = dividerRef.current.closest(".hero");
+    }
+    const onMove = (e) => {
+      if (!dragging.current || !heroRef.current) return;
+      const rect = heroRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const ratio = Math.max(0.18, Math.min(0.62, x / rect.width));
+      document.documentElement.style.setProperty("--hero-left-fr", ratio.toFixed(3) + "fr");
+      document.documentElement.style.setProperty("--hero-right-fr", (1 - ratio).toFixed(3) + "fr");
+      try { localStorage.setItem("ss_hero_split", String(ratio)); } catch (err) {}
+    };
+    const onUp = () => {
+      if (dragging.current && dividerRef.current) {
+        dividerRef.current.classList.remove("dragging");
+      }
+      dragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const onDown = (e) => {
+    e.preventDefault();
+    dragging.current = true;
+    if (dividerRef.current) dividerRef.current.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  const onDblClick = () => {
+    // Reset to default split.
+    document.documentElement.style.removeProperty("--hero-left-fr");
+    document.documentElement.style.removeProperty("--hero-right-fr");
+    try { localStorage.removeItem("ss_hero_split"); } catch (e) {}
+  };
+
+  return (
+    <div
+      ref={dividerRef}
+      className="hero-splitter"
+      role="separator"
+      aria-orientation="vertical"
+      title="Drag to resize · double-click to reset"
+      onMouseDown={onDown}
+      onDoubleClick={onDblClick}
+    />
   );
 }
 
