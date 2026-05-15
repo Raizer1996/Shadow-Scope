@@ -1,4 +1,4 @@
-"""Tests for ASN IOC type — parser, normalize, bgpview.io module."""
+"""Tests for ASN IOC type — parser, normalize, RIPE Stat module."""
 
 import responses
 
@@ -40,67 +40,118 @@ def test_normalize_asn_strips_leading_zeros():
 
 
 # ---------------------------------------------------------------------------
-# bgpview.io module
+# RIPE Stat module
 # ---------------------------------------------------------------------------
 
 
-_SAMPLE = {
+_OVERVIEW = {
     "status": "ok",
     "data": {
-        "asn": 15169,
-        "name": "GOOGLE",
-        "description_short": "Google LLC",
-        "country_code": "US",
-        "rir_allocation": {"rir_name": "ARIN", "date_allocated": "2000-03-30"},
-        "website": "https://www.google.com",
+        "holder": "GOOGLE, US",
+        "type": "as",
+        "announced": True,
+        "resource": "15169",
+        "block": {"resource": "15169", "name": "AS15169"},
         "looking_glass": None,
-        "traffic_estimation": None,
-        "email_contacts": ["arin-contact@google.com"],
-        "abuse_contacts": ["network-abuse@google.com"],
+    },
+}
+
+_PREFIXES = {
+    "status": "ok",
+    "data": {
+        "prefixes": [
+            {"prefix": "8.8.8.0/24"},
+            {"prefix": "8.8.4.0/24"},
+            {"prefix": "172.217.0.0/16"},
+        ]
     },
 }
 
 
 @responses.activate
 def test_asn_module_returns_summary():
-    responses.add(responses.GET, f"{asn_mod.BASE_URL}/asn/15169", json=_SAMPLE, status=200)
+    responses.add(
+        responses.GET,
+        f"{asn_mod.BASE_URL}/as-overview/data.json",
+        json=_OVERVIEW,
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        f"{asn_mod.BASE_URL}/announced-prefixes/data.json",
+        json=_PREFIXES,
+        status=200,
+    )
     result = asn_mod.enrich("AS15169")
     assert result is not None
     assert result["asn"] == 15169
     assert result["name"] == "GOOGLE"
-    assert result["country_code"] == "US"
-    assert result["rir_name"] == "ARIN"
-    assert "network-abuse@google.com" in result["abuse_contacts"]
+    assert result["description_short"] == "GOOGLE, US"
+    assert result["rir_name"] == "RIPE NCC"
+    assert result["announced_prefixes_count"] == 3
+    assert result["is_active"] is True
 
 
 @responses.activate
-def test_asn_module_handles_404():
-    responses.add(responses.GET, f"{asn_mod.BASE_URL}/asn/99999999", status=404)
+def test_asn_module_overview_404_returns_none():
+    responses.add(
+        responses.GET,
+        f"{asn_mod.BASE_URL}/as-overview/data.json",
+        status=404,
+    )
     assert asn_mod.enrich("AS99999999") is None
 
 
 @responses.activate
-def test_asn_module_handles_500():
-    responses.add(responses.GET, f"{asn_mod.BASE_URL}/asn/15169", status=500)
+def test_asn_module_overview_500_returns_none():
+    responses.add(
+        responses.GET,
+        f"{asn_mod.BASE_URL}/as-overview/data.json",
+        status=500,
+    )
     assert asn_mod.enrich("AS15169") is None
 
 
 @responses.activate
 def test_asn_module_handles_malformed_json():
-    responses.add(responses.GET, f"{asn_mod.BASE_URL}/asn/15169", body="not json", status=200)
+    responses.add(
+        responses.GET,
+        f"{asn_mod.BASE_URL}/as-overview/data.json",
+        body="not json",
+        status=200,
+    )
     assert asn_mod.enrich("AS15169") is None
 
 
 @responses.activate
-def test_asn_module_handles_error_status():
-    """``status != 'ok'`` in payload → treat as miss."""
+def test_asn_module_error_status_returns_none():
     responses.add(
         responses.GET,
-        f"{asn_mod.BASE_URL}/asn/15169",
-        json={"status": "error", "status_message": "rate limited"},
+        f"{asn_mod.BASE_URL}/as-overview/data.json",
+        json={"status": "error"},
         status=200,
     )
     assert asn_mod.enrich("AS15169") is None
+
+
+@responses.activate
+def test_asn_module_prefixes_failure_does_not_block_overview():
+    """If the prefix-count secondary call fails, the overview still returns."""
+    responses.add(
+        responses.GET,
+        f"{asn_mod.BASE_URL}/as-overview/data.json",
+        json=_OVERVIEW,
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        f"{asn_mod.BASE_URL}/announced-prefixes/data.json",
+        status=500,
+    )
+    result = asn_mod.enrich("AS15169")
+    assert result is not None
+    assert result["asn"] == 15169
+    assert result["announced_prefixes_count"] is None
 
 
 def test_asn_module_invalid_input_returns_none():

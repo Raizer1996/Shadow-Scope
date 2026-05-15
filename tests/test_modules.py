@@ -302,9 +302,49 @@ def test_ipinfo_enrich_ip_returns_none_on_429(monkeypatch: pytest.MonkeyPatch) -
     assert ipinfo_mod.enrich_ip("1.2.3.4") is None
 
 
-def test_ipinfo_enrich_ip_skips_without_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ipinfo_enrich_ip_without_key_attempts_anonymous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without either env var, the module still attempts an anonymous fetch.
+
+    IPinfo's free tier allows a few requests/day without a token; the
+    module no longer hard-bails when no key is set, but failed requests
+    still return None (covered by other tests).
+    """
     monkeypatch.delenv("IP_INFO_API", raising=False)
+    monkeypatch.delenv("IPINFO_API_KEY", raising=False)
+    # Force the network call to fail so the test stays offline.
+    import requests as _requests
+
+    def _boom(*a, **kw):
+        raise _requests.exceptions.ConnectionError("offline test")
+
+    monkeypatch.setattr(_requests, "get", _boom)
     assert ipinfo_mod.enrich_ip("1.2.3.4") is None
+
+
+def test_ipinfo_reads_new_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The historical ``IP_INFO_API`` env name still works for back-compat."""
+    monkeypatch.delenv("IPINFO_API_KEY", raising=False)
+    monkeypatch.setenv("IP_INFO_API", "legacy-token")
+    captured: dict = {}
+    import requests as _requests
+
+    def _capture(url, params=None, **kw):
+        captured["url"] = url
+        captured["params"] = params
+
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {"ip": "1.2.3.4"}
+
+        return _Resp()
+
+    monkeypatch.setattr(_requests, "get", _capture)
+    ipinfo_mod.enrich_ip("1.2.3.4")
+    assert captured["params"]["token"] == "legacy-token"
 
 
 # ---------------------------------------------------------------------------
@@ -1030,40 +1070,65 @@ class TestOTX:
             == 0
         )
 
-    def test_otx_score_few_pulses(self) -> None:
-        """1–2 pulses → 50."""
+    def test_otx_score_few_pulses_no_strong_signal(self) -> None:
+        """1–2 pulses, no adversary attribution, neutral rep → weak (10)."""
         assert (
             score_mod.calculate_otx_score(
                 {"pulse_info": {"count": 2, "pulses": []}, "reputation": 0}
             )
-            == 50
+            == 10
         )
 
-    def test_otx_score_many_pulses(self) -> None:
-        """3–9 pulses → 75."""
+    def test_otx_score_with_adversary(self) -> None:
+        """A pulse naming an adversary = strong signal regardless of count → 90."""
         assert (
             score_mod.calculate_otx_score(
-                {"pulse_info": {"count": 5, "pulses": []}, "reputation": 0}
-            )
-            == 75
-        )
-
-    def test_otx_score_widespread(self) -> None:
-        """≥10 pulses → 90."""
-        assert (
-            score_mod.calculate_otx_score(
-                {"pulse_info": {"count": 12, "pulses": []}, "reputation": 0}
+                {
+                    "pulse_info": {"count": 1, "pulses": [{"adversary": "APT28"}]},
+                    "reputation": 0,
+                }
             )
             == 90
         )
 
-    def test_otx_score_negative_rep_bumps(self) -> None:
-        """pulse_count=10 + reputation=-5 → 90 + 10 = 100 (capped)."""
+    def test_otx_score_many_pulses_no_strong(self) -> None:
+        """3–9 pulses without adversary attribution → weak (25)."""
+        assert (
+            score_mod.calculate_otx_score(
+                {"pulse_info": {"count": 5, "pulses": []}, "reputation": 0}
+            )
+            == 25
+        )
+
+    def test_otx_score_widespread_no_strong(self) -> None:
+        """≥10 pulses, no adversary, neutral rep → weak (35)."""
+        assert (
+            score_mod.calculate_otx_score(
+                {"pulse_info": {"count": 12, "pulses": []}, "reputation": 0}
+            )
+            == 35
+        )
+
+    def test_otx_score_negative_rep_strong(self) -> None:
+        """reputation < -2 = strong signal → 90."""
         assert (
             score_mod.calculate_otx_score(
                 {"pulse_info": {"count": 10, "pulses": []}, "reputation": -5}
             )
-            == 100
+            == 90
+        )
+
+    def test_otx_score_false_positive_suppressed(self) -> None:
+        """false_positive flag forces score to 0 regardless of pulses + rep."""
+        assert (
+            score_mod.calculate_otx_score(
+                {
+                    "pulse_info": {"count": 100, "pulses": []},
+                    "reputation": -10,
+                    "false_positive": True,
+                }
+            )
+            == 0
         )
 
     def test_otx_score_none(self) -> None:

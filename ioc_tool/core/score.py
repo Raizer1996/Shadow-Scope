@@ -131,23 +131,36 @@ def calculate_greynoise_score(data: dict | None) -> int:
 
 
 def calculate_otx_score(data: dict | None) -> int:
-    """AlienVault OTX pulse count + reputation drive risk.
+    """AlienVault OTX pulse count + reputation + verification gate.
 
-    OTX surfaces analyst-curated **pulses** that reference an IOC; the
-    more pulses, the more widely-reported the threat. Negative
-    ``reputation`` (OTX's own community signal) tilts the score up.
+    OTX surfaces analyst-curated pulses, but well-known benign IOCs
+    (Google, Cloudflare, Tor exit lists, DNS resolvers) often accrue
+    dozens of pulses by being mentioned in defensive guides, threat-
+    actor *targeting* lists, etc. Counting raw pulses inflates score on
+    very common infrastructure.
 
-    Mapping:
+    Revised gating:
 
-    - ``None`` / no data → ``0``
-    - ``pulse_info.count == 0`` and ``reputation >= 0`` → ``0``
-    - ``pulse_info.count`` 1–2 → ``50``
-    - ``pulse_info.count`` 3–9 → ``75``
-    - ``pulse_info.count >= 10`` → ``90``
-    - Negative ``reputation`` (``< 0``) bumps the score by ``+10``
-      (capped at ``100``)
+    - ``None`` / no data → 0
+    - ``false_positive`` flag present → 0 (curator-marked benign)
+    - Strong signal = reputation < 0 OR adversary-classified pulses
+      (matched against the ``adversary`` field of returned pulses)
+    - Otherwise pulse count alone caps at MEDIUM (50) — never high/critical
+
+    Mapping when STRONG signal present:
+      reputation < -2 OR ≥1 pulse with named adversary  → 90
+      reputation < 0  OR ≥3 pulses                       → 75
+      ≥1 pulse                                            → 50
+    Mapping when only weak signal (pulse count, no adv, no rep):
+      ≥10 pulses → 35
+      ≥3 pulses  → 25
+      ≥1 pulse   → 10
+      none       → 0
     """
     if not data:
+        return 0
+
+    if bool(data.get("false_positive")):
         return 0
 
     pulse_info = data.get("pulse_info") or {}
@@ -161,23 +174,32 @@ def calculate_otx_score(data: dict | None) -> int:
     except (TypeError, ValueError):
         reputation = 0
 
-    if pulse_count == 0 and reputation >= 0:
-        return 0
+    # Walk the first few pulses for adversary attribution — strong signal.
+    has_adversary = False
+    for pulse in (pulse_info.get("pulses") or [])[:10]:
+        if isinstance(pulse, dict) and pulse.get("adversary"):
+            has_adversary = True
+            break
 
+    strong = (reputation < 0) or has_adversary
+
+    if strong:
+        if reputation < -2 or has_adversary:
+            return 90
+        if pulse_count >= 3:
+            return 75
+        if pulse_count >= 1:
+            return 50
+        return 25  # negative-rep, no pulses — weak but real
+
+    # Weak signal only (count without negative rep / adversary attribution).
     if pulse_count >= 10:
-        base = 90
-    elif pulse_count >= 3:
-        base = 75
-    elif pulse_count >= 1:
-        base = 50
-    else:
-        # pulse_count == 0 but reputation < 0 — still a (weak) signal
-        base = 0
-
-    if reputation < 0:
-        base += 10
-
-    return min(base, 100)
+        return 35
+    if pulse_count >= 3:
+        return 25
+    if pulse_count >= 1:
+        return 10
+    return 0
 
 
 def calculate_urlscan_score(data: dict | None) -> int:
