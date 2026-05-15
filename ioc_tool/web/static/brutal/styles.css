@@ -1331,7 +1331,8 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .spider-title { position: relative; }
 .spider-title::after { content: none; } /* reserved */
 
-/* IP CORE flag badges — Tor / VPN / Abuse etc. shown above the grid */
+/* IP CORE flag badges — legacy simple chips; kept for any callers
+   still using the older shape. Threat Surface block below supersedes. */
 .ipc-flags { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 8px; border-bottom: 1px dotted var(--line); }
 .ipc-flag {
   font-size: 9.5px;
@@ -1341,6 +1342,108 @@ input, select, textarea { font-family: inherit; color: inherit; }
   background: var(--bg);
   font-weight: 800;
   text-transform: uppercase;
+}
+
+/* ============================================================
+   Threat Surface — cross-source consensus matrix inside IP CORE
+   ============================================================ */
+.threat-surface {
+  border: 1px solid var(--line-2);
+  background: var(--bg-3);
+  padding: 8px 10px 10px;
+  display: flex; flex-direction: column;
+  gap: 8px;
+}
+.ts-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 4px; border-bottom: 1px dotted var(--line);
+}
+.ts-title { font-size: 10px; letter-spacing: 0.14em; color: var(--ink-2); font-weight: 800; }
+.ts-meta { font-size: 9px; color: var(--ink-3); letter-spacing: 0.06em; }
+
+.ts-flag-rows { display: flex; flex-direction: column; gap: 4px; }
+.ts-flag-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 10.5px;
+}
+.ts-flag-row.no { opacity: 0.55; }
+.ts-flag-name {
+  font-weight: 800;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
+.ts-source-chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.ts-source-chip {
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--ink-3);
+}
+.ts-source-chip.confirmed { font-weight: 700; }
+.ts-source-chip.denied {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  opacity: 0.45;
+}
+
+/* Operator / RDNS rows */
+.ts-relations { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px dotted var(--line); }
+.ts-rel-row { display: grid; grid-template-columns: 72px 1fr; gap: 8px; font-size: 10.5px; align-items: start; }
+.ts-rel-k { color: var(--ink-3); letter-spacing: 0.10em; font-size: 9.5px; padding-top: 2px; }
+.ts-rel-v { display: flex; flex-wrap: wrap; gap: 4px; }
+.ts-rel-chip {
+  display: inline-flex; flex-direction: column;
+  padding: 2px 6px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  line-height: 1.2;
+}
+.ts-rel-name { color: var(--ink); font-weight: 700; font-size: 11px; }
+.ts-rel-src { color: var(--ink-3); font-size: 8.5px; letter-spacing: 0.05em; }
+.ts-rel-hostnames .ts-host {
+  display: inline-block;
+  padding: 1px 5px;
+  margin: 2px 4px 0 0;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+/* ============================================================
+   Scope-drone mascot — brutalist scanner critter in spider header
+   ============================================================ */
+.scope-drone {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+  filter: drop-shadow(0 0 4px rgba(255, 107, 53, 0.35));
+  animation: ss-drone-bob 2.4s ease-in-out infinite;
+}
+.scope-drone svg { display: block; }
+.sd-eye { animation: ss-drone-scan 1.8s cubic-bezier(.5,.0,.5,1) infinite alternate; }
+.sd-led-a { animation: ss-drone-led 1.2s ease-in-out infinite; }
+.sd-led-b { animation: ss-drone-led 1.2s 0.6s ease-in-out infinite; }
+@keyframes ss-drone-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2px); }
+}
+@keyframes ss-drone-scan {
+  0%   { transform: translateX(0);  fill: var(--accent); }
+  45%  { transform: translateX(10px); }
+  50%  { fill: var(--bad); }
+  55%  { transform: translateX(10px); }
+  100% { transform: translateX(0);  fill: var(--accent); }
+}
+@keyframes ss-drone-led {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
 }
 
 /* Apply glitch to ALL section titles. Existing rules expect data-text
