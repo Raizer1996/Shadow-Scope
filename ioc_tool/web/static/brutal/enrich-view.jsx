@@ -178,7 +178,7 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
   return (
     <div className="spider">
       <div className="spider-head">
-        <span className="spider-title">SOURCE PROFILE</span>
+        <span className="spider-title glitch" data-text="SOURCE PROFILE">SOURCE PROFILE</span>
         <span className="spider-meta">{N} axes · radius = score</span>
       </div>
       <svg viewBox="0 0 280 280" preserveAspectRatio="xMidYMid meet">

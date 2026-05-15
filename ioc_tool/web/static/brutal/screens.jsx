@@ -101,6 +101,15 @@ function BatchView({ results, setActiveIocId, setTab, fmt }) {
           })}
         </tbody>
       </table>
+      {sorted.length === 0 && (
+        <div className="tab-empty">
+          <div className="tab-empty-title">// BATCH is empty</div>
+          <div className="tab-empty-desc">
+            Every IOC you enrich this session lands here, sorted by score.
+            Head back to <button className="tab-empty-link" onClick={() => setTab("enrich")}>ENRICH</button> and paste one in.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
