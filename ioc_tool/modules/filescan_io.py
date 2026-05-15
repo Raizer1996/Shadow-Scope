@@ -1,5 +1,6 @@
-import requests
 import os
+
+import requests
 
 BASE_URL = "https://www.filescan.io/api"
 
@@ -12,14 +13,14 @@ def get_headers():
 def submit_file(file_path):
     if not os.getenv('FILE_SCAN_IO'):
         return {"error": "Missing FILE_SCAN_IO API Key"}
-        
+
     url = f"{BASE_URL}/scan/file"
     try:
         with open(file_path, 'rb') as f:
             files = {'file': f}
             # FileScan.IO often requires minimal params, or just the file
             response = requests.post(url, headers=get_headers(), files=files)
-            
+
             if response.status_code == 200:
                 data = response.json()
                 flow_id = data.get('flow_id')
@@ -27,7 +28,7 @@ def submit_file(file_path):
                     # Specific report URL is hard to guess/undocumented.
                     # Pointing to the dashboard is safer.
                     return {
-                        "message": "Submission Successful", 
+                        "message": "Submission Successful",
                         "flow_id": flow_id,
                         "dashboard_link": "https://www.filescan.io/me/reports"
                     }
@@ -39,10 +40,10 @@ def submit_file(file_path):
 def submit_url(target_url):
     if not os.getenv('FILE_SCAN_IO'):
         return {"error": "Missing FILE_SCAN_IO API Key"}
-        
+
     url = f"{BASE_URL}/scan/url"
     data = {'url': target_url}
-    
+
     try:
         response = requests.post(url, headers=get_headers(), data=data)
         if response.status_code == 200:
@@ -50,7 +51,7 @@ def submit_url(target_url):
             flow_id = data.get('flow_id')
             if flow_id:
                 return {
-                    "message": "Submission Successful", 
+                    "message": "Submission Successful",
                     "flow_id": flow_id,
                     "dashboard_link": "https://www.filescan.io/me/reports"
                 }

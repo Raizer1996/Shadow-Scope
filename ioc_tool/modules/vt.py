@@ -1,6 +1,7 @@
-import requests
-import os
 import base64
+import os
+
+import requests
 
 VT_API_KEY = os.getenv('VT_API_KEY')
 BASE_URL = 'https://www.virustotal.com/api/v3'

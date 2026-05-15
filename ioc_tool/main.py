@@ -1,12 +1,15 @@
 import os
-from dotenv import load_dotenv
-from ioc_tool.ui import cli
 import sys
+
+from dotenv import load_dotenv
+
+from ioc_tool.ui import cli
+
 
 def main():
     # Load environment variables
     load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
-    
+
     # Run CLI
     try:
         cli.main()

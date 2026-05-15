@@ -30,7 +30,6 @@ collapse to ``None``.
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 import requests
 
@@ -46,7 +45,7 @@ _TYPE_PATH = {
 }
 
 
-def enrich(value: str, ioc_type: str) -> Optional[dict]:
+def enrich(value: str, ioc_type: str) -> dict | None:
     """Look up an IOC in AlienVault OTX.
 
     ``ioc_type`` is the ShadowScope-internal type: ``'ip'``, ``'domain'``,

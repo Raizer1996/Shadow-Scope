@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Dict, Iterable, List
+from collections.abc import Iterable
 from urllib.parse import urlparse
 
 from .defang import refang
@@ -78,10 +78,10 @@ _FILENAME_TLDS: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 
 
-def _dedup_preserve(items: Iterable[str]) -> List[str]:
+def _dedup_preserve(items: Iterable[str]) -> list[str]:
     """Return items deduplicated, preserving first-seen order."""
     seen: set[str] = set()
-    out: List[str] = []
+    out: list[str] = []
     for item in items:
         if item not in seen:
             seen.add(item)
@@ -143,7 +143,7 @@ def _tld_is_alpha(candidate: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def extract_iocs(text: str) -> Dict[str, List[str]]:
+def extract_iocs(text: str) -> dict[str, list[str]]:
     """Extract all IOCs from a free-form text blob.
 
     Refangs the input first (so ``1[.]2[.]3[.]4`` and ``hxxp://evil[.]com``
@@ -192,7 +192,7 @@ def extract_iocs(text: str) -> Dict[str, List[str]]:
     ip_set = set(ips)
 
     raw_domain_candidates = _DOMAIN_RE.findall(refanged)
-    domains: List[str] = []
+    domains: list[str] = []
     for cand in raw_domain_candidates:
         lowered = cand.lower()
         if cand in ip_set:
@@ -208,7 +208,7 @@ def extract_iocs(text: str) -> Dict[str, List[str]]:
         domains.append(cand)
     domains = _dedup_preserve(domains)
 
-    result: Dict[str, List[str]] = {
+    result: dict[str, list[str]] = {
         "ip": ips,
         "domain": domains,
         "url": urls,

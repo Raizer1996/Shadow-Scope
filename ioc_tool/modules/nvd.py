@@ -33,15 +33,13 @@ never raise.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import requests
 
 BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 TIMEOUT = 10  # seconds
 
 
-def enrich_cve(value: str) -> Optional[dict]:
+def enrich_cve(value: str) -> dict | None:
     """Look up a CVE in the NIST NVD.
 
     Returns the first ``vulnerabilities[0]["cve"]`` dict on a hit, or

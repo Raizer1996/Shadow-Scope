@@ -41,7 +41,6 @@ collapse to ``None``.
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 import requests
 
@@ -56,7 +55,7 @@ _QUERY_FIELD = {
 }
 
 
-def enrich(value: str, ioc_type: str) -> Optional[dict]:
+def enrich(value: str, ioc_type: str) -> dict | None:
     """Search URLscan.io historical scans for an IOC.
 
     ``ioc_type`` is the ShadowScope-internal type: ``'ip'``,

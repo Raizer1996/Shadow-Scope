@@ -20,7 +20,6 @@ from ioc_tool.core import enrich as enrich_mod
 from ioc_tool.web import api as api_mod
 from ioc_tool.web.api import app
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

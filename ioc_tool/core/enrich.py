@@ -31,16 +31,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Callable, Optional, Tuple
+from typing import Any
 
-from . import database, parser, score
 from ..modules import (
     abuseipdb,
     epss,
     greynoise,
-    ipinfo_mod,
     ip_quality_score,
+    ipinfo_mod,
     kev,
     malwarebazaar,
     nvd,
@@ -53,14 +53,14 @@ from ..modules import (
     vt,
     whois_mod,
 )
-
+from . import database, parser, score
 
 # ---------------------------------------------------------------------------
 # Cache freshness
 # ---------------------------------------------------------------------------
 
 
-def should_refresh(timestamp_str: Optional[str]) -> bool:
+def should_refresh(timestamp_str: str | None) -> bool:
     """Return True if the cached row is stale (older than 24 h) or unparseable."""
     if not timestamp_str:
         return True
@@ -96,7 +96,7 @@ def should_refresh(timestamp_str: Optional[str]) -> bool:
 # boolean rather than score-value introspection.
 
 
-_SourceResult = Tuple[str, dict, int, bool]
+_SourceResult = tuple[str, dict, int, bool]
 # (display_name, data, score, contributes_to_composite)
 
 
@@ -104,13 +104,13 @@ def _run_source(
     ioc_id: int,
     source_key: str,
     display_name: str,
-    fetcher: Callable[[], Optional[dict]],
-    scorer: Optional[Callable[[dict], int]],
+    fetcher: Callable[[], dict | None],
+    scorer: Callable[[dict], int] | None,
     *,
     info_only: bool = False,
-    cache_filter: Optional[Callable[[dict], Optional[dict]]] = None,
-    post_process: Optional[Callable[[dict], Tuple[dict, int]]] = None,
-) -> Optional[_SourceResult]:
+    cache_filter: Callable[[dict], dict | None] | None = None,
+    post_process: Callable[[dict], tuple[dict, int]] | None = None,
+) -> _SourceResult | None:
     """Run a single enrichment source: cache → fetch → score → persist.
 
     Parameters mirror the historical per-source blocks in :func:`enrich_ioc`:
@@ -150,8 +150,8 @@ def _run_source(
 # ---------------------------------------------------------------------------
 
 
-def _vt_fetcher(value: str, ioc_type: str) -> Callable[[], Optional[dict]]:
-    def _do() -> Optional[dict]:
+def _vt_fetcher(value: str, ioc_type: str) -> Callable[[], dict | None]:
+    def _do() -> dict | None:
         if ioc_type == 'ip':
             return vt.enrich_ip(value)
         if ioc_type == 'domain':
@@ -168,7 +168,7 @@ def _vt_scorer(data: dict) -> int:
     return score.calculate_vt_score(data.get('last_analysis_stats', {}))
 
 
-def _shodan_filter(data: dict) -> Optional[dict]:
+def _shodan_filter(data: dict) -> dict | None:
     """Shodan returns ``{'error': ...}`` on auth/missing-key — treat as no-data."""
     if isinstance(data, dict) and 'error' in data:
         return None
@@ -179,17 +179,17 @@ def _ipqs_scorer(data: dict) -> int:
     return data.get('fraud_score', 0) if isinstance(data, dict) else 0
 
 
-def _urlhaus_fetcher(value: str, ioc_type: str) -> Callable[[], Optional[dict]]:
-    def _do() -> Optional[dict]:
+def _urlhaus_fetcher(value: str, ioc_type: str) -> Callable[[], dict | None]:
+    def _do() -> dict | None:
         if ioc_type == 'url':
             return urlhaus.enrich_url(value)
         return urlhaus.enrich_host(value)
     return _do
 
 
-def _whois_post_process(data: dict) -> Tuple[dict, int]:
+def _whois_post_process(data: dict) -> tuple[dict, int]:
     """Serialise datetime fields → ISO strings; compute score from creation_date."""
-    serializable_whois = {}
+    serializable_whois: dict[str, Any] = {}
     for key, val in data.items():
         if isinstance(val, datetime):
             serializable_whois[key] = val.isoformat()
@@ -208,7 +208,7 @@ def _whois_post_process(data: dict) -> Tuple[dict, int]:
 # ---------------------------------------------------------------------------
 
 
-def _tor_check(value: str) -> Optional[_SourceResult]:
+def _tor_check(value: str) -> _SourceResult | None:
     """Tor exit-node check. Local file lookup, kept on the thread pool for
     parity with the other sources (cheap, but predictable scheduling).
     """
@@ -372,7 +372,7 @@ async def enrich_ioc_async(value: str, ioc_type: str) -> dict:
     results: dict[str, Any] = {}
     scores: list[int] = []
     for item in raw_results:
-        if isinstance(item, Exception):
+        if isinstance(item, BaseException):
             # Source crashed in the thread — swallow per the never-crash contract.
             continue
         if item is None:

@@ -17,14 +17,16 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+import requests
 import responses
 
+from ioc_tool.core import score as score_mod
 from ioc_tool.modules import (
     abuseipdb,
     epss,
     greynoise,
-    ipinfo_mod,
     ip_quality_score,
+    ipinfo_mod,
     kev,
     malwarebazaar,
     nvd,
@@ -37,9 +39,6 @@ from ioc_tool.modules import (
     vt,
     whois_mod,
 )
-from ioc_tool.core import score as score_mod
-import requests
-
 
 # ---------------------------------------------------------------------------
 # VirusTotal

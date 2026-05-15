@@ -26,15 +26,13 @@ never raise.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import requests
 
 BASE_URL = "https://api.first.org/data/v1/epss"
 TIMEOUT = 10  # seconds
 
 
-def enrich_cve(value: str) -> Optional[dict]:
+def enrich_cve(value: str) -> dict | None:
     """Look up a CVE in EPSS.
 
     Returns the first entry from ``data[]`` on a hit (a dict with

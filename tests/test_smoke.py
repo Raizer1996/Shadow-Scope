@@ -8,13 +8,20 @@ import pytest
 
 from ioc_tool.core import (
     defang as defang_mod,
+)
+from ioc_tool.core import (
     extractor as extractor_mod,
+)
+from ioc_tool.core import (
     output as output_mod,
+)
+from ioc_tool.core import (
     parser as parser_mod,
+)
+from ioc_tool.core import (
     score,
 )
 from ioc_tool.ui import cli
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,20 +48,20 @@ def test_compose_file_exists_and_mounts_data_volume():
 def test_imports():
     """All core + module packages import without side effects (other than .env read)."""
     from ioc_tool import main  # noqa: F401
-    from ioc_tool.core import enrich, database, parser  # noqa: F401
+    from ioc_tool.core import database, enrich, parser  # noqa: F401
     from ioc_tool.modules import (  # noqa: F401
-        vt,
         abuseipdb,
-        shodan_mod,
-        ip_quality_score,
-        ipinfo_mod,
-        tor,
-        whois_mod,
         filescan_io,
         hybrid_analysis,
+        ip_quality_score,
+        ipinfo_mod,
         joe_sandbox,
+        shodan_mod,
+        tor,
+        vt,
+        whois_mod,
     )
-    from ioc_tool.ui import cli, banner  # noqa: F401
+    from ioc_tool.ui import banner, cli  # noqa: F401
 
 
 def test_vt_score_zero_when_empty():
@@ -328,7 +335,7 @@ def test_to_csv_handles_missing_modules():
     assert len(lines) == 2  # header + 1 data row
     header = lines[0].split(",")
     row = lines[1].split(",")
-    record = dict(zip(header, row))
+    record = dict(zip(header, row, strict=True))
     assert record["ioc"] == "example.com"
     assert record["type"] == "domain"
     assert record["shodan_tags"] == ""
@@ -544,12 +551,12 @@ def test_cve_csv_columns_present():
 # modules sync rather than rewriting against aiohttp).
 
 
-import asyncio as _asyncio
+import asyncio as _asyncio  # noqa: E402
 
-import responses as _responses
+import responses as _responses  # noqa: E402
 
-from ioc_tool.core import enrich as _enrich_mod
-from ioc_tool.modules import tor as _tor_mod
+from ioc_tool.core import enrich as _enrich_mod  # noqa: E402
+from ioc_tool.modules import tor as _tor_mod  # noqa: E402
 
 
 def _stub_all_network(monkeypatch):
@@ -562,8 +569,8 @@ def _stub_all_network(monkeypatch):
     from ioc_tool.modules import (
         abuseipdb,
         greynoise,
-        ipinfo_mod,
         ip_quality_score,
+        ipinfo_mod,
         malwarebazaar,
         otx,
         shodan_mod,
@@ -684,7 +691,6 @@ def test_enrich_ioc_swallows_source_exceptions(monkeypatch, tmp_path):
     _stub_all_network(monkeypatch)
 
     # Force one source to explode inside the thread pool.
-    from ioc_tool.modules import vt as _vt
     def _boom(value):
         raise RuntimeError("simulated thread crash")
     monkeypatch.setattr(_enrich_mod.vt, "enrich_ip", _boom)

@@ -1,7 +1,7 @@
-import sqlite3
 import json
-from datetime import datetime
 import os
+import sqlite3
+from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'ioc.db')
 
@@ -13,7 +13,7 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     # Table: iocs
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS iocs (
@@ -25,7 +25,7 @@ def init_db():
             tags TEXT
         )
     ''')
-    
+
     # Table: enrichments
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS enrichments (
@@ -38,7 +38,7 @@ def init_db():
             FOREIGN KEY (ioc_id) REFERENCES iocs (id)
         )
     ''')
-    
+
     conn.commit()
     conn.close()
 
@@ -46,10 +46,10 @@ def add_or_update_ioc(value, ioc_type, tags=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     now = datetime.now()
-    
+
     cursor.execute('SELECT id, first_seen FROM iocs WHERE value = ?', (value,))
     row = cursor.fetchone()
-    
+
     if row:
         ioc_id = row['id']
         cursor.execute('''
@@ -61,7 +61,7 @@ def add_or_update_ioc(value, ioc_type, tags=None):
             VALUES (?, ?, ?, ?, ?)
         ''', (value, ioc_type, now, now, json.dumps(tags) if tags else None))
         ioc_id = cursor.lastrowid
-        
+
     conn.commit()
     conn.close()
     return ioc_id
@@ -78,25 +78,25 @@ def add_enrichment(ioc_id, source, data, score):
     conn = get_db_connection()
     cursor = conn.cursor()
     now = datetime.now()
-    
+
     cursor.execute('''
         INSERT INTO enrichments (ioc_id, source, data, timestamp, score)
         VALUES (?, ?, ?, ?, ?)
     ''', (ioc_id, source, json.dumps(data), now, score))
-    
+
     conn.commit()
     conn.close()
 
 def get_latest_enrichment(ioc_id, source):
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     cursor.execute('''
-        SELECT * FROM enrichments 
-        WHERE ioc_id = ? AND source = ? 
+        SELECT * FROM enrichments
+        WHERE ioc_id = ? AND source = ?
         ORDER BY timestamp DESC LIMIT 1
     ''', (ioc_id, source))
-    
+
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None

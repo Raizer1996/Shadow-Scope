@@ -1,5 +1,5 @@
-import re
 import ipaddress
+import re
 
 from .defang import refang
 
@@ -46,13 +46,13 @@ def detect_type(value):
     # Email
     if re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', value):
         return 'email'
-        
+
     # URL (Simple check)
     if re.match(r'^https?://', value):
         return 'url'
-        
+
     # Domain (Fallback, basic regex)
     if re.match(r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$', value):
         return 'domain'
-        
+
     return 'unknown'

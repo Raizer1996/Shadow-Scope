@@ -21,15 +21,13 @@ consistent with the other enrichment modules.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import requests
 
 BASE_URL = "https://threatfox-api.abuse.ch/api/v1/"
 TIMEOUT = 10  # seconds
 
 
-def enrich(value: str) -> Optional[dict]:
+def enrich(value: str) -> dict | None:
     """Look up any IOC (ip, domain, url, hash) in ThreatFox.
 
     Returns the first matching entry from ``data[]`` on a hit
