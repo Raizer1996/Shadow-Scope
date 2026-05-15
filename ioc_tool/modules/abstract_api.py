@@ -1,15 +1,19 @@
-"""AbstractAPI IP Geolocation enrichment.
+"""AbstractAPI IP Intelligence enrichment.
 
-AbstractAPI's IP-geolocation endpoint augments the basic IPinfo/Shodan
-geo data with explicit anonymisation flags (Tor / VPN / proxy / relay /
-hosting / residential proxy) — useful as a second opinion alongside
-IPQS and the Tor exit list.
+AbstractAPI's IP-intelligence endpoint returns geolocation + security
+flags (Tor / VPN / proxy / relay / hosting / residential proxy / abuser)
+plus ASN + connection metadata. Useful as a second-opinion source
+alongside IPQS, GreyNoise, and the Tor exit list.
 
-Free tier: 20K req/month. Higher tiers + the "Security" addon unlock
-the anonymisation flags.
+Env-var resolution (first non-empty wins):
+  1. ``ABSTRACT_IP_INTELLIGENCE`` — current product name on the
+     AbstractAPI dashboard
+  2. ``ABSTRACT_API_KEY``         — historical generic alias used by
+     earlier versions of this module
+  3. ``ABSTRACT_IP_API_KEY``      — alternate alias some setups use
 
-API: https://app.abstractapi.com/api/ip-geolocation/documentation
-Endpoint: ``GET https://ipgeolocation.abstractapi.com/v1/?api_key=KEY&ip_address=IP``
+API docs: https://app.abstractapi.com/api/ip-intelligence/documentation
+Endpoint: ``https://ip-intelligence.abstractapi.com/v1/?api_key=KEY&ip_address=IP``
 
 Returns the parsed JSON on success, ``None`` on miss / network error /
 malformed response / quota exceeded. Never raises.
@@ -21,13 +25,21 @@ import os
 
 import requests
 
-BASE_URL = "https://ipgeolocation.abstractapi.com/v1/"
+BASE_URL = "https://ip-intelligence.abstractapi.com/v1/"
 TIMEOUT = 10
 
 
+def _api_key() -> str:
+    for name in ("ABSTRACT_IP_INTELLIGENCE", "ABSTRACT_API_KEY", "ABSTRACT_IP_API_KEY"):
+        v = os.getenv(name, "").strip()
+        if v:
+            return v
+    return ""
+
+
 def enrich_ip(ip: str) -> dict | None:
-    """Look up an IP on AbstractAPI's geolocation+security endpoint."""
-    api_key = os.getenv("ABSTRACT_API_KEY", "").strip()
+    """Look up an IP on AbstractAPI's IP-intelligence endpoint."""
+    api_key = _api_key()
     if not api_key:
         return None
     try:
