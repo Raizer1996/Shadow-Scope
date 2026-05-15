@@ -22,13 +22,13 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [ ] **PDF report** (`--pdf`) — exec-style with score banner, table, links. **[issue — needs `fpdf2` dependency]**
 
 ### Bulk + I/O
-- [ ] **Bulk mode** (`-f iocs.txt`) — one IOC per line, parallel enrich, combined report. **[issue]**
-- [ ] **Pipe support** (`echo 1.2.3.4 | shadowscope enrich -`). **[issue]**
+- [x] **Bulk mode** (`-f iocs.txt`) — parallel fan-out across IOCs via `enrich_many` / `enrich_many_async` (asyncio.gather over per-IOC tasks)
+- [x] **Pipe support** (`echo 1.2.3.4 | shadowscope enrich -`) — stdin sentinel routes through the text-extractor pipeline
 - [x] **Punycode decode** — `idn_check` in heuristics module: decodes `xn--` labels, flags mixed-script homograph (Cyrillic 'а' in Latin context = 90, pure-script IDN = 50)
 
 ### Cache / freshness
 - [x] **Configurable cache TTL** — env `CACHE_TTL_HOURS` (float supported, fallback 24 h)
-- [ ] **Tor list auto-refresh** — daily fetch from `check.torproject.org`. **[issue]**
+- [x] **Tor list auto-refresh** — staleness check via file mtime + `TOR_LIST_TTL_HOURS` env (default 24 h); refresh on first miss or expiry
 - [x] **Force refresh flag** — `--no-cache` CLI flag + `enrich_ioc(no_cache=)` kwarg, propagated via `ContextVar`
 
 ---

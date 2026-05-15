@@ -663,27 +663,34 @@ def handle_enrich(args: argparse.Namespace) -> None:
         msg_console.print("[yellow]No IOCs provided. Pass an IOC positional or -f FILE.[/yellow]")
         return
 
+    # Classify and filter once so both branches share the same view.
+    typed_iocs: list[tuple[str, str]] = []
+    for ioc in iocs_to_process:
+        ioc_type = parser.detect_type(ioc)
+        if ioc_type == 'unknown':
+            msg_console.print(f"[yellow]Skipping unknown IOC type: {ioc}[/yellow]")
+            continue
+        typed_iocs.append((ioc, ioc_type))
+
     results: list[dict[str, Any]] = []
-    if machine_readable:
-        # No spinner — would leak escape codes to stdout via rich's redraw loop.
-        for ioc in iocs_to_process:
-            ioc_type = parser.detect_type(ioc)
-            if ioc_type == 'unknown':
-                msg_console.print(f"[yellow]Skipping unknown IOC type: {ioc}[/yellow]")
-                continue
-
-            result = enrich.enrich_ioc(ioc, ioc_type, no_cache=no_cache)
-            results.append(result)
-    else:
-        with console.status("[bold green]Enriching IOCs...[/bold green]"):
-            for ioc in iocs_to_process:
-                ioc_type = parser.detect_type(ioc)
-                if ioc_type == 'unknown':
-                    console.print(f"[yellow]Skipping unknown IOC type: {ioc}[/yellow]")
-                    continue
-
-                result = enrich.enrich_ioc(ioc, ioc_type)
-                results.append(result)
+    if typed_iocs:
+        if len(typed_iocs) == 1:
+            # Single-IOC path stays sync-wrapped so the spinner cleans up.
+            value, ioc_type = typed_iocs[0]
+            if machine_readable:
+                results = [enrich.enrich_ioc(value, ioc_type, no_cache=no_cache)]
+            else:
+                with console.status("[bold green]Enriching IOC...[/bold green]"):
+                    results = [enrich.enrich_ioc(value, ioc_type, no_cache=no_cache)]
+        else:
+            # Bulk path — fan out across IOCs in parallel via enrich_many.
+            if machine_readable:
+                results = enrich.enrich_many(typed_iocs, no_cache=no_cache)
+            else:
+                with console.status(
+                    f"[bold green]Enriching {len(typed_iocs)} IOCs in parallel...[/bold green]"
+                ):
+                    results = enrich.enrich_many(typed_iocs, no_cache=no_cache)
 
     if not results:
         return
