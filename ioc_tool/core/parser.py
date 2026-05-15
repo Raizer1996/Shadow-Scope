@@ -7,15 +7,19 @@ from .defang import refang
 def normalize_value(value, ioc_type):
     """Return the canonical form of an IOC for a given type.
 
-    Currently only CVE identifiers are normalised — they're uppercased
-    and stripped so ``cve-2024-1234`` and ``CVE-2024-1234`` collapse to
-    one cache key downstream. Other IOC types are returned unchanged
-    (refanging is handled separately in :func:`detect_type`).
+    - CVE: uppercased + stripped so ``cve-2024-1234`` and
+      ``CVE-2024-1234`` share a cache key.
+    - ASN: stripped to ``ASxxxxx`` (uppercase, no spaces). Accepts
+      ``AS15169``, ``as15169``, ``asn15169``, or bare ``15169``.
+    - Everything else: unchanged (refanging happens in detect_type).
     """
     if value is None:
         return value
     if ioc_type == 'cve':
         return value.strip().upper()
+    if ioc_type == 'asn':
+        digits = re.sub(r'(?i)^as(n)?', '', value.strip())
+        return f"AS{digits.lstrip('0') or '0'}"
     return value
 
 
@@ -27,6 +31,13 @@ def detect_type(value):
     # form is uppercased; downstream code can rely on the 'CVE-' prefix.
     if re.match(r'^CVE-\d{4}-\d{4,}$', value, re.IGNORECASE):
         return 'cve'
+
+    # ASN identifier — ``AS12345`` / ``ASN12345`` / ``as12345``. We
+    # explicitly require the ``AS`` prefix to avoid false-positives on
+    # bare integers (which could be anything). 1-10 digits covers the
+    # 32-bit ASN range (0 to 4_294_967_295).
+    if re.match(r'^AS(N)?\d{1,10}$', value, re.IGNORECASE):
+        return 'asn'
 
     # IP Address
     try:
