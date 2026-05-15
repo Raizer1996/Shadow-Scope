@@ -140,7 +140,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 <!-- Moved to Done 2026-05-14 — Docker Compose stack (Redis backend deferred — single-container SQLite is sufficient for current scale) -->
 - [ ] **Kubernetes Helm chart**. **[issue]**
 - [ ] **Demo GIF / asciinema** in README. **[issue]**
-- [ ] **SemVer + CHANGELOG.md** (Keep-a-Changelog format). **[issue]**
+- [x] **SemVer + CHANGELOG.md** — Keep-a-Changelog format documenting v0.1 → v0.7
 
 ---
 
