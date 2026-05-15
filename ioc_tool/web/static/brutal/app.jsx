@@ -137,21 +137,33 @@ function App() {
   }, []);
 
   const onEnrich = (text) => {
-    if (!text.trim()) return;
+    const value = text.trim();
+    if (!value) return;
     setEnriching(true);
-    setTimeout(() => {
-      const matched = window.IOC_DB.find(r => r.ioc === text.trim());
-      if (matched) {
-        setResults(prev => [matched, ...prev.filter(r => r.id !== matched.id)]);
-        setActiveIocId(matched.id);
-      } else {
-        const fab = fabricateRecord(text.trim());
-        setResults(prev => [fab, ...prev]);
+    setTab("enrich");
+
+    // Live backend call. The setResults filter dedups by record id
+    // AND by raw ioc string so re-enriching the same IOC never creates
+    // a duplicate row, even when the backend canonicalises (e.g. CVE
+    // uppercase, ASN strip leading zeros) and the local input would
+    // otherwise hash to a different key for the same indicator.
+    window.shadowscopeFetch(value, { defang, summary: llm })
+      .then((record) => {
+        setResults(prev => [
+          record,
+          ...prev.filter(r => r.id !== record.id && r.ioc !== record.ioc && r.ioc !== value),
+        ]);
+        setActiveIocId(record.id);
+      })
+      .catch((err) => {
+        console.warn("[shadowscope] /api/ui/enrich failed — falling back to mock:", err.message);
+        const fab = fabricateRecord(value);
+        setResults(prev => [fab, ...prev.filter(r => r.id !== fab.id && r.ioc !== fab.ioc)]);
         setActiveIocId(fab.id);
-      }
-      setEnriching(false);
-      setTab("enrich");
-    }, 850);
+      })
+      .finally(() => {
+        setEnriching(false);
+      });
   };
 
   const fmt = (s) => defang ? window.defangText(s) : s;

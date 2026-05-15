@@ -132,7 +132,7 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
       <div className="enrich-split">
         <section className="sources-block">
           <div className="sec-head">
-            <span className="sec-title">SOURCE ATTRIBUTION</span>
+            <span className="sec-title glitch" data-text="SOURCE ATTRIBUTION">SOURCE ATTRIBUTION</span>
             <span className="sec-meta">{modules.length} sources queried · ordered by score</span>
             <span className="sec-meta dim">click row → toggle inclusion</span>
           </div>
@@ -616,6 +616,29 @@ function SourceDrawer({ name, mod, ioc }) {
         <KV k="first seen" v={data.first_seen} key="tf-fs" />,
       );
       break;
+    case "AbstractAPI":
+      {
+        const sec = data.security || {};
+        const conn = data.connection || {};
+        rows.push(
+          <KV k="country"  v={data.country ? `${data.country_code || ""} ${data.country}` : null} key="ab-c" />,
+          <KV k="city"     v={data.city ? `${data.city}${data.region ? " · " + data.region : ""}` : null} key="ab-city" />,
+          <KV k="coords"   v={data.latitude != null ? `${data.latitude}, ${data.longitude}` : null} mono key="ab-co" />,
+          <KV k="timezone" v={(data.timezone || {}).name} key="ab-tz" />,
+          <KV k="postal"   v={data.postal_code} key="ab-p" />,
+          <KV k="EU"       v={data.country_is_eu ? "yes" : null} key="ab-eu" />,
+          <KV k="ASN"      v={conn.autonomous_system_number ? `AS${conn.autonomous_system_number}` : null} key="ab-asn" />,
+          <KV k="ISP"      v={conn.isp_name || conn.organization_name} key="ab-isp" />,
+          <KV k="conn type" v={conn.connection_type} key="ab-ct" />,
+          <KV k="Tor"      v={sec.is_tor ? "yes" : null} key="ab-tor" />,
+          <KV k="VPN"      v={sec.is_vpn ? "yes" : null} key="ab-vpn" />,
+          <KV k="proxy"    v={sec.is_proxy ? "yes" : null} key="ab-prx" />,
+          <KV k="relay"    v={sec.is_relay ? "yes" : null} key="ab-rly" />,
+          <KV k="hosting"  v={sec.is_hosting ? "yes" : null} key="ab-hst" />,
+          <KV k="abuser"   v={sec.is_abuser ? "yes" : null} key="ab-ab" />,
+        );
+      }
+      break;
     case "Heuristics":
       Object.entries(data).forEach(([k, v]) => {
         if (!v || typeof v !== "object") return;
@@ -750,7 +773,7 @@ function LlmVerdict({ ioc, fmt, sev }) {
   return (
     <section className="llm-block">
       <div className="sec-head">
-        <span className="sec-title">NARRATIVE VERDICT</span>
+        <span className="sec-title glitch" data-text="NARRATIVE VERDICT">NARRATIVE VERDICT</span>
         <span className="sec-meta dim">optional · LLM-generated · NOT part of composite score</span>
       </div>
       <div className="llm-body">

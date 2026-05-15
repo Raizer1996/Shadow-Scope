@@ -1331,6 +1331,35 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .spider-title { position: relative; }
 .spider-title::after { content: none; } /* reserved */
 
+/* IP CORE flag badges — Tor / VPN / Abuse etc. shown above the grid */
+.ipc-flags { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 8px; border-bottom: 1px dotted var(--line); }
+.ipc-flag {
+  font-size: 9.5px;
+  letter-spacing: 0.10em;
+  padding: 2px 6px;
+  border: 1px solid;
+  background: var(--bg);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+/* Apply glitch to ALL section titles. Existing rules expect data-text
+   attr; the regex sweep we ran adds glitch + data-text to every static
+   sec-title. We keep .spider-title and .ipc-title under glitch too. */
+.sec-title.glitch, .spider-title.glitch, .ipc-title.glitch, .ngp-title.glitch { display: inline-block; }
+
+/* Make the spider chart itself pulse subtly — radius scales 100%–104%
+   on a 6s ease-in-out so the chart appears "live". */
+.spider svg {
+  animation: ss-spider-breathe 6s ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes ss-spider-breathe {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
+  50%      { transform: scale(1.025); filter: drop-shadow(0 0 8px rgba(255,107,53,0.18)); }
+}
+
+
 /* Tab empty-state — explains why a tab has no data and where to start */
 .tab-empty {
   margin: 24px 0 12px;

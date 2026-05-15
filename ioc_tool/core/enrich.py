@@ -39,6 +39,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..modules import (
+    abstract_api,
     abuseipdb,
     crtsh,
     epss,
@@ -359,6 +360,14 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             lambda: ipinfo_mod.enrich_ip(value),
             None,
             info_only=True,
+        ))
+
+    # --- AbstractAPI — IP only (anonymisation flags) ---
+    if ioc_type == 'ip':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'abstract', 'AbstractAPI',
+            lambda: abstract_api.enrich_ip(value),
+            score.calculate_abstract_score,
         ))
 
     # --- GreyNoise — IP only ---
