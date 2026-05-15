@@ -390,12 +390,25 @@ def test_ui_route_skips_auth(monkeypatch):
 
 
 def test_static_files_served(client):
-    """GET /static/app.js returns 200 with a JS content type."""
-    response = client.get("/static/app.js")
+    """GET /static/shared/data.js returns 200 with a JS content type.
+
+    The brutalist UI pulls its mock data from ``/static/shared/data.js``;
+    this exercises the same StaticFiles mount the dashboard relies on.
+    """
+    response = client.get("/static/shared/data.js")
     assert response.status_code == 200
     ctype = response.headers.get("content-type", "")
     assert ("javascript" in ctype) or ctype.startswith("application/javascript"), (
-        f"unexpected content-type for /static/app.js: {ctype!r}"
+        f"unexpected content-type for /static/shared/data.js: {ctype!r}"
     )
-    # And it must really be the app code — sanity-check a known marker.
-    assert "ShadowScope dashboard" in response.text
+    # Known marker — sanity-check it's really the data module.
+    assert "IOC_DB" in response.text
+
+
+def test_classic_ui_still_reachable(client):
+    """Legacy vanilla dashboard remains at /ui-classic until full API wiring lands."""
+    response = client.get("/ui-classic")
+    assert response.status_code == 200
+    # Markers from the classic HTML
+    assert "ShadowScope" in response.text
+    assert "/static/classic/styles.css" in response.text
