@@ -335,42 +335,93 @@ function DiffHead({ r, fmt, side }) {
 // ─────────── Sources Drawer ───────────
 
 function SourcesDrawer({ onClose }) {
+  const [sources, setSources] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const headers = {};
+    try {
+      const tok = sessionStorage.getItem("ss_api_token");
+      if (tok) headers["Authorization"] = "Bearer " + tok;
+    } catch (e) {}
+    fetch("/api/ui/sources", { headers })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+      .then(j => { if (!cancelled) setSources(j); })
+      .catch(e => { if (!cancelled) setErr(e.message); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (err) {
+    return (
+      <div className="drawer-scrim" onClick={onClose}>
+        <aside className="drawer" onClick={e => e.stopPropagation()}>
+          <header className="drawer-head">
+            <span className="sec-title">SOURCES</span>
+            <button className="drawer-close" onClick={onClose}>✕  esc</button>
+          </header>
+          <div className="drawer-body" style={{ padding: "16px" }}>
+            <div className="dim">failed to load source status: {err}</div>
+          </div>
+        </aside>
+      </div>
+    );
+  }
+
+  if (!sources) {
+    return (
+      <div className="drawer-scrim" onClick={onClose}>
+        <aside className="drawer" onClick={e => e.stopPropagation()}>
+          <header className="drawer-head">
+            <span className="sec-title">SOURCES · loading…</span>
+            <button className="drawer-close" onClick={onClose}>✕  esc</button>
+          </header>
+        </aside>
+      </div>
+    );
+  }
+
+  const list = sources.sources || [];
   const grouped = {
-    ok: window.SOURCES.filter(s => s.status === "ok"),
-    degraded: window.SOURCES.filter(s => s.status === "degraded"),
-    down: window.SOURCES.filter(s => s.status === "down"),
-    no_key: window.SOURCES.filter(s => s.status === "no_key")
+    ok: list.filter(s => s.status === "ok"),
+    local: list.filter(s => s.status === "local"),
+    anonymous: list.filter(s => s.status === "anonymous"),
+    no_key: list.filter(s => s.status === "no_key"),
   };
+  const dotClass = (status) =>
+    status === "ok" ? "ok" :
+    status === "local" ? "ok" :
+    status === "anonymous" ? "anon" :
+    "nokey";
+
   return (
     <div className="drawer-scrim" onClick={onClose}>
       <aside className="drawer" onClick={e => e.stopPropagation()}>
         <header className="drawer-head">
-          <span className="sec-title">SOURCES · {window.SOURCES.length} configured</span>
+          <span className="sec-title">SOURCES · {sources.total} configured</span>
           <button className="drawer-close" onClick={onClose}>✕  esc</button>
         </header>
         <div className="drawer-summary">
-          <SourcesPie />
           <div className="drawer-legend">
-            <div><span className="src-dot ok" /> <b>{grouped.ok.length}</b> operational</div>
-            <div><span className="src-dot deg" /> <b>{grouped.degraded.length}</b> degraded</div>
-            <div><span className="src-dot down" /> <b>{grouped.down.length}</b> down</div>
-            <div><span className="src-dot nokey" /> <b>{grouped.no_key.length}</b> no key — anonymous only</div>
+            <div><span className="src-dot ok" /> <b>{grouped.ok.length + grouped.local.length}</b> operational (key + local)</div>
+            <div><span className="src-dot anon" /> <b>{grouped.anonymous.length}</b> anonymous (no key required)</div>
+            <div><span className="src-dot nokey" /> <b>{grouped.no_key.length}</b> missing key</div>
           </div>
         </div>
         <div className="drawer-body">
           {Object.entries(grouped).map(([k, arr]) => arr.length === 0 ? null : (
             <div key={k} className="drawer-group">
               <div className="drawer-group-head">
-                <span className={`src-dot ${k === "ok" ? "ok" : k === "degraded" ? "deg" : k === "down" ? "down" : "nokey"}`} />
+                <span className={`src-dot ${dotClass(k)}`} />
                 <span>{k.toUpperCase().replace("_"," ")}</span>
                 <span className="dim small">· {arr.length}</span>
               </div>
               {arr.map(s => (
                 <div key={s.id} className="drawer-row">
                   <span className="dr-name">{s.id}</span>
-                  <span className="dr-types">{s.ioc_types.map(t => <span key={t} className="type-pill">{t}</span>)}</span>
+                  <span className="dr-types">{(s.ioc_types || []).map(t => <span key={t} className="type-pill">{t}</span>)}</span>
                   <span className={`dr-key key-${s.key}`}>{s.key}</span>
-                  <span className="dr-lat dim">{s.latency_ms ? `${s.latency_ms}ms` : "—"}</span>
+                  <span className="dr-lat dim">{s.env || "—"}</span>
                 </div>
               ))}
             </div>
