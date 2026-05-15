@@ -6,11 +6,11 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ---
 
-## v0.2 — Quality + Speed (foundations)
+## v0.2 — Quality + Speed (foundations) ✅
 
 ### Engineering
-- [ ] **Type hints + mypy clean** on public functions. **[issue]**
-- [ ] **GitHub Actions CI matrix** — ruff lint + pytest on py3.10/3.11/3.12 *(already scaffolded — needs ruff config + green run)*. **[issue]**
+- [x] **Type hints + mypy clean** on public functions — mypy passes on 36 source files (non-strict baseline, ignore_missing_imports)
+- [x] **GitHub Actions CI matrix** — ruff lint + mypy + pytest on py3.10/3.11/3.12; `pyproject.toml` with ruff (E/W/F/I/B/UP/SIM) + mypy config; CI/mypy/ruff badges in README
 
 ---
 

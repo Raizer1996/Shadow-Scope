@@ -46,7 +46,6 @@ return ``None`` and never raise.
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 import requests
 
@@ -54,7 +53,7 @@ BASE_URL = "https://api.greynoise.io/v3/community"
 TIMEOUT = 10  # seconds
 
 
-def enrich_ip(value: str) -> Optional[dict]:
+def enrich_ip(value: str) -> dict | None:
     """Look up an IP in the GreyNoise Community API.
 
     Returns the full response dict on success — even when the

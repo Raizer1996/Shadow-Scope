@@ -1,0 +1,72 @@
+[project]
+name = "shadowscope"
+version = "1.0.0"
+description = "Terminal-based IOC enrichment + composite risk scoring for SOC / IR / threat-intel work"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Raizer", email = "artmbordulev@gmail.com" }]
+keywords = ["threat-intelligence", "ioc", "soc", "ir", "cti", "security"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+
+[project.urls]
+Homepage = "https://github.com/Raizer1996/Shadow-Scope"
+Issues = "https://github.com/Raizer1996/Shadow-Scope/issues"
+
+[project.scripts]
+shadowscope = "ioc_tool.main:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["build", "dist", ".venv", "venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",  # line too long (line-length handles soft wrap)
+    "B008",  # function call in default arg (FastAPI Depends pattern)
+    "SIM117", # nested with statements (clearer when explicit)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # asserts in tests are fine
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+no_implicit_optional = true
+show_error_codes = true
+files = ["ioc_tool"]
+exclude = ["build/", "dist/", "tests/"]
+
+[[tool.mypy.overrides]]
+module = ["whois.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q --strict-markers"

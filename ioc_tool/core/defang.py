@@ -61,7 +61,7 @@ _SCHEME_PATTERN = re.compile(
 _FTP_SCHEME_PATTERN = re.compile(r"\bfxp://", re.IGNORECASE)
 
 
-def _restore_http_scheme(match: "re.Match[str]") -> str:
+def _restore_http_scheme(match: re.Match[str]) -> str:
     """Convert an ``hxxp(s)://`` match back to ``http(s)://`` preserving case.
 
     The middle ``xx`` segment is rewritten to ``tt`` using the case of the

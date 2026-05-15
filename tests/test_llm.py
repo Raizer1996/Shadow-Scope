@@ -18,7 +18,7 @@ Contracts under test (all driven by ``docs/ROADMAP.md`` LLM summary item):
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 import requests
@@ -27,7 +27,7 @@ import responses
 from ioc_tool.core import llm
 
 
-def _sample_result() -> Dict[str, Any]:
+def _sample_result() -> dict[str, Any]:
     """A representative enrichment result the LLM might be asked to summarise."""
     return {
         "ioc": "1.2.3.4",

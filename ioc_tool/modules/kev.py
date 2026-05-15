@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Optional
 
 import requests
 
@@ -57,7 +56,7 @@ def _cache_is_stale() -> bool:
     return (time.time() - mtime) > REFRESH_SECONDS
 
 
-def _download_catalog() -> Optional[dict]:
+def _download_catalog() -> dict | None:
     """Fetch the catalog and persist it to ``CACHE_FILE``.
 
     Returns the parsed catalog dict on success, ``None`` on any failure.
@@ -92,12 +91,12 @@ def _download_catalog() -> Optional[dict]:
     return payload
 
 
-def _read_cached_catalog() -> Optional[dict]:
+def _read_cached_catalog() -> dict | None:
     """Load the previously-cached catalog from disk. ``None`` on error."""
     if not os.path.exists(CACHE_FILE):
         return None
     try:
-        with open(CACHE_FILE, "r") as f:
+        with open(CACHE_FILE) as f:
             payload = json.load(f)
     except (OSError, ValueError):
         return None
@@ -106,7 +105,7 @@ def _read_cached_catalog() -> Optional[dict]:
     return payload
 
 
-def _get_catalog() -> Optional[dict]:
+def _get_catalog() -> dict | None:
     """Return the catalog dict, refreshing the on-disk cache if stale.
 
     Refresh policy: re-download when the file is missing or >24 h old.
@@ -141,7 +140,7 @@ def load_catalog() -> set[str]:
     }
 
 
-def get_kev_entry(value: str) -> Optional[dict]:
+def get_kev_entry(value: str) -> dict | None:
     """Return the full KEV catalog entry for ``value``, or ``None``.
 
     The returned dict includes ``dateAdded``, ``vendorProject``,

@@ -1,5 +1,6 @@
-import requests
 import os
+
+import requests
 
 API_KEY = os.getenv('HYBRID_ANALYSIS_API_KEY')
 BASE_URL = "https://www.hybrid-analysis.com/api/v2"
@@ -14,7 +15,7 @@ def get_headers():
 def submit_file(file_path):
     if not os.getenv('HYBRID_ANALYSIS_API_KEY'):
         return {"error": "Missing HYBRID_ANALYSIS_API_KEY"}
-        
+
     # Using /submit/file which is the standard submission endpoint
     url = f"{BASE_URL}/submit/file"
     try:
@@ -22,8 +23,8 @@ def submit_file(file_path):
             files = {'file': f}
             # 'environment_id' is often required, usually '100' (Windows 7) or '120' (Windows 10)
             # 'scan_type' might not be needed or should be 'all'
-            data = {'environment_id': '120'} 
-            
+            data = {'environment_id': '120'}
+
             response = requests.post(url, headers=get_headers(), files=files, data=data)
             if response.status_code in [200, 201]:
                 return response.json()
@@ -34,14 +35,14 @@ def submit_file(file_path):
 def submit_url(target_url):
     if not os.getenv('HYBRID_ANALYSIS_API_KEY'):
         return {"error": "Missing HYBRID_ANALYSIS_API_KEY"}
-        
+
     # Correct endpoint for standard keys
     url = f"{BASE_URL}/submit/url"
     data = {
         'url': target_url,
         'environment_id': '120' # Often required for URLs too
     }
-    
+
     try:
         response = requests.post(url, headers=get_headers(), data=data)
         if response.status_code in [200, 201]:

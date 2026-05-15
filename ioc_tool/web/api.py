@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,7 +42,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ..core import database, defang as defang_mod, enrich, extractor, llm as llm_mod, parser
+from ..core import database, enrich, extractor, parser
+from ..core import defang as defang_mod
+from ..core import llm as llm_mod
 
 API_VERSION = "0.9.0"
 
@@ -56,7 +58,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # ---------------------------------------------------------------------------
 
 
-def require_token(authorization: Optional[str] = Header(None)) -> None:
+def require_token(authorization: str | None = Header(None)) -> None:
     """Bearer-token auth dependency.
 
     Token comes from ``SHADOWSCOPE_API_TOKEN``. If unset, all requests are
@@ -86,7 +88,7 @@ def require_token(authorization: Optional[str] = Header(None)) -> None:
 class BulkEnrichRequest(BaseModel):
     """Request body for ``POST /enrich/bulk``."""
 
-    iocs: List[str] = Field(
+    iocs: list[str] = Field(
         ...,
         description="List of IOC strings to enrich (auto-detected, refanged)",
     )
@@ -108,7 +110,7 @@ class HealthResponse(BaseModel):
 class ServiceInfoResponse(BaseModel):
     name: str
     version: str
-    endpoints: List[str]
+    endpoints: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +118,7 @@ class ServiceInfoResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _apply_output_defang(result: Dict[str, Any], should_defang: bool) -> Dict[str, Any]:
+def _apply_output_defang(result: dict[str, Any], should_defang: bool) -> dict[str, Any]:
     """Optionally defang the ``ioc`` field on a single enrichment result."""
     if should_defang and isinstance(result, dict) and isinstance(result.get("ioc"), str):
         result = dict(result)  # don't mutate caller's reference
@@ -124,7 +126,7 @@ def _apply_output_defang(result: Dict[str, Any], should_defang: bool) -> Dict[st
     return result
 
 
-async def _attach_summaries(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def _attach_summaries(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Run ``llm.summarize`` for each result concurrently and inject ``llm_summary``.
 
     Summarisation is network I/O against Ollama — we parallelise via
@@ -136,8 +138,8 @@ async def _attach_summaries(results: List[Dict[str, Any]]) -> List[Dict[str, Any
         return results
     tasks = [asyncio.to_thread(llm_mod.summarize, r) for r in results]
     summaries = await asyncio.gather(*tasks, return_exceptions=True)
-    enriched: List[Dict[str, Any]] = []
-    for r, s in zip(results, summaries):
+    enriched: list[dict[str, Any]] = []
+    for r, s in zip(results, summaries, strict=True):
         merged = dict(r)
         if isinstance(s, str) and s:
             merged["llm_summary"] = s
@@ -145,7 +147,7 @@ async def _attach_summaries(results: List[Dict[str, Any]]) -> List[Dict[str, Any
     return enriched
 
 
-async def _enrich_one(ioc: str) -> Dict[str, Any]:
+async def _enrich_one(ioc: str) -> dict[str, Any]:
     """Refang → detect type → run async enrichment. Raises HTTPException on unknown type."""
     refanged = defang_mod.refang(ioc)
     ioc_type = parser.detect_type(refanged)
@@ -163,7 +165,7 @@ async def _enrich_one(ioc: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _cors_origins() -> List[str]:
+def _cors_origins() -> list[str]:
     """Parse ``SHADOWSCOPE_CORS_ORIGINS`` (comma-separated) → list. Default: ``["*"]``."""
     raw = os.getenv("SHADOWSCOPE_CORS_ORIGINS", "*")
     parts = [p.strip() for p in raw.split(",") if p.strip()]
@@ -246,7 +248,7 @@ async def enrich_single(
         False,
         description="Attach an llm_summary field via local Ollama (optional)",
     ),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Enrich a single IOC. Type is auto-detected and defanged input is refanged."""
     result = await _enrich_one(ioc)
     result = _apply_output_defang(result, defang)
@@ -266,7 +268,7 @@ async def enrich_bulk(
         False,
         description="Attach an llm_summary field via local Ollama (optional)",
     ),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Enrich many IOCs concurrently.
 
     Unknown-type entries are dropped (with no exception) so a single bad
@@ -285,9 +287,9 @@ async def enrich_bulk(
         return []
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for item in raw_results:
-        if isinstance(item, Exception):
+        if isinstance(item, BaseException):
             # Never crash the whole batch — match the CLI contract.
             continue
         results.append(_apply_output_defang(item, defang))
@@ -304,7 +306,7 @@ async def extract_and_enrich(
         False,
         description="Attach an llm_summary field via local Ollama (optional)",
     ),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Extract IOCs from a free-form text blob, then enrich each.
 
     Mirrors ``shadowscope enrich --text "..."`` — same extractor, same
@@ -315,7 +317,7 @@ async def extract_and_enrich(
     extracted = extractor.extract_iocs(payload.text or "")
 
     # Flatten across buckets, preserving order — same shape the CLI uses.
-    iocs_to_process: List[str] = []
+    iocs_to_process: list[str] = []
     for bucket in extracted.values():
         iocs_to_process.extend(bucket)
 
@@ -328,9 +330,9 @@ async def extract_and_enrich(
         tasks.append(enrich.enrich_ioc_async(refanged, ioc_type))
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for item in raw_results:
-        if isinstance(item, Exception):
+        if isinstance(item, BaseException):
             continue
         results.append(_apply_output_defang(item, defang))
 
@@ -344,7 +346,7 @@ async def extract_and_enrich(
 def show_cached(
     ioc: str = Query(..., description="IOC value to look up in the cache"),
     defang: bool = Query(False, description="Defang the returned ioc field"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return the cached enrichment for an IOC without refetching.
 
     404 if the IOC has never been enriched (no row in ``iocs`` table).
@@ -362,8 +364,8 @@ def show_cached(
     import json as _json
 
     ioc_type = parser.detect_type(refanged)
-    modules: Dict[str, Dict[str, Any]] = {}
-    scores: List[int] = []
+    modules: dict[str, dict[str, Any]] = {}
+    scores: list[int] = []
 
     # Iterate over every source the orchestrator might have written.
     # We deliberately query the DB directly here rather than calling the
@@ -395,7 +397,7 @@ def show_cached(
     from ..core import score as score_mod
     final_score = score_mod.calculate_final_risk(scores)
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ioc": refanged,
         "type": ioc_type,
         "modules": modules,
@@ -405,7 +407,7 @@ def show_cached(
 
 
 @app.get("/sources", dependencies=[Depends(require_token)])
-def list_sources() -> Dict[str, bool]:
+def list_sources() -> dict[str, bool]:
     """List every configured source and whether its key is present.
 
     Returns a flat ``{source_name: key_is_set}`` dict. Never returns the

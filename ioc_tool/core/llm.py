@@ -20,8 +20,9 @@ Environment variables (all optional):
 
 from __future__ import annotations
 
+import contextlib
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -64,7 +65,7 @@ def _tier_for_score(score: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _summarize_module(source: str, payload: Dict[str, Any]) -> str:
+def _summarize_module(source: str, payload: dict[str, Any]) -> str:
     """Return a one-line ``Source: <score> + 1-3 facts`` summary.
 
     Token-efficient by design — we keep each line tight so the whole
@@ -72,7 +73,7 @@ def _summarize_module(source: str, payload: Dict[str, Any]) -> str:
     """
     score = payload.get("score", 0)
     data = payload.get("data") or {}
-    parts: List[str] = []
+    parts: list[str] = []
 
     if source == "VirusTotal":
         stats = data.get("last_analysis_stats") or {}
@@ -152,9 +153,9 @@ def _summarize_module(source: str, payload: Dict[str, Any]) -> str:
                     first_name = first_name[:57] + "..."
                 parts.append(first_name)
     elif source == "URLscan":
-        total = data.get("total")
-        if total:
-            parts.append(f"{total} scans")
+        url_total = data.get("total")
+        if url_total:
+            parts.append(f"{url_total} scans")
         for entry in data.get("results") or []:
             if not isinstance(entry, dict):
                 continue
@@ -180,10 +181,8 @@ def _summarize_module(source: str, payload: Dict[str, Any]) -> str:
             parts.append(f"EPSS {epss_val}")
         pct = data.get("percentile")
         if pct is not None:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 parts.append(f"percentile {float(pct) * 100:.1f}%")
-            except (TypeError, ValueError):
-                pass
     elif source == "KEV":
         parts.append("listed in CISA KEV")
         if data.get("knownRansomwareCampaignUse") == "Known":
@@ -194,7 +193,7 @@ def _summarize_module(source: str, payload: Dict[str, Any]) -> str:
     return f"{source}: score={score}; {detail}"
 
 
-def _build_prompt(result: Dict[str, Any]) -> str:
+def _build_prompt(result: dict[str, Any]) -> str:
     """Construct the LLM prompt from an enrichment result dict.
 
     The output stays under ~600 chars even for IOCs with every source
@@ -207,7 +206,7 @@ def _build_prompt(result: Dict[str, Any]) -> str:
     tier = _tier_for_score(final_score)
 
     modules = result.get("modules") or {}
-    source_lines: List[str] = []
+    source_lines: list[str] = []
     for source, payload in modules.items():
         if not isinstance(payload, dict):
             continue
@@ -241,11 +240,11 @@ def _build_prompt(result: Dict[str, Any]) -> str:
 
 
 def summarize(
-    result: Dict[str, Any],
-    model: Optional[str] = None,
-    base_url: Optional[str] = None,
+    result: dict[str, Any],
+    model: str | None = None,
+    base_url: str | None = None,
     timeout: int = DEFAULT_TIMEOUT,
-) -> Optional[str]:
+) -> str | None:
     """Generate a 2-3 sentence natural-language verdict for an enriched IOC.
 
     Calls the local Ollama HTTP API (``POST /api/generate``) with a

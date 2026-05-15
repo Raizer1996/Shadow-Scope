@@ -1,7 +1,7 @@
 import argparse
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -10,12 +10,18 @@ from rich.table import Table
 
 from ..core import (
     database,
-    defang as defang_mod,
     enrich,
     extractor,
-    llm as llm_mod,
-    output as output_mod,
     parser,
+)
+from ..core import (
+    defang as defang_mod,
+)
+from ..core import (
+    llm as llm_mod,
+)
+from ..core import (
+    output as output_mod,
 )
 from ..modules import (
     abuseipdb,  # noqa: F401  (imported for side-effect parity with previous CLI)
@@ -58,7 +64,7 @@ def check_config(quiet: bool = False) -> None:
     callers piping ``--json`` / ``--csv`` to stdout still get a
     parse-clean machine-readable payload.
     """
-    missing: List[str] = []
+    missing: list[str] = []
     if not os.getenv('VT_API_KEY'):
         missing.append("VT_API_KEY (VirusTotal)")
     if not os.getenv('ABUSEIPDB_API_KEY'):
@@ -90,7 +96,7 @@ def get_score_color(score: int) -> str:
     return "green"
 
 
-def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> None:
+def print_single_result(result: dict[str, Any], should_defang: bool = False) -> None:
     """Used for 'show' command - detailed view of a single IOC."""
     ioc_value = _display_ioc(result['ioc'], should_defang)
     ioc_type = result['type']
@@ -283,7 +289,7 @@ def print_single_result(result: Dict[str, Any], should_defang: bool = False) -> 
 
 
 def print_aggregated_table(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     should_defang: bool = False,
 ) -> None:
     """Used for 'enrich' command - summary table of all IOCs."""
@@ -294,7 +300,7 @@ def print_aggregated_table(
     table.add_column("IOC", style="white")
     table.add_column("Summary", style="dim")
 
-    malicious_iocs: List[str] = []
+    malicious_iocs: list[str] = []
 
     for res in sorted_results:
         score = res['final_score']
@@ -302,7 +308,7 @@ def print_aggregated_table(
         ioc_value = _display_ioc(res['ioc'], should_defang)
         modules = res.get('modules', {})
 
-        summary_parts: List[str] = []
+        summary_parts: list[str] = []
 
         # VirusTotal Summary
         if 'VirusTotal' in modules:
@@ -596,12 +602,12 @@ def handle_enrich(args: argparse.Namespace) -> None:
     machine_readable = want_json or want_csv
     msg_console = err_console if machine_readable else console
 
-    iocs_to_process: List[str] = []
+    iocs_to_process: list[str] = []
 
     # --- Bulk text-blob mode ------------------------------------------------
     # `--text BLOB` and the `-` stdin sentinel both feed into the same
     # extractor pipeline and override any positional / -f input.
-    blob_text: Optional[str] = getattr(args, 'text', None)
+    blob_text: str | None = getattr(args, 'text', None)
     if blob_text is None and getattr(args, 'ioc', None) == '-':
         blob_text = sys.stdin.read()
 
@@ -627,7 +633,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
         file_path = getattr(args, 'file', None)
         if file_path:
             try:
-                with open(file_path, 'r') as f:
+                with open(file_path) as f:
                     for line in f:
                         line = line.strip()
                         if line:
@@ -643,7 +649,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
     # repeats across types (e.g. domain + email-domain overlap), and the
     # enrichment cache is keyed on value anyway.
     seen: set[str] = set()
-    deduped: List[str] = []
+    deduped: list[str] = []
     for ioc in iocs_to_process:
         if ioc not in seen:
             seen.add(ioc)
@@ -654,7 +660,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
         msg_console.print("[yellow]No IOCs provided. Pass an IOC positional or -f FILE.[/yellow]")
         return
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     if machine_readable:
         # No spinner — would leak escape codes to stdout via rich's redraw loop.
         for ioc in iocs_to_process:
@@ -680,7 +686,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
         return
 
     want_summary = bool(getattr(args, 'summary', False))
-    summaries: Dict[int, Optional[str]] = {}
+    summaries: dict[int, str | None] = {}
     if want_summary:
         # Compute one verdict per result upfront so JSON/CSV and table
         # branches share the same data. Each call wraps its own errors
@@ -690,7 +696,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
 
     if want_json:
         if want_summary:
-            payload: List[Dict[str, Any]] = []
+            payload: list[dict[str, Any]] = []
             for idx, res in enumerate(results):
                 merged = dict(res)
                 merged['llm_summary'] = summaries.get(idx)
@@ -775,9 +781,9 @@ def handle_show(args: argparse.Namespace) -> None:
 
 
 def handle_analyze(
-    args: Optional[argparse.Namespace] = None,
-    target: Optional[str] = None,
-    input_type: Optional[str] = None,
+    args: argparse.Namespace | None = None,
+    target: str | None = None,
+    input_type: str | None = None,
     provider: str = "4",
 ) -> None:
     """Sandbox analyze a file or URL across one or more providers.
@@ -800,17 +806,14 @@ def handle_analyze(
             return
 
     if not target:
-        if input_type == "file":
-            target = Prompt.ask("Enter file path")
-        else:
-            target = Prompt.ask("Enter URL")
+        target = Prompt.ask("Enter file path") if input_type == "file" else Prompt.ask("Enter URL")
 
     if input_type == "file" and not os.path.exists(target):
         console.print("[red]File not found[/red]")
         return
 
     # Resolve provider selection
-    providers: List[str] = []
+    providers: list[str] = []
     if provider == "4":
         providers = ["hybrid", "joe", "filescan"]
     elif provider == "1":
@@ -856,10 +859,7 @@ def handle_analyze(
         console.print(f"\n[bold {style}]--- Running {title} ---[/bold {style}]")
 
         with console.status(f"[bold {style}]Submitting to {title}...[/bold {style}]"):
-            if input_type == "file":
-                res = func_file(target)
-            else:
-                res = func_url(target)
+            res = func_file(target) if input_type == "file" else func_url(target)
 
         if "error" in res:
             console.print(f"[red]Error: {res['error']}[/red]")
@@ -891,8 +891,8 @@ def handle_serve(args: argparse.Namespace) -> None:
 
 
 def handle_shodan(
-    args: Optional[argparse.Namespace] = None,
-    target: Optional[str] = None,
+    args: argparse.Namespace | None = None,
+    target: str | None = None,
 ) -> None:
     """Shodan-only host lookup. Accepts an argparse Namespace or a bare target string."""
     if args is not None:
@@ -1155,9 +1155,8 @@ def main() -> None:
         getattr(args, 'json', False) or getattr(args, 'csv', False)
     )
 
-    if not machine_readable:
-        if not banner.show():
-            pass
+    if not machine_readable and not banner.show():
+        pass
     database.init_db()
     check_config(quiet=machine_readable)
 

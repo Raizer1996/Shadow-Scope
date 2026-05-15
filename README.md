@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Raizer1996/Shadow-Scope/actions/workflows/ci.yml/badge.svg)](https://github.com/Raizer1996/Shadow-Scope/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![mypy: checked](https://img.shields.io/badge/mypy-checked-blue.svg)](https://mypy-lang.org/)
+[![ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![IOC Types](https://img.shields.io/badge/IOC-IP%20%7C%20Domain%20%7C%20URL%20%7C%20Hash%20%7C%20File-orange.svg)](docs/ARCHITECTURE.md)
 

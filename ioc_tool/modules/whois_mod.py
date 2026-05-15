@@ -1,5 +1,5 @@
 import whois
-from datetime import datetime
+
 
 def get_whois_data(domain):
     try:

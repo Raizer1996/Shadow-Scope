@@ -16,15 +16,13 @@ and never raise. A successful HTTP 200 with ``query_status != "ok"``
 
 from __future__ import annotations
 
-from typing import Optional
-
 import requests
 
 BASE_URL = "https://urlhaus-api.abuse.ch/v1"
 TIMEOUT = 10  # seconds
 
 
-def enrich_url(value: str) -> Optional[dict]:
+def enrich_url(value: str) -> dict | None:
     """Look up a URL in URLhaus.
 
     Returns the parsed response dict on a hit (``query_status == "ok"``),
@@ -53,7 +51,7 @@ def enrich_url(value: str) -> Optional[dict]:
     return payload
 
 
-def enrich_host(value: str) -> Optional[dict]:
+def enrich_host(value: str) -> dict | None:
     """Look up a domain or IP host in URLhaus.
 
     Returns the response dict (typically including ``url_count`` and a

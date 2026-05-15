@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: lint + test
+    name: lint + type + test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -28,10 +28,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest ruff
+          pip install -r requirements-dev.txt
 
       - name: Lint with ruff
         run: ruff check ioc_tool tests
+
+      - name: Type-check with mypy
+        run: mypy ioc_tool
 
       - name: Run pytest
         run: pytest -q

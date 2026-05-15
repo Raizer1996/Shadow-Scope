@@ -15,11 +15,10 @@ import csv
 import io
 import json
 from datetime import date, datetime
-from typing import Any, Dict, List
-
+from typing import Any
 
 # CSV columns — keep this list authoritative. Tests assert on it.
-CSV_COLUMNS: List[str] = [
+CSV_COLUMNS: list[str] = [
     "ioc",
     "type",
     "final_score",
@@ -93,7 +92,7 @@ def _json_default(obj: Any) -> Any:
     return str(obj)
 
 
-def to_json(results: List[Dict[str, Any]]) -> str:
+def to_json(results: list[dict[str, Any]]) -> str:
     """Serialize enrichment results as pretty-printed JSON (indent=2).
 
     Includes every key in every module dict — nothing is dropped.
@@ -103,7 +102,7 @@ def to_json(results: List[Dict[str, Any]]) -> str:
     return json.dumps(results, indent=2, default=_json_default, sort_keys=False)
 
 
-def to_csv(results: List[Dict[str, Any]]) -> str:
+def to_csv(results: list[dict[str, Any]]) -> str:
     """Flatten enrichment results to CSV (one row per IOC).
 
     Columns are defined by :data:`CSV_COLUMNS`. Missing values become
@@ -120,7 +119,7 @@ def to_csv(results: List[Dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
-def _flatten_result(result: Dict[str, Any]) -> Dict[str, str]:
+def _flatten_result(result: dict[str, Any]) -> dict[str, str]:
     """Reduce a single enrichment dict to the CSV column dict.
 
     Every value is coerced to ``str`` so the CSV writer never chokes
@@ -129,7 +128,7 @@ def _flatten_result(result: Dict[str, Any]) -> Dict[str, str]:
     modules = (result or {}).get("modules", {}) or {}
     final_score = (result or {}).get("final_score", 0) or 0
 
-    row: Dict[str, str] = {col: "" for col in CSV_COLUMNS}
+    row: dict[str, str] = {col: "" for col in CSV_COLUMNS}
     row["ioc"] = _s(result.get("ioc"))
     row["type"] = _s(result.get("type"))
     row["final_score"] = _s(final_score)
