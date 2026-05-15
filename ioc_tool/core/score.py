@@ -325,6 +325,28 @@ def calculate_crtsh_score(data: dict | None) -> int:
     return 0
 
 
+def calculate_abstract_score(data: dict | None) -> int:
+    """AbstractAPI security flags → 0-100. Anonymising path → 70, else info-only.
+
+    The endpoint may or may not return the ``security`` block depending
+    on subscription tier. Even when it does, AbstractAPI is one signal
+    among many — we cap at 70 so it never drives the composite above
+    where the other sources agree.
+    """
+    if not data:
+        return 0
+    sec = data.get("security") or {}
+    if (
+        sec.get("is_vpn")
+        or sec.get("is_proxy")
+        or sec.get("is_tor")
+        or sec.get("is_relay")
+        or sec.get("is_anonymous")
+    ):
+        return 70
+    return 0
+
+
 def calculate_asn_score(data: dict | None) -> int:
     """ASN enrichment is info-only — we always return 0 so it appears in
     the result without pushing the composite tier. Analysts read the

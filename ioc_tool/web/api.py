@@ -314,6 +314,21 @@ def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
             return f"{malware or 'C2'} · {status or 'listed'}"
     elif source == "SSLBL":
         return data.get("malware") or "malicious cert hash"
+    elif source == "AbstractAPI":
+        sec = data.get("security") or {}
+        parts = []
+        if sec.get("is_tor"):
+            parts.append("Tor")
+        if sec.get("is_vpn"):
+            parts.append("VPN")
+        if sec.get("is_proxy"):
+            parts.append("proxy")
+        if sec.get("is_relay"):
+            parts.append("relay")
+        loc = data.get("country") or ""
+        if parts:
+            return ("/".join(parts) + (f" · {loc}" if loc else "")) or "—"
+        return loc or "—"
     elif source == "Heuristics":
         parts = []
         if "nrd" in data and isinstance(data["nrd"], dict):
@@ -432,6 +447,7 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
     {"id": "OTX",           "env": "OTX_API_KEY",               "types": ["ip", "domain", "url", "hash"]},
     {"id": "URLscan",       "env": "URLSCAN_API_KEY",           "types": ["ip", "domain", "url"]},
     {"id": "Pulsedive",     "env": "PULSEDIVE_API_KEY",         "types": ["ip", "domain", "url"], "anonymous_ok": True},
+    {"id": "AbstractAPI",   "env": "ABSTRACT_API_KEY",          "types": ["ip"]},
     {"id": "URLhaus",       "env": None,                        "types": ["url", "domain", "ip"]},
     {"id": "ThreatFox",     "env": None,                        "types": ["ip", "domain", "url", "hash"]},
     {"id": "MalwareBazaar", "env": None,                        "types": ["hash"]},

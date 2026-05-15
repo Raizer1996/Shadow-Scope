@@ -25,6 +25,7 @@ def _isolated_db(monkeypatch, tmp_path):
 def _stub_all_network(monkeypatch):
     """Force every source to return None — same stub used in test_smoke."""
     from ioc_tool.modules import (
+        abstract_api,
         abuseipdb,
         crtsh,
         feodo,
@@ -42,6 +43,7 @@ def _stub_all_network(monkeypatch):
         vt,
         whois_mod,
     )
+    monkeypatch.setattr(abstract_api, "enrich_ip", lambda v: None)
     monkeypatch.setattr(abuseipdb, "enrich_ip", lambda v: None)
     monkeypatch.setattr(crtsh, "enrich_domain", lambda v: None)
     monkeypatch.setattr(feodo, "enrich_ip", lambda v: None)

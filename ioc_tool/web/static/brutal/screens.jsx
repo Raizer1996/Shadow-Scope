@@ -249,7 +249,7 @@ function CaseGraph({ iocs }) {
   });
   return (
     <div className="graph-panel">
-      <div className="sec-head"><span className="sec-title">SHARED INFRASTRUCTURE GRAPH</span><span className="sec-meta dim">IOC ↔ source bipartite · edge = positive score</span></div>
+      <div className="sec-head"><span className="sec-title glitch" data-text="SHARED INFRASTRUCTURE GRAPH">SHARED INFRASTRUCTURE GRAPH</span><span className="sec-meta dim">IOC ↔ source bipartite · edge = positive score</span></div>
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h}>
         {edges.map((e, i) => (
           <line key={i} x1={e.from.x} y1={e.from.y} x2={e.to.x} y2={e.to.y}
@@ -366,7 +366,7 @@ function SourcesDrawer({ onClose }) {
       <div className="drawer-scrim" onClick={onClose}>
         <aside className="drawer" onClick={e => e.stopPropagation()}>
           <header className="drawer-head">
-            <span className="sec-title">SOURCES</span>
+            <span className="sec-title glitch" data-text="SOURCES">SOURCES</span>
             <button className="drawer-close" onClick={onClose}>✕  esc</button>
           </header>
           <div className="drawer-body" style={{ padding: "16px" }}>
@@ -382,7 +382,7 @@ function SourcesDrawer({ onClose }) {
       <div className="drawer-scrim" onClick={onClose}>
         <aside className="drawer" onClick={e => e.stopPropagation()}>
           <header className="drawer-head">
-            <span className="sec-title">SOURCES · loading…</span>
+            <span className="sec-title glitch" data-text="SOURCES · loading…">SOURCES · loading…</span>
             <button className="drawer-close" onClick={onClose}>✕  esc</button>
           </header>
         </aside>

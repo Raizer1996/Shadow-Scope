@@ -23,7 +23,7 @@ function MitreStrip({ ioc, onPivot }) {
   return (
     <section className="mitre-strip">
       <div className="sec-head">
-        <span className="sec-title">MITRE ATT&CK</span>
+        <span className="sec-title glitch" data-text="MITRE ATT&CK">MITRE ATT&CK</span>
         <span className="sec-meta">{techniques.length} techniques mapped via <DrillChip kind="malware" value={family} onPivot={onPivot} inline /></span>
         <span className="sec-meta dim">attack.mitre.org · derived from family attribution</span>
       </div>
@@ -77,7 +77,7 @@ function WhoisTimeline({ ioc, fmt }) {
   return (
     <section className="whois-block">
       <div className="sec-head">
-        <span className="sec-title">WHOIS · LIFECYCLE</span>
+        <span className="sec-title glitch" data-text="WHOIS · LIFECYCLE">WHOIS · LIFECYCLE</span>
         <span className="sec-meta">domain age <b style={{color: ageDays < 30 ? "var(--high)" : "var(--ink)"}}>{ageDays} days</b></span>
         <span className="sec-meta dim">tracks every observable change since registration</span>
       </div>
@@ -223,7 +223,7 @@ function NamedThreatStrip({ ioc }) {
   return (
     <section className="threat-strip">
       <div className="ts-head">
-        <span className="sec-title">NAMED ATTRIBUTION</span>
+        <span className="sec-title glitch" data-text="NAMED ATTRIBUTION">NAMED ATTRIBUTION</span>
         <span className="sec-meta">{adv.length} adv · {fam.length} fam · {thr.length} threat · {tag.length} tag</span>
         <span className="sec-meta dim">de-duplicated across OTX / VT / Pulsedive / ThreatFox / URLhaus / MalwareBazaar</span>
       </div>
@@ -284,7 +284,7 @@ function CveBlock({ ioc }) {
   return (
     <section className="cve-block">
       <div className="sec-head">
-        <span className="sec-title">CVE · INTELLIGENCE</span>
+        <span className="sec-title glitch" data-text="CVE · INTELLIGENCE">CVE · INTELLIGENCE</span>
         <span className="sec-meta">{ioc.ioc} · NVD + EPSS + CISA KEV</span>
       </div>
 
@@ -381,7 +381,7 @@ function CrtshBlock({ ioc, fmt }) {
   return (
     <section className="crtsh-block">
       <div className="sec-head">
-        <span className="sec-title">CERTIFICATE TRANSPARENCY</span>
+        <span className="sec-title glitch" data-text="CERTIFICATE TRANSPARENCY">CERTIFICATE TRANSPARENCY</span>
         <span className="sec-meta">{data.total} certificates · {data.subdomain_count} unique subdomains</span>
         <span className="sec-meta dim">via crt.sh</span>
       </div>
@@ -500,7 +500,7 @@ function PivotPanel({ ioc, results, setActiveIocId }) {
     return (
       <aside className="pivot-panel">
         <div className="sec-head">
-          <span className="sec-title">RELATED</span>
+          <span className="sec-title glitch" data-text="RELATED">RELATED</span>
           <span className="sec-meta dim">no pivots</span>
         </div>
         <div className="pivot-empty">// no related infrastructure found<br/>// in current intel corpus</div>
@@ -511,7 +511,7 @@ function PivotPanel({ ioc, results, setActiveIocId }) {
   return (
     <aside className="pivot-panel">
       <div className="sec-head">
-        <span className="sec-title">RELATED</span>
+        <span className="sec-title glitch" data-text="RELATED">RELATED</span>
         <span className="sec-meta">{groups.reduce((n, g) => n + g.items.length, 0)} IOCs across {groups.length} pivots</span>
       </div>
       {groups.map(g => (
@@ -667,12 +667,39 @@ function IpCorePanel({ ioc, fmt }) {
   const g = _geoFor(ioc);
   if (!g) return null;
   const ports = g.ports || [];
+
+  // Cross-source flags surfaced as colour-coded badges at the top of
+  // the panel — Tor / VPN / Proxy / Abuse / Anycast / Privacy. The
+  // dashboard previously buried these inside the per-source drawers,
+  // which user testing showed made them invisible at a glance.
+  const flags = [];
+  const tor = ioc.modules.TOR?.data;
+  const ab = ioc.modules.AbuseIPDB?.data || {};
+  const ipinfo = ioc.modules.IPinfo?.data || {};
+  const gn = ioc.modules.GreyNoise?.data || {};
+  const ipqs = ioc.modules.IPQS?.data || {};
+  if (tor?.is_tor || ab.isTor) flags.push({ k: "TOR EXIT", color: "var(--crit)" });
+  if (ipqs.vpn) flags.push({ k: "VPN", color: "var(--bad)" });
+  if (ipqs.proxy) flags.push({ k: "PROXY", color: "var(--bad)" });
+  if (ipinfo.privacy?.tor || ipinfo.privacy?.vpn || ipinfo.privacy?.proxy) flags.push({ k: "PRIVACY-VPN", color: "var(--bad)" });
+  if (ab.abuseConfidenceScore >= 25) flags.push({ k: `ABUSE ${ab.abuseConfidenceScore}%`, color: "var(--bad)" });
+  if (gn.classification === "malicious") flags.push({ k: "SCANNER-MAL", color: "var(--bad)" });
+  if (gn.riot) flags.push({ k: "GN-RIOT", color: "var(--safe)" });
+  if (ipinfo.anycast || ipinfo.is_anycast) flags.push({ k: "ANYCAST", color: "var(--ink-2)" });
+
   return (
     <div className="ip-core-panel">
       <div className="ipc-head">
-        <span className="ipc-title">IP CORE</span>
+        <span className="ipc-title glitch" data-text="IP CORE">IP CORE</span>
         <span className="ipc-meta">identity · routing</span>
       </div>
+      {flags.length > 0 && (
+        <div className="ipc-flags">
+          {flags.map(f => (
+            <span key={f.k} className="ipc-flag" style={{ color: f.color, borderColor: f.color }}>{f.k}</span>
+          ))}
+        </div>
+      )}
       <div className="ipc-grid">
         {g.country && (
           <div className="ipc-row">
