@@ -133,36 +133,13 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
             <span className="sec-meta">{modules.length} sources queried · ordered by score</span>
             <span className="sec-meta dim">click row → toggle inclusion</span>
           </div>
-          <table className="src-table">
-            <thead>
-              <tr>
-                <th style={{ width: "3ch" }}></th>
-                <th style={{ width: "14ch" }}>source</th>
-                <th style={{ width: "9ch" }}>score</th>
-                <th>detail</th>
-                <th style={{ width: "8ch" }}>fetched</th>
-              </tr>
-            </thead>
-            <tbody>
-              {modules.sort((a, b) => b[1].score - a[1].score).map(([name, mod]) => {
-                const s = sevOf(mod.score);
-                const off = disabledSources.has(name);
-                const f = window.FRESHNESS(name, ioc.id);
-                return (
-                  <tr key={name} className={`src-row ${mod.score === 0 ? "muted" : ""} ${off ? "off" : ""}`} onClick={() => toggleSource(name)}>
-                    <td className="src-toggle"><span className={`src-check ${off ? "off" : "on"}`}>{off ? "✕" : "✓"}</span></td>
-                    <td className="src-name">{name}</td>
-                    <td className="src-score" style={{ color: off ? "var(--ink-3)" : s.fg }}>
-                      <span className="src-score-num">{String(mod.score).padStart(2, "0")}</span>
-                      <span className="src-score-bar"><span style={{ width: `${mod.score}%`, background: off ? "var(--line-2)" : s.fg }} /></span>
-                    </td>
-                    <td className="src-detail">{renderSourceDetail(mod.detail, mod, onPivot)}</td>
-                    <td className={`src-fresh ${f.stale ? "stale" : ""}`}>{f.minutes < 60 ? `${f.minutes}m` : `${Math.floor(f.minutes/60)}h`}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <SourceTable
+            modules={modules}
+            disabledSources={disabledSources}
+            toggleSource={toggleSource}
+            ioc={ioc}
+            onPivot={onPivot}
+          />
         </section>
 
         <PivotPanel ioc={ioc} results={results} setActiveIocId={setActiveIocId} />
@@ -303,6 +280,365 @@ function CaseChip({ caseId }) {
       <span className="chip-val">{c?.label || caseId}</span>
       <span className="chip-meta dim small">{c?.iocs?.length || 1} IOC</span>
       <span className="chip-help" title={explain}>?</span>
+    </div>
+  );
+}
+
+// Source attribution table — per-source row with optional expand drawer.
+// Clicking the source name toggles the drawer; clicking the row checkbox
+// toggles inclusion in the composite (unchanged from previous behaviour).
+function SourceTable({ modules, disabledSources, toggleSource, ioc, onPivot }) {
+  const [expanded, setExpanded] = useState(new Set());
+
+  const toggleExpand = (name) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
+
+  const sorted = modules.sort((a, b) => b[1].score - a[1].score);
+
+  return (
+    <table className="src-table">
+      <thead>
+        <tr>
+          <th style={{ width: "3ch" }}></th>
+          <th style={{ width: "14ch" }}>source</th>
+          <th style={{ width: "9ch" }}>score</th>
+          <th>detail</th>
+          <th style={{ width: "8ch" }}>fetched</th>
+          <th style={{ width: "3ch" }}></th>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map(([name, mod]) => {
+          const s = sevOf(mod.score);
+          const off = disabledSources.has(name);
+          const f = window.FRESHNESS(name, ioc.id);
+          const open = expanded.has(name);
+          return (
+            <React.Fragment key={name}>
+              <tr className={`src-row ${mod.score === 0 ? "muted" : ""} ${off ? "off" : ""}`}>
+                <td className="src-toggle" onClick={() => toggleSource(name)} title="toggle inclusion in composite">
+                  <span className={`src-check ${off ? "off" : "on"}`}>{off ? "✕" : "✓"}</span>
+                </td>
+                <td className="src-name" onClick={() => toggleSource(name)}>{name}</td>
+                <td className="src-score" style={{ color: off ? "var(--ink-3)" : s.fg }} onClick={() => toggleSource(name)}>
+                  <span className="src-score-num">{String(mod.score).padStart(2, "0")}</span>
+                  <span className="src-score-bar"><span style={{ width: `${mod.score}%`, background: off ? "var(--line-2)" : s.fg }} /></span>
+                </td>
+                <td className="src-detail" onClick={() => toggleSource(name)}>{renderSourceDetail(mod.detail, mod, onPivot)}</td>
+                <td className={`src-fresh ${f.stale ? "stale" : ""}`} onClick={() => toggleSource(name)}>{f.minutes < 60 ? `${f.minutes}m` : `${Math.floor(f.minutes/60)}h`}</td>
+                <td className="src-expand-cell">
+                  <button
+                    type="button"
+                    className={`src-expand ${open ? "open" : ""}`}
+                    onClick={(e) => { e.stopPropagation(); toggleExpand(name); }}
+                    title={open ? "collapse" : "expand raw data"}
+                  >{open ? "−" : "+"}</button>
+                </td>
+              </tr>
+              {open && (
+                <tr className="src-drawer-row">
+                  <td colSpan="6">
+                    <SourceDrawer name={name} mod={mod} ioc={ioc} />
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+// Per-source raw-data drawer — surfaces the full enrichment payload for
+// the source the user expanded. Renders source-specific highlight rows
+// when the shape is known; falls back to a key/value list otherwise.
+function SourceDrawer({ name, mod, ioc }) {
+  const data = mod.data || {};
+  const rows = [];
+
+  // Common formatter for a key/value row.
+  const KV = ({ k, v, copyable, mono }) => {
+    if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) return null;
+    return (
+      <div className="dr-kv">
+        <span className="dr-k">{k}</span>
+        <span className={`dr-v ${mono ? "mono" : ""}`}>
+          {copyable ? <Copyable text={String(v)}>{String(v)}</Copyable> : Array.isArray(v) ? v.slice(0, 12).join(", ") : String(v)}
+        </span>
+      </div>
+    );
+  };
+
+  switch (name) {
+    case "VirusTotal": {
+      const stats = data.last_analysis_stats || {};
+      const total = Object.values(stats).reduce((a, b) => a + (Number(b) || 0), 0);
+      const tags = data.tags || [];
+      const cats = Object.values(data.categories || {}).filter(Boolean);
+      const ptc = data.popular_threat_classification || {};
+      const family = ptc.suggested_threat_label;
+      const yaraHits = (data.crowdsourced_yara_results || []).slice(0, 5).map(y => y.rule_name || y.ruleset_name).filter(Boolean);
+      rows.push(
+        <KV k="engines" v={total ? `${stats.malicious || 0} malicious / ${stats.suspicious || 0} suspicious / ${total} total` : null} key="vt-eng" />,
+        <KV k="reputation" v={data.reputation} key="vt-rep" />,
+        <KV k="votes" v={data.total_votes ? `${data.total_votes.malicious || 0} bad · ${data.total_votes.harmless || 0} good` : null} key="vt-votes" />,
+        <KV k="categories" v={cats.length ? Array.from(new Set(cats)) : null} key="vt-cat" />,
+        <KV k="tags" v={tags} key="vt-tags" />,
+        <KV k="family" v={family} key="vt-fam" />,
+        <KV k="YARA" v={yaraHits} key="vt-yara" />,
+        <KV k="JARM" v={data.jarm} mono key="vt-jarm" copyable />,
+        <KV k="ASN owner" v={data.as_owner} key="vt-asn" />,
+        <KV k="country" v={data.country} key="vt-country" />,
+        <KV k="last submit" v={data.last_submission_date ? new Date(data.last_submission_date * 1000).toISOString().slice(0,10) : null} key="vt-ls" />,
+        <KV k="names" v={(data.names || []).slice(0, 4)} key="vt-names" />,
+        <KV k="SHA256" v={data.sha256} mono copyable key="vt-sha" />,
+      );
+      break;
+    }
+    case "AbuseIPDB":
+      rows.push(
+        <KV k="confidence" v={data.abuseConfidenceScore} key="ab-conf" />,
+        <KV k="reports" v={data.totalReports ? `${data.totalReports} (${data.numDistinctUsers || "?"} reporters)` : null} key="ab-rep" />,
+        <KV k="usage" v={data.usageType} key="ab-use" />,
+        <KV k="ISP" v={data.isp} key="ab-isp" />,
+        <KV k="domain" v={data.domain} key="ab-dom" />,
+        <KV k="hostnames" v={data.hostnames} key="ab-hosts" />,
+        <KV k="last report" v={data.lastReportedAt ? new Date(data.lastReportedAt).toISOString().slice(0, 10) : null} key="ab-last" />,
+        <KV k="Tor" v={data.isTor ? "yes" : null} key="ab-tor" />,
+      );
+      break;
+    case "Shodan":
+      rows.push(
+        <KV k="OS" v={data.os} key="sh-os" />,
+        <KV k="ISP" v={data.isp} key="sh-isp" />,
+        <KV k="org" v={data.org} key="sh-org" />,
+        <KV k="ports" v={(data.ports || []).map(p => String(p))} key="sh-ports" />,
+        <KV k="tags" v={data.tags} key="sh-tags" />,
+        <KV k="hostnames" v={data.hostnames} key="sh-hosts" />,
+        <KV k="last scan" v={data.last_update} key="sh-last" />,
+      );
+      break;
+    case "GreyNoise":
+      rows.push(
+        <KV k="classification" v={data.classification} key="gn-cls" />,
+        <KV k="noise" v={data.noise ? "yes (background scanner)" : null} key="gn-noise" />,
+        <KV k="RIOT" v={data.riot ? "yes (trusted scanner)" : null} key="gn-riot" />,
+        <KV k="name" v={data.name} key="gn-name" />,
+        <KV k="last seen" v={data.last_seen} key="gn-ls" />,
+        data.link && (
+          <div className="dr-kv" key="gn-link">
+            <span className="dr-k">link</span>
+            <span className="dr-v"><a href={data.link} target="_blank" rel="noreferrer">view on GreyNoise ↗</a></span>
+          </div>
+        ),
+      );
+      break;
+    case "OTX":
+      {
+        const pi = data.pulse_info || {};
+        const pulses = (pi.pulses || []).slice(0, 5);
+        rows.push(
+          <KV k="pulses" v={pi.count} key="otx-cnt" />,
+          <KV k="reputation" v={data.reputation} key="otx-rep" />,
+          <KV k="false positive" v={data.false_positive ? "yes" : null} key="otx-fp" />,
+        );
+        if (pulses.length) {
+          rows.push(
+            <div className="dr-kv dr-stack" key="otx-pulses">
+              <span className="dr-k">recent</span>
+              <span className="dr-v dr-stack-v">
+                {pulses.map((p, i) => (
+                  <span key={i} className="otx-pulse">
+                    <b>{p.name || "(unnamed)"}</b>
+                    {p.adversary && <span className="dr-pulse-adv"> · {p.adversary}</span>}
+                    {p.malware_families && p.malware_families.length > 0 && (
+                      <span className="dr-pulse-mw"> · {p.malware_families.slice(0,2).map(m=>m.display_name||m.target||m).join(", ")}</span>
+                    )}
+                  </span>
+                ))}
+              </span>
+            </div>
+          );
+        }
+      }
+      break;
+    case "Pulsedive":
+      {
+        const threats = (data.threats || []).map(t => (typeof t === "string" ? t : t.name)).filter(Boolean);
+        const feeds = (data.feeds || []).map(f => (typeof f === "string" ? f : f.name)).filter(Boolean);
+        rows.push(
+          <KV k="risk" v={data.risk} key="pd-risk" />,
+          <KV k="recommended" v={data.risk_recommended} key="pd-rec" />,
+          <KV k="threats" v={threats} key="pd-thr" />,
+          <KV k="feeds" v={feeds} key="pd-feeds" />,
+          <KV k="added" v={data.stamp_added} key="pd-add" />,
+          <KV k="last seen" v={data.stamp_seen} key="pd-seen" />,
+        );
+      }
+      break;
+    case "WHOIS":
+      rows.push(
+        <KV k="registrar" v={data.registrar} key="w-reg" />,
+        <KV k="created" v={Array.isArray(data.creation_date) ? data.creation_date[0] : data.creation_date} key="w-cd" />,
+        <KV k="updated" v={Array.isArray(data.updated_date) ? data.updated_date[0] : data.updated_date} key="w-ud" />,
+        <KV k="expires" v={Array.isArray(data.expiration_date) ? data.expiration_date[0] : data.expiration_date} key="w-ex" />,
+        <KV k="name servers" v={data.name_servers} key="w-ns" />,
+        <KV k="status" v={data.status} key="w-st" />,
+        <KV k="DNSSEC" v={data.dnssec} key="w-ds" />,
+        <KV k="org" v={data.org} key="w-org" />,
+        <KV k="country" v={data.country} key="w-c" />,
+      );
+      break;
+    case "crt.sh":
+      {
+        const subs = (data.unique_subdomains || []).slice(0, 12);
+        const recent = data.most_recent || {};
+        rows.push(
+          <KV k="certs total" v={data.total} key="cs-total" />,
+          <KV k="subdomains" v={data.subdomain_count} key="cs-subs" />,
+          <KV k="most recent" v={recent.not_before} key="cs-mr" />,
+          <KV k="issuer" v={recent.issuer} key="cs-iss" />,
+        );
+        if (subs.length) {
+          rows.push(
+            <div className="dr-kv dr-stack" key="cs-list">
+              <span className="dr-k">sample</span>
+              <span className="dr-v dr-stack-v">
+                {subs.map(s => <span key={s} className="dr-sub">{s}</span>)}
+              </span>
+            </div>
+          );
+        }
+      }
+      break;
+    case "URLscan":
+      {
+        const res = (data.results || []).slice(0, 5);
+        rows.push(
+          <KV k="scans" v={data.total} key="us-total" />,
+        );
+        if (res.length) {
+          rows.push(
+            <div className="dr-kv dr-stack" key="us-list">
+              <span className="dr-k">recent</span>
+              <span className="dr-v dr-stack-v">
+                {res.map((r, i) => {
+                  const t = r.task || {};
+                  const v = (r.verdicts || {}).overall || {};
+                  return (
+                    <span key={i} className={`us-scan ${v.malicious ? "bad" : ""}`}>
+                      <span className="us-when">{t.time ? t.time.slice(0,10) : "?"}</span>
+                      <span className="us-url">{(r.page || {}).url || t.url || ""}</span>
+                      {v.malicious && <span className="us-verdict">MAL</span>}
+                    </span>
+                  );
+                })}
+              </span>
+            </div>
+          );
+        }
+      }
+      break;
+    case "NVD":
+      {
+        const desc = (data.descriptions || []).find(d => d.lang === "en");
+        const cvss = ((data.metrics || {}).cvssMetricV31 || [])[0] || {};
+        const cwes = (data.weaknesses || []).flatMap(w => (w.description || []).map(d => d.value));
+        const refs = (data.references || []).slice(0, 5);
+        rows.push(
+          <KV k="CVSS v3.1" v={cvss.cvssData ? `${cvss.cvssData.baseScore} / ${cvss.cvssData.baseSeverity}` : null} key="nv-cvss" />,
+          <KV k="vector" v={cvss.cvssData?.vectorString} mono key="nv-vec" />,
+          <KV k="CWE" v={cwes} key="nv-cwe" />,
+          <KV k="published" v={(data.published || "").slice(0, 10)} key="nv-pub" />,
+        );
+        if (desc) rows.push(
+          <div className="dr-kv dr-stack" key="nv-desc">
+            <span className="dr-k">description</span>
+            <span className="dr-v dr-stack-v"><span className="dr-desc">{desc.value}</span></span>
+          </div>
+        );
+        if (refs.length) rows.push(
+          <div className="dr-kv dr-stack" key="nv-refs">
+            <span className="dr-k">refs</span>
+            <span className="dr-v dr-stack-v">
+              {refs.map((r, i) => <a key={i} href={r.url} target="_blank" rel="noreferrer" className="dr-ref">{(r.tags || ["link"]).join(",")} → {r.url}</a>)}
+            </span>
+          </div>
+        );
+      }
+      break;
+    case "EPSS":
+      rows.push(
+        <KV k="probability" v={data.epss ? (Math.round(data.epss * 10000) / 100) + "%" : null} key="ep-p" />,
+        <KV k="percentile" v={data.percentile ? (Math.round(data.percentile * 10000) / 100) + "%" : null} key="ep-pct" />,
+        <KV k="date" v={data.date} key="ep-d" />,
+      );
+      break;
+    case "KEV":
+      rows.push(
+        <KV k="vendor" v={data.vendorProject} key="k-v" />,
+        <KV k="product" v={data.product} key="k-p" />,
+        <KV k="name" v={data.vulnerabilityName} key="k-n" />,
+        <KV k="added" v={data.dateAdded} key="k-da" />,
+        <KV k="due" v={data.dueDate} key="k-due" />,
+        <KV k="ransomware" v={data.knownRansomwareCampaignUse === "Known" ? "YES — known in ransomware campaigns" : null} key="k-r" />,
+        data.shortDescription && (
+          <div className="dr-kv dr-stack" key="k-d">
+            <span className="dr-k">summary</span>
+            <span className="dr-v dr-stack-v"><span className="dr-desc">{data.shortDescription}</span></span>
+          </div>
+        ),
+      );
+      break;
+    case "URLhaus":
+      rows.push(
+        <KV k="threat" v={data.threat} key="uh-t" />,
+        <KV k="status" v={data.url_status} key="uh-s" />,
+        <KV k="tags" v={data.tags} key="uh-tg" />,
+        <KV k="first seen" v={data.date_added} key="uh-fs" />,
+      );
+      break;
+    case "ThreatFox":
+      rows.push(
+        <KV k="malware" v={data.malware} key="tf-m" />,
+        <KV k="confidence" v={data.confidence_level} key="tf-c" />,
+        <KV k="threat type" v={data.threat_type} key="tf-tt" />,
+        <KV k="reporter" v={data.reporter} key="tf-r" />,
+        <KV k="first seen" v={data.first_seen} key="tf-fs" />,
+      );
+      break;
+    case "Heuristics":
+      Object.entries(data).forEach(([k, v]) => {
+        if (!v || typeof v !== "object") return;
+        rows.push(
+          <div className="dr-kv dr-stack" key={`h-${k}`}>
+            <span className="dr-k">{k.toUpperCase()}</span>
+            <span className="dr-v dr-stack-v"><span className="mono">{JSON.stringify(v)}</span></span>
+          </div>
+        );
+      });
+      break;
+    default:
+      // Unknown source — fall back to the first few keys raw.
+      Object.entries(data).slice(0, 10).forEach(([k, v]) => {
+        rows.push(<KV k={k} v={typeof v === "object" ? JSON.stringify(v).slice(0, 120) : v} key={"d-"+k} />);
+      });
+  }
+
+  const finalRows = rows.filter(Boolean);
+  return (
+    <div className="src-drawer">
+      <div className="dr-head">
+        <span className="dr-title">{name} · raw</span>
+        <span className="dr-meta dim">{Object.keys(data).length} fields cached</span>
+      </div>
+      {finalRows.length === 0 ? <div className="dim">// no data fields populated for this source</div> : finalRows}
     </div>
   );
 }
