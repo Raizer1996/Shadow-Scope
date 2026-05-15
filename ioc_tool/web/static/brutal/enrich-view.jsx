@@ -154,21 +154,26 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
 }
 
 // SpiderChart — per-source score polygon. Honors disabled sources (greys out).
-// Per-IOC-type relevance: which sources actually have an opinion on
-// THIS kind of indicator? Sources that always run regardless (Shodan,
-// IPinfo, AbstractAPI) but only emit context — not an opinion on the
-// IOC's badness — get suppressed from the spider so the polygon
-// reflects the analysts' "did anyone think this is bad?" view.
-const _SPIDER_INFO_ONLY = new Set([
-  "Shodan", "IPinfo", "AbstractAPI", "crt.sh", "ASN", "Allowlist", "Heuristics",
-]);
-const _SPIDER_TYPE_HIDE = {
-  ip:     new Set(["URLscan"]),  // URLscan history on a bare IP is mostly low-signal noise
-  cve:    new Set([]),
-  asn:    new Set([]),
-  hash:   new Set([]),
-  url:    new Set([]),
-  domain: new Set([]),
+//
+// Per-IOC-type allowlist: which sources actually express an OPINION
+// on this kind of indicator's badness. Info-only / context sources
+// (Shodan, IPinfo, AbstractAPI, crt.sh, ASN, Allowlist) never appear;
+// type-irrelevant sources (AbuseIPDB on a domain, URLscan on a hash)
+// are filtered too. The polygon then reflects the analysts' "did
+// anyone with an opinion call this bad?" question.
+const _SPIDER_RELEVANT_BY_TYPE = {
+  ip:     new Set(["VirusTotal", "AbuseIPDB", "GreyNoise", "OTX",
+                   "Pulsedive", "IPQS", "ThreatFox", "URLhaus",
+                   "Feodo", "TOR"]),
+  domain: new Set(["VirusTotal", "OTX", "Pulsedive", "ThreatFox",
+                   "URLhaus", "Heuristics", "WHOIS"]),
+  url:    new Set(["VirusTotal", "OTX", "Pulsedive", "ThreatFox",
+                   "URLhaus", "URLscan"]),
+  hash:   new Set(["VirusTotal", "MalwareBazaar", "ThreatFox", "OTX",
+                   "SSLBL"]),
+  cve:    new Set(["NVD", "EPSS", "KEV"]),
+  asn:    new Set(["ASN"]),
+  email:  new Set(["OTX"]),
 };
 
 
@@ -206,9 +211,12 @@ function ScopeDrone() {
 
 
 function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
-  const hideByType = _SPIDER_TYPE_HIDE[ioc.type] || new Set();
-  const entries = Object.entries(ioc.modules).filter(([name]) =>
-    !_SPIDER_INFO_ONLY.has(name) && !hideByType.has(name)
+  // Whitelist by IOC type. Falls back to "everything that has score>0"
+  // for unknown / unmapped types so the chart still renders for
+  // future IOC kinds.
+  const relevant = _SPIDER_RELEVANT_BY_TYPE[ioc.type];
+  const entries = Object.entries(ioc.modules).filter(([name, mod]) =>
+    relevant ? relevant.has(name) : mod.score > 0
   );
   const N = entries.length;
   const cx = 140, cy = 132, R = 88;
@@ -232,7 +240,6 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
   return (
     <div className="spider">
       <div className="spider-head">
-        <ScopeDrone />
         <span className="spider-title glitch" data-text="SOURCE PROFILE">SOURCE PROFILE</span>
         <span className="spider-meta">{N} axes · radius = score</span>
       </div>
@@ -292,6 +299,7 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
         <span><span className="swatch-line" style={{background: "#fb923c"}}/> threshold 60</span>
         <span><span className="swatch-line" style={{background: "#f43f5e"}}/> threshold 80</span>
       </div>
+      <ScopeDrone />
     </div>
   );
 }

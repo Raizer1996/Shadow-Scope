@@ -1417,23 +1417,49 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 
 /* ============================================================
-   Scope-drone mascot — brutalist scanner critter in spider header
+   Scope-drone mascot — brutalist scanner critter, roams inside
+   the spider panel like a Tamagotchi pet. Absolute-positioned at
+   the bottom of .spider; traverses left↔right on a 10s cycle, bobs
+   on a 1.6s sub-cycle, eye sweeps at 1.8s, LEDs alternate at 1.2s.
    ============================================================ */
+.spider { position: relative; }
 .scope-drone {
-  display: inline-flex;
-  align-items: center;
-  margin-right: 8px;
-  filter: drop-shadow(0 0 4px rgba(255, 107, 53, 0.35));
-  animation: ss-drone-bob 2.4s ease-in-out infinite;
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  pointer-events: auto;
+  filter: drop-shadow(0 0 4px rgba(255, 107, 53, 0.45));
+  animation:
+    ss-drone-roam 10s ease-in-out infinite,
+    ss-drone-bob 1.6s ease-in-out infinite;
+  z-index: 2;
+  cursor: help;
 }
 .scope-drone svg { display: block; }
 .sd-eye { animation: ss-drone-scan 1.8s cubic-bezier(.5,.0,.5,1) infinite alternate; }
 .sd-led-a { animation: ss-drone-led 1.2s ease-in-out infinite; }
 .sd-led-b { animation: ss-drone-led 1.2s 0.6s ease-in-out infinite; }
+
+/* Idle hop — slight vertical bob */
 @keyframes ss-drone-bob {
   0%, 100% { transform: translateY(0); }
   50%      { transform: translateY(-2px); }
 }
+
+/* Lateral roam — walk left↔right across the spider panel.
+   Stretches calc(100% - 44px) ≈ accounts for drone width. */
+@keyframes ss-drone-roam {
+  0%   { left: 0; transform: scaleX(1); }
+  8%   { transform: scaleX(1); }
+  10%  { transform: scaleX(-1); }   /* flip to face right */
+  45%  { left: calc(100% - 44px); transform: scaleX(-1); }
+  55%  { transform: scaleX(-1); }
+  57%  { transform: scaleX(1); }    /* flip to face left */
+  92%  { left: 0; transform: scaleX(1); }
+  100% { left: 0; transform: scaleX(1); }
+}
+
+/* Eye scan — translateX within the eye track, colour shifts at midpoint */
 @keyframes ss-drone-scan {
   0%   { transform: translateX(0);  fill: var(--accent); }
   45%  { transform: translateX(10px); }
