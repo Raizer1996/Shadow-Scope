@@ -32,17 +32,20 @@ def enrich_ip(ip: str) -> dict | None:
     """Fetch IPinfo data for ``ip``. Returns ``None`` on miss / network error.
 
     Anonymous queries return a limited subset; a token returns the full
-    object (org, abuse, privacy, company). Either is useful — the
-    dashboard surfaces whichever fields are present.
+    object (org, abuse, privacy, company). When the token carries the
+    Privacy Detection tier we also fetch ``/privacy/{ip}`` and merge it
+    under a ``privacy`` key — the dashboard surfaces ``privacy.service``
+    (e.g. ``ProtonVPN``) when present.
     """
     api_key = _api_key()
     params = {"token": api_key} if api_key else None
+    headers = {"Accept": "application/json"}
     try:
         response = requests.get(
             f"{BASE_URL}/{ip}",
             params=params,
             timeout=TIMEOUT,
-            headers={"Accept": "application/json"},
+            headers=headers,
         )
     except requests.exceptions.RequestException:
         return None
@@ -52,4 +55,25 @@ def enrich_ip(ip: str) -> dict | None:
         payload = response.json()
     except ValueError:
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+
+    # If we have a token, also hit Privacy Detection to surface VPN brand /
+    # proxy / tor / relay / hosting flags. Silently no-op if the token tier
+    # doesn't include it (403/404/empty).
+    if api_key and not isinstance(payload.get("privacy"), dict):
+        try:
+            priv = requests.get(
+                f"{BASE_URL}/{ip}/privacy",
+                params=params,
+                timeout=TIMEOUT,
+                headers=headers,
+            )
+            if priv.status_code == 200:
+                pdata = priv.json()
+                if isinstance(pdata, dict):
+                    payload["privacy"] = pdata
+        except (requests.exceptions.RequestException, ValueError):
+            pass
+
+    return payload
