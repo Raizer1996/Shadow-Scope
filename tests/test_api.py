@@ -412,3 +412,68 @@ def test_classic_ui_still_reachable(client):
     # Markers from the classic HTML
     assert "ShadowScope" in response.text
     assert "/static/classic/styles.css" in response.text
+
+
+# ---------------------------------------------------------------------------
+# /api/ui/enrich — brutalist dashboard adapter
+# ---------------------------------------------------------------------------
+
+
+def _stub_async_enrich_with_kwargs(monkeypatch, payload):
+    """Async stub that accepts the no_cache kwarg /api/ui/enrich passes."""
+    async def _stub(value, ioc_type, *, no_cache=False):
+        return {**payload, "ioc": value, "type": ioc_type}
+    monkeypatch.setattr(api_mod.enrich, "enrich_ioc_async", _stub)
+
+
+def test_ui_enrich_returns_shaped_payload(client, monkeypatch):
+    _stub_async_enrich_with_kwargs(monkeypatch, {
+        "ioc": "evil.example.com",
+        "type": "domain",
+        "final_score": 85,
+        "modules": {
+            "VirusTotal": {"score": 75, "data": {
+                "last_analysis_stats": {"malicious": 7, "harmless": 60, "suspicious": 0, "undetected": 35},
+            }},
+            "URLhaus": {"score": 95, "data": {"threat": "malware_download", "tags": ["emotet"]}},
+            "Heuristics": {"score": 75, "data": {
+                "nrd": {"bucket": "nrd", "age_days": 12, "score": 75},
+                "dga": {"score": 30},
+            }},
+        },
+    })
+    r = client.get("/api/ui/enrich?ioc=evil.example.com")
+    assert r.status_code == 200
+    body = r.json()
+    # UI-only shape additions
+    assert body["id"].startswith("ioc_")
+    assert "agreement" in body and body["agreement"]["sources_total"] > 0
+    assert "enriched_at" in body
+    # Per-module detail summaries populated
+    assert body["modules"]["VirusTotal"]["detail"] == "7 / 102 engines malicious"
+    assert "threat=malware_download" in body["modules"]["URLhaus"]["detail"]
+    assert "NRD(12d)" in body["modules"]["Heuristics"]["detail"]
+
+
+def test_ui_enrich_rejects_unknown_type(client, monkeypatch):
+    _stub_async_enrich_with_kwargs(monkeypatch, {"modules": {}, "final_score": 0})
+    r = client.get("/api/ui/enrich?ioc=not-an-ioc!")
+    assert r.status_code == 400
+
+
+def test_ui_enrich_record_id_stable(client, monkeypatch):
+    """Same IOC + type → same id (idempotent dashboard rows)."""
+    _stub_async_enrich_with_kwargs(monkeypatch, {"modules": {}, "final_score": 0})
+    a = client.get("/api/ui/enrich?ioc=8.8.8.8").json()
+    b = client.get("/api/ui/enrich?ioc=8.8.8.8").json()
+    assert a["id"] == b["id"]
+
+
+def test_ui_enrich_carries_no_cache_param(client, monkeypatch):
+    seen: dict = {}
+    async def _stub(value, ioc_type, *, no_cache=False):
+        seen["no_cache"] = no_cache
+        return {"ioc": value, "type": ioc_type, "modules": {}, "final_score": 0}
+    monkeypatch.setattr(api_mod.enrich, "enrich_ioc_async", _stub)
+    client.get("/api/ui/enrich?ioc=8.8.8.8&no_cache=true")
+    assert seen["no_cache"] is True

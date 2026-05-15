@@ -32,7 +32,9 @@ verbatim from CLI scripts to HTTP calls.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +44,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ..core import database, enrich, extractor, parser
+from ..core import database, enrich, extractor, output, parser
 from ..core import defang as defang_mod
 from ..core import llm as llm_mod
 
@@ -252,6 +254,180 @@ def ui_classic() -> FileResponse:
 def health() -> HealthResponse:
     """Liveness check — always public so healthchecks don't need a token."""
     return HealthResponse(status="ok")
+
+
+# ---------------------------------------------------------------------------
+# UI shape adapter
+# ---------------------------------------------------------------------------
+#
+# The brutalist React dashboard expects each result with a few extra
+# fields the raw orchestrator doesn't emit: a stable client-side ``id``,
+# pre-computed ``agreement`` summary, per-module ``detail`` one-liners,
+# and a ``prev_score`` for the score-delta strip. Rather than mutate the
+# orchestrator (which the CLI consumes), we synthesise those fields here.
+
+def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
+    """Return a terse per-source detail summary for the dashboard table."""
+    data = data or {}
+    if source == "VirusTotal":
+        stats = (data.get("last_analysis_stats") or {})
+        total = sum(int(v or 0) for v in stats.values())
+        mal = int(stats.get("malicious") or 0)
+        if total:
+            return f"{mal} / {total} engines malicious"
+    elif source == "AbuseIPDB":
+        conf = data.get("abuseConfidenceScore")
+        reports = data.get("totalReports")
+        if conf is not None:
+            tail = f" · {reports} reports" if reports else ""
+            return f"confidence {conf}{tail}"
+    elif source == "URLhaus":
+        threat = data.get("threat")
+        tags = data.get("tags") or []
+        if threat:
+            tag_part = f" · tag={tags[0]}" if tags else ""
+            return f"threat={threat}{tag_part}"
+    elif source == "ThreatFox":
+        malware = data.get("malware")
+        confidence = data.get("confidence_level")
+        if malware:
+            return f"{malware} · confidence {confidence}" if confidence else str(malware)
+    elif source == "Pulsedive":
+        risk = data.get("risk")
+        threats = data.get("threats") or []
+        if risk:
+            t = threats[0].get("name") if threats and isinstance(threats[0], dict) else ""
+            tail = f" · {t}" if t else ""
+            return f"risk={risk}{tail}"
+    elif source == "WHOIS":
+        creation = data.get("creation_date")
+        if creation:
+            return f"created {creation}"
+    elif source == "GreyNoise":
+        cls = data.get("classification") or data.get("noise")
+        if cls is not None:
+            return f"classification={cls}"
+    elif source == "Feodo":
+        malware = data.get("malware")
+        status = data.get("status")
+        if malware or status:
+            return f"{malware or 'C2'} · {status or 'listed'}"
+    elif source == "SSLBL":
+        return data.get("malware") or "malicious cert hash"
+    elif source == "Heuristics":
+        parts = []
+        if "nrd" in data and isinstance(data["nrd"], dict):
+            age = data["nrd"].get("age_days")
+            parts.append(f"NRD({age}d)" if age is not None else "NRD")
+        if "dga" in data and isinstance(data["dga"], dict):
+            parts.append(f"DGA={data['dga'].get('score', 0)}")
+        if "typosquat" in data and isinstance(data["typosquat"], dict):
+            parts.append(f"typo→{data['typosquat'].get('match', '?')}")
+        if "idn" in data and isinstance(data["idn"], dict):
+            mixed = data["idn"].get("mixed_script")
+            parts.append("IDN-mixed" if mixed else "IDN")
+        if parts:
+            return " · ".join(parts)
+    elif source == "OTX":
+        pulse = (data.get("pulse_info") or {}).get("count")
+        if pulse:
+            return f"{pulse} pulses"
+    elif source == "URLscan":
+        scans = data.get("total")
+        if scans:
+            return f"{scans} scans"
+    elif source == "crt.sh":
+        certs = data.get("total")
+        subs = data.get("subdomain_count")
+        if certs:
+            return f"{certs} certs · {subs or 0} subdomains"
+    return "—" if score == 0 else ""
+
+
+def _ui_record_id(ioc: str, ioc_type: str) -> str:
+    """Stable client-side ID — same IOC always renders to the same row in the UI."""
+    digest = hashlib.sha1(f"{ioc_type}:{ioc}".encode()).hexdigest()[:12]
+    return f"ioc_{digest}"
+
+
+def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, Any]:
+    """Add ``id``, ``agreement``, per-module ``detail``, and ``enriched_at`` to a raw enrichment."""
+    ioc = result.get("ioc", "")
+    ioc_type = result.get("type", "")
+    modules_raw = result.get("modules") or {}
+    modules_ui: dict[str, Any] = {}
+    for source, entry in modules_raw.items():
+        if not isinstance(entry, dict):
+            continue
+        score = int(entry.get("score") or 0)
+        data = entry.get("data") or {}
+        modules_ui[source] = {
+            "score": score,
+            "detail": _ui_detail(source, score, data),
+            "data": data,
+        }
+
+    return {
+        "id": _ui_record_id(ioc, ioc_type),
+        "ioc": ioc,
+        "type": ioc_type,
+        "final_score": int(result.get("final_score") or 0),
+        "prev_score": prev_score if prev_score is not None else int(result.get("final_score") or 0),
+        "enriched_at": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "agreement": output.consensus_summary(result),
+        "modules": modules_ui,
+    }
+
+
+@app.get("/api/ui/enrich", dependencies=[Depends(require_token)])
+async def ui_enrich(
+    ioc: str = Query(..., description="IOC value (auto-detected, refanged)"),
+    defang: bool = Query(False, description="Defang the returned ioc field"),
+    summary: bool = Query(False, description="Attach llm_summary via local Ollama"),
+    no_cache: bool = Query(False, description="Bypass the SQLite cache"),
+) -> dict[str, Any]:
+    """Enrich + reshape for the brutalist dashboard.
+
+    Adds the UI-only fields (id, agreement, per-module detail, prev_score)
+    around the raw orchestrator output. The dashboard's ``onEnrich`` calls
+    this endpoint rather than ``/enrich`` so the JSX doesn't have to know
+    about the synthesis logic.
+    """
+    refanged = defang_mod.refang(ioc)
+    ioc_type = parser.detect_type(refanged)
+    if ioc_type == "unknown":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to detect IOC type for value: {ioc!r}.",
+        )
+
+    # Grab the previous composite from iocs.last_score BEFORE re-enrich, so
+    # the dashboard can show a delta on subsequent enrichments.
+    database.init_db()
+    prev_score: int | None = None
+    ioc_id = database.get_ioc_id(refanged)
+    if ioc_id is not None:
+        conn = database.get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT last_score FROM iocs WHERE id = ?", (ioc_id,))
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0] is not None:
+            prev_score = int(row[0])
+
+    result = await enrich.enrich_ioc_async(refanged, ioc_type, no_cache=no_cache)
+    if defang:
+        result = _apply_output_defang(result, True)
+    if summary:
+        verdict = await asyncio.to_thread(llm_mod.summarize, result)
+        if isinstance(verdict, str) and verdict:
+            result = dict(result)
+            result["llm_summary"] = verdict
+
+    shaped = _to_ui_shape(result, prev_score)
+    if "llm_summary" in result:
+        shaped["llm_summary"] = result["llm_summary"]
+    return shaped
 
 
 @app.get("/enrich", dependencies=[Depends(require_token)])
