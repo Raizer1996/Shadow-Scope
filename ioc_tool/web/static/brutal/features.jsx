@@ -767,12 +767,26 @@ function NetworkGeoPanel({ ioc }) {
       attribution: '© OSM',
       className: "ss-tile",
     }).addTo(map);
-    L.circleMarker([g.lat, g.lon], {
-      radius: 8,
-      color: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ff6b35",
-      weight: 2,
-      fillOpacity: 0.5,
-    }).addTo(map).bindPopup(`<b>${ioc.ioc}</b><br>${g.city || ""} ${g.country || ""}`);
+    // Beacon marker — three concentric pulsing rings + crosshair + dot.
+    // SVG inside a Leaflet DivIcon so the CSS keyframes drive the
+    // animation rather than redrawing on each frame.
+    const beaconHtml = `
+      <div class="ss-beacon">
+        <span class="ss-beacon-ring r1"></span>
+        <span class="ss-beacon-ring r2"></span>
+        <span class="ss-beacon-ring r3"></span>
+        <span class="ss-beacon-crosshair-v"></span>
+        <span class="ss-beacon-crosshair-h"></span>
+        <span class="ss-beacon-dot"></span>
+      </div>`;
+    const icon = L.divIcon({
+      html: beaconHtml,
+      className: "ss-beacon-icon",
+      iconSize: [60, 60],
+      iconAnchor: [30, 30],
+    });
+    L.marker([g.lat, g.lon], { icon }).addTo(map)
+      .bindPopup(`<b>${ioc.ioc}</b><br>${g.city || ""} ${g.country || ""}`);
     mapRef.current = map;
     return () => {
       if (mapRef.current) {

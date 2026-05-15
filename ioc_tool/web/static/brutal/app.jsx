@@ -202,15 +202,54 @@ function fabricateRecord(text) {
   };
 }
 
+// Live source-status badge — fetches /api/ui/sources once on mount and
+// renders the real count (e.g. "SOURCES 10/22 keyed · 12 anon").
+function SourcesBadge({ onClick }) {
+  const [stats, setStats] = useState(null);
+  useEffect(() => {
+    const h = {};
+    try {
+      const tok = sessionStorage.getItem("ss_api_token");
+      if (tok) h["Authorization"] = "Bearer " + tok;
+    } catch (e) {}
+    fetch("/api/ui/sources", { headers: h })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => j && setStats(j))
+      .catch(() => {});
+  }, []);
+  if (!stats) {
+    return (
+      <button className="src-btn" onClick={onClick}>
+        <span className="src-dot ok" />
+        <span>SOURCES …</span>
+      </button>
+    );
+  }
+  const operational = stats.ok + (stats.local || 0);
+  const missing = stats.no_key || 0;
+  return (
+    <button className="src-btn" onClick={onClick} title="open sources drawer">
+      <span className={`src-dot ${missing > 0 ? "deg" : "ok"}`} />
+      <span>SOURCES <b>{operational}</b>/<span className="dim">{stats.total}</span></span>
+    </button>
+  );
+}
+
+
 // ─────────── Top Bar / tabs ───────────
 
 function TopBar({ tab, setTab, setSourcesOpen }) {
   const tabs = [
-    { id: "enrich", label: "ENRICH",  kbd: "g e" },
-    { id: "batch",  label: "BATCH",   kbd: "g b" },
-    { id: "watch",  label: "WATCH",   kbd: "g w" },
-    { id: "cases",  label: "CASES",   kbd: "g c" },
-    { id: "diff",   label: "DIFF",    kbd: "g d" }
+    { id: "enrich", label: "ENRICH", kbd: "g e",
+      help: "Single-IOC enrichment. Paste an IP / domain / URL / hash / CVE / ASN — every source queries in parallel and aggregates into the composite score." },
+    { id: "batch",  label: "BATCH",  kbd: "g b",
+      help: "All IOCs you've enriched this session, sorted highest-score first. Click a row to drill into ENRICH for that IOC." },
+    { id: "watch",  label: "WATCH",  kbd: "g w",
+      help: "Live alert stream — re-enrich daily and surface deltas. Tied to the `shadowscope watch` CLI; backend wiring lands next." },
+    { id: "cases",  label: "CASES",  kbd: "g c",
+      help: "Investigation cases — group IOCs by campaign (tag via `shadowscope tag <ioc> --case=name`). Empty until you tag IOCs." },
+    { id: "diff",   label: "DIFF",   kbd: "g d",
+      help: "Side-by-side compare two IOCs' per-source scores. Spots shared infrastructure across a campaign." },
   ];
   return (
     <header className="topbar">
@@ -226,7 +265,12 @@ function TopBar({ tab, setTab, setSourcesOpen }) {
       </div>
       <nav className="tabs">
         {tabs.map(t => (
-          <button key={t.id} className={`tab ${tab === t.id ? "on" : ""}`} onClick={() => setTab(t.id)}>
+          <button
+            key={t.id}
+            className={`tab ${tab === t.id ? "on" : ""}`}
+            onClick={() => setTab(t.id)}
+            title={t.help}
+          >
             <span className="tab-label">{t.label}</span>
             <span className="tab-kbd">{t.kbd}</span>
           </button>
@@ -234,10 +278,7 @@ function TopBar({ tab, setTab, setSourcesOpen }) {
       </nav>
       <div className="topbar-right">
         <ClockLive />
-        <button className="src-btn" onClick={() => setSourcesOpen(true)}>
-          <span className="src-dot ok" />
-          <span>SOURCES <b>18</b>/<span className="dim">21</span></span>
-        </button>
+        <SourcesBadge onClick={() => setSourcesOpen(true)} />
       </div>
     </header>
   );
