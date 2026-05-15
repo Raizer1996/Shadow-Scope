@@ -5,8 +5,8 @@ This module turns the dict structure returned by
 that SOC pipelines can pipe into SIEMs, spreadsheets, and ticket
 systems.
 
-Pure stdlib (``json`` + ``csv``). Both functions are pure: they take
-results, return a string. No printing, no file I/O.
+Pure stdlib (``json`` + ``csv`` + ``uuid``). Every emitter is pure:
+takes results, returns a string. No printing, no file I/O.
 """
 
 from __future__ import annotations
@@ -14,7 +14,8 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import date, datetime
+import uuid
+from datetime import date, datetime, timezone
 from typing import Any
 
 # CSV columns — keep this list authoritative. Tests assert on it.
@@ -304,3 +305,289 @@ def _s(value: Any) -> str:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     return str(value)
+
+
+# ---------------------------------------------------------------------------
+# STIX 2.1 export
+# ---------------------------------------------------------------------------
+#
+# STIX (Structured Threat Information eXpression) 2.1 is the OASIS
+# standard for sharing threat intelligence between platforms (MISP,
+# OpenCTI, Anomali, TheHive, AlienVault OTX, …). A "bundle" wraps a
+# list of SDOs (STIX Domain Objects); for IOC sharing the relevant
+# SDOs are ``indicator`` (the pattern) plus optionally ``observed-data``
+# (the raw sighting). We emit indicators with one STIX pattern per IOC,
+# tagged with our composite risk score and per-source detections.
+#
+# We deliberately hand-roll the STIX JSON rather than depending on the
+# 3rd-party ``stix2`` library — its dependency tree is heavy (antlr4,
+# pytz, simplejson, pyjwt) and we only need a tiny slice (the bundle
+# wrapper + indicator SDO). The shapes below match the STIX 2.1
+# specification verbatim and validate against the OASIS reference
+# parser; reviewers can spot-check via https://oasis-open.github.io/
+# cti-documentation/stix/intro.
+
+# Map our IOC type names to STIX 2.1 cyber-observable types in pattern.
+_STIX_OBSERVABLE = {
+    "ip": "ipv4-addr",
+    "domain": "domain-name",
+    "url": "url",
+    "email": "email-addr",
+    # Hashes are special — the type depends on length, but in STIX they
+    # all live under "file:hashes.<algo>" so we keep one branch.
+    "hash": "file",
+}
+
+# Hash algorithm names that STIX 2.1 recognises (must match
+# stix-vocab/hash-algorithm-ov enumeration).
+_STIX_HASH_ALG = {
+    32: "MD5",
+    40: "SHA-1",
+    64: "SHA-256",
+}
+
+
+def _stix_pattern(ioc: str, ioc_type: str) -> str | None:
+    """Build a STIX 2.1 pattern expression for the given IOC.
+
+    Returns ``None`` for unsupported types (e.g. ``cve`` — STIX has its
+    own ``vulnerability`` SDO that we'd need to model separately).
+    """
+    if ioc_type == "hash":
+        algo = _STIX_HASH_ALG.get(len(ioc))
+        if not algo:
+            return None
+        return f"[file:hashes.'{algo}' = '{ioc}']"
+
+    observable = _STIX_OBSERVABLE.get(ioc_type)
+    if not observable:
+        return None
+
+    field = "value" if observable != "email-addr" else "value"
+    return f"[{observable}:{field} = '{ioc}']"
+
+
+def _stix_labels(final_score: int, modules: dict[str, Any]) -> list[str]:
+    """Derive STIX ``indicator_types`` labels from our score + module signals.
+
+    STIX 2.1 enumerates: ``malicious-activity``, ``anomalous-activity``,
+    ``benign``, ``compromised``, ``unknown``. We map by score tier and
+    by which sources contributed positives.
+    """
+    labels: list[str] = []
+    if final_score >= 60:
+        labels.append("malicious-activity")
+    elif final_score >= 30:
+        labels.append("anomalous-activity")
+    else:
+        labels.append("unknown")
+
+    heuristics = modules.get("Heuristics", {}).get("data", {}) if modules else {}
+    if heuristics.get("typosquat") or heuristics.get("idn"):
+        labels.append("anomalous-activity")
+    return list(dict.fromkeys(labels))  # de-dupe, preserve order
+
+
+def _stix_indicator(result: dict[str, Any], created_iso: str) -> dict[str, Any] | None:
+    """Build a single STIX 2.1 ``indicator`` SDO from one enrichment result."""
+    ioc = result.get("ioc")
+    ioc_type = result.get("type", "")
+    pattern = _stix_pattern(ioc, ioc_type) if ioc else None
+    if pattern is None:
+        return None
+
+    final_score = int(result.get("final_score") or 0)
+    modules = result.get("modules") or {}
+    labels = _stix_labels(final_score, modules)
+
+    # Stable indicator IDs from a name namespace — same IOC always produces
+    # the same indicator UUID so re-enrichment doesn't create duplicates.
+    namespace = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
+    indicator_id = f"indicator--{uuid.uuid5(namespace, f'{ioc_type}:{ioc}')}"
+
+    description_parts: list[str] = [f"ShadowScope composite score: {final_score} ({_risk_tier(final_score)})"]
+    for source, entry in (modules or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        src_score = entry.get("score")
+        if src_score:
+            description_parts.append(f"{source}: {src_score}")
+
+    return {
+        "type": "indicator",
+        "spec_version": "2.1",
+        "id": indicator_id,
+        "created": created_iso,
+        "modified": created_iso,
+        "name": f"{ioc_type}: {ioc}",
+        "description": " | ".join(description_parts),
+        "indicator_types": labels,
+        "pattern": pattern,
+        "pattern_type": "stix",
+        "pattern_version": "2.1",
+        "valid_from": created_iso,
+        "labels": [f"shadowscope:score:{final_score}", f"shadowscope:tier:{_risk_tier(final_score).lower()}"],
+        "external_references": [
+            {
+                "source_name": "ShadowScope",
+                "description": "Composite IOC enrichment + risk scoring",
+            }
+        ],
+    }
+
+
+def to_stix(results: list[dict[str, Any]]) -> str:
+    """Serialize enrichment results as a STIX 2.1 bundle (one indicator per IOC).
+
+    Unsupported IOC types (currently ``cve``) are silently dropped from
+    the bundle — STIX has separate SDOs for those and we don't model
+    them yet. Empty input → an empty bundle, which is still valid STIX.
+    """
+    created_iso = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    objects: list[dict[str, Any]] = []
+    for result in results or []:
+        indicator = _stix_indicator(result, created_iso)
+        if indicator is not None:
+            objects.append(indicator)
+
+    bundle = {
+        "type": "bundle",
+        "id": f"bundle--{uuid.uuid4()}",
+        "objects": objects,
+    }
+    return json.dumps(bundle, indent=2, default=_json_default)
+
+
+# ---------------------------------------------------------------------------
+# Markdown report
+# ---------------------------------------------------------------------------
+#
+# Markdown is the lingua franca for case documentation — analyst-friendly,
+# pasteable into TheHive / Jira / Notion / Slack, source-controllable.
+# Format: one top section per IOC with a score banner, a per-module table,
+# heuristic flags, and the optional LLM summary. No external rendering
+# library — just f-strings.
+
+
+def _md_score_banner(score: int) -> str:
+    """Return a coloured-square banner reflecting the risk tier."""
+    tier = _risk_tier(score)
+    icon = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢", "Safe": "⚪"}.get(tier, "⚪")
+    return f"{icon} **{tier}** — composite score `{score}/100`"
+
+
+def _md_module_table(modules: dict[str, Any]) -> str:
+    """Render per-source rows as a Markdown table. Empty input → empty string."""
+    if not modules:
+        return ""
+    rows = ["| Source | Score | Notes |", "|---|---|---|"]
+    for name, entry in modules.items():
+        if not isinstance(entry, dict):
+            continue
+        score = entry.get("score", 0)
+        data = entry.get("data") or {}
+        # Pick a couple of useful keys per source — keep it terse.
+        note_parts: list[str] = []
+        if name == "VirusTotal":
+            stats = data.get("last_analysis_stats") or {}
+            if stats:
+                note_parts.append(f"{stats.get('malicious', 0)}/{sum(stats.values())} engines")
+        elif name == "AbuseIPDB":
+            conf = data.get("abuseConfidenceScore")
+            if conf is not None:
+                note_parts.append(f"confidence {conf}")
+        elif name == "Heuristics":
+            for key in ("nrd", "dga", "typosquat", "idn"):
+                if key in data:
+                    note_parts.append(key)
+        elif name == "WHOIS":
+            creation = data.get("creation_date")
+            if creation:
+                note_parts.append(f"created {creation}")
+        notes = ", ".join(note_parts) if note_parts else ""
+        rows.append(f"| {name} | {score} | {notes} |")
+    return "\n".join(rows)
+
+
+def _md_heuristics_block(modules: dict[str, Any]) -> str:
+    """Surface heuristic flags (NRD / DGA / typosquat / IDN) as a bullet list."""
+    h = (modules.get("Heuristics") or {}).get("data") or {}
+    if not h:
+        return ""
+    lines: list[str] = ["**Heuristics:**"]
+    if "nrd" in h:
+        nrd = h["nrd"]
+        lines.append(f"- NRD: {nrd['bucket']} (age {nrd['age_days']}d, created {nrd['created']})")
+    if "dga" in h:
+        dga = h["dga"]
+        lines.append(
+            f"- DGA: score {dga['score']}, entropy {dga['entropy']}, "
+            f"consonant-run {dga['longest_consonant_run']}"
+        )
+    if "typosquat" in h:
+        t = h["typosquat"]
+        confusables = ", ".join(t["confusables"]) if t["confusables"] else "—"
+        lines.append(f"- Typosquat of `{t['match']}` (distance {t['distance']}, confusables: {confusables})")
+    if "idn" in h:
+        idn = h["idn"]
+        suffix = " — **MIXED-SCRIPT HOMOGRAPH**" if idn.get("mixed_script") else ""
+        lines.append(f"- IDN: unicode=`{idn.get('unicode')}`{suffix}")
+    return "\n".join(lines)
+
+
+def to_markdown(
+    results: list[dict[str, Any]],
+    include_summaries: dict[int, str | None] | None = None,
+) -> str:
+    """Render enrichment results as a Markdown case-doc report.
+
+    ``include_summaries`` (optional) maps result-index → LLM-summary
+    string; populated keys get an "LLM Verdict" block per IOC. Pass
+    ``None`` to skip LLM rendering even when summaries exist upstream.
+    """
+    if not results:
+        return "# ShadowScope Report\n\n_No IOCs enriched._\n"
+
+    now_iso = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    parts: list[str] = [
+        "# ShadowScope Report",
+        "",
+        f"_Generated {now_iso} — {len(results)} IOC(s)_",
+        "",
+        "---",
+    ]
+
+    for idx, result in enumerate(results):
+        ioc = result.get("ioc", "?")
+        ioc_type = result.get("type", "?")
+        score = int(result.get("final_score") or 0)
+        modules = result.get("modules") or {}
+
+        parts.append("")
+        parts.append(f"## `{ioc}` _(type: {ioc_type})_")
+        parts.append("")
+        parts.append(_md_score_banner(score))
+        parts.append("")
+
+        table = _md_module_table(modules)
+        if table:
+            parts.append(table)
+            parts.append("")
+
+        heuristics_block = _md_heuristics_block(modules)
+        if heuristics_block:
+            parts.append(heuristics_block)
+            parts.append("")
+
+        if include_summaries is not None:
+            verdict = include_summaries.get(idx)
+            if verdict:
+                parts.append("**LLM Verdict:**")
+                parts.append("")
+                parts.append(f"> {verdict}")
+                parts.append("")
+
+        parts.append("---")
+
+    return "\n".join(parts) + "\n"
