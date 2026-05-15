@@ -90,8 +90,8 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ## v0.7 — Case Management & Workflow
 
-- [ ] **Tags + cases** — `shadowscope tag <ioc> --case=campaign-x`. **[issue]**
-- [ ] **Notes per IOC** — append free-text notes stored in DB. **[issue]**
+- [x] **Tags + cases** — `shadowscope tag <ioc> --tag=phishing --case=campaign-x --note="ATO landing"`, `shadowscope cases [--case=name]`. New `ioc_tags` table; idempotent under UNIQUE constraint; remove via `--remove`.
+- [x] **Notes per IOC** — `--note` flag on `tag` subcommand upserts on conflict.
 - [ ] **History view** — past queries, score over time, change alerts. **[issue]**
 - [x] **Allowlist** — `ALLOWLIST_CIDRS` + `ALLOWLIST_DOMAINS` env vars short-circuit the enrichment pipeline for org-internal IPs / domains / URLs (subdomain-aware, IPv4+IPv6 CIDR support)
 - [ ] **Watch mode** — re-enrich daily, alert on score change > threshold. **[issue]**
