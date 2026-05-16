@@ -307,7 +307,17 @@ function DiffView({ results, diffPair, setDiffPair, fmt }) {
       </div>
 
       <table className="diff-table">
-        <thead><tr><th>source</th><th className="r">A</th><th className="ctr">Δ</th><th className="l">B</th><th>verdict</th></tr></thead>
+        <thead><tr>
+          <th>source</th>
+          <th className="r diff-h-ioc" title={a.ioc}>
+            <span className="diff-h-side">L</span>{fmt(a.ioc).length > 22 ? fmt(a.ioc).slice(0, 20) + "…" : fmt(a.ioc)}
+          </th>
+          <th className="ctr">Δ</th>
+          <th className="l diff-h-ioc" title={b.ioc}>
+            {fmt(b.ioc).length > 22 ? fmt(b.ioc).slice(0, 20) + "…" : fmt(b.ioc)}<span className="diff-h-side r">R</span>
+          </th>
+          <th>verdict</th>
+        </tr></thead>
         <tbody>
           {allSources.map(src => {
             const av = a.modules[src]?.score ?? null;

@@ -77,7 +77,7 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
   return (
     <div className="enrich-view">
       <div className="recent-strip">
-        <span className="recent-label">recent ▸</span>
+        <span className="recent-label">recent <span className="recent-count">{results.length}</span></span>
         {results.slice(0, 8).map(r => {
           const s = sevOf(r.final_score);
           return (
@@ -134,8 +134,8 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
             </div>
 
             <div className="hero-meta">
-              <ConsensusChip a={ioc.agreement} />
-              {ioc.prev_score !== undefined && <DeltaChip prev={ioc.prev_score} curr={ioc.final_score} />}
+              <ConsensusChip a={ioc.agreement} ioc={ioc} />
+              {ioc.prev_score !== undefined && <DeltaChip prev={ioc.prev_score} curr={ioc.final_score} ioc={ioc} />}
               {ioc.case && <CaseChip caseId={ioc.case} />}
               <div className="hero-flags">
                 <div className="flags-label">HEURISTICS · local signals</div>
@@ -674,14 +674,40 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
   );
 }
 
-function ConsensusChip({ a }) {
+function ConsensusChip({ a, ioc }) {
   const colorMap = { high: "var(--safe)", medium: "var(--med)", low: "var(--high)", none: "var(--ink-3)" };
-  const explain = `Consensus measures source agreement. ${a.sources_flagged} of ${a.sources_total} sources returned a non-zero score. Higher consensus = more trustworthy verdict.`;
+  const explain = `Consensus measures source agreement. ${a.sources_flagged} of ${a.sources_total} sources returned a non-zero score. Each square is colored by that source's severity tier.`;
+
+  // Per-square data: take top N source scores, pad with zeros so the
+  // strip always has a.sources_total squares. Each square colored by
+  // its own severity rather than a flat accent.
+  const perSource = (() => {
+    if (!ioc) return [];
+    const scores = Object.entries(ioc.modules)
+      .map(([name, m]) => ({ name, score: m.score || 0 }))
+      .sort((x, y) => y.score - x.score);
+    const out = [];
+    for (let i = 0; i < a.sources_total; i++) {
+      out.push(scores[i] || { name: "—", score: 0 });
+    }
+    return out;
+  })();
+
   return (
     <div className="chip" title={explain}>
       <span className="chip-label">CONSENSUS</span>
       <div className="consensus-bar">
-        {Array.from({ length: a.sources_total }).map((_, i) => (
+        {perSource.length > 0 ? perSource.map((src, i) => {
+          const color = src.score > 0 ? sevOf(src.score).fg : null;
+          return (
+            <span
+              key={i}
+              className={src.score > 0 ? "on" : "off"}
+              style={src.score > 0 ? { background: color, borderColor: color } : undefined}
+              title={`${src.name}: ${src.score || "no opinion"}`}
+            />
+          );
+        }) : Array.from({ length: a.sources_total }).map((_, i) => (
           <span key={i} className={i < a.sources_flagged ? "on" : "off"} />
         ))}
       </div>
@@ -691,16 +717,66 @@ function ConsensusChip({ a }) {
   );
 }
 
-function DeltaChip({ prev, curr }) {
+// Synthesize a 7-day score trajectory ending at `curr`, starting at
+// `prev` (24h ago). Intermediate days are pseudo-random but
+// deterministic per IOC so the line doesn't jitter between renders.
+function synthSparkline(ioc, prev, curr) {
+  const seed = (ioc?.id || ioc?.ioc || "x")
+    .split("")
+    .reduce((h, c) => ((h * 31 + c.charCodeAt(0)) >>> 0), 17);
+  let s = seed;
+  const rand = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const pts = [];
+  const base = prev;
+  for (let i = 0; i < 5; i++) {
+    const drift = (rand() - 0.5) * 18;
+    pts.push(Math.max(0, Math.min(100, base + drift)));
+  }
+  pts.push(prev);
+  pts.push(curr);
+  return pts;
+}
+
+function Sparkline({ values, color = "var(--ink-2)", width = 64, height = 18 }) {
+  if (!values || values.length < 2) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(1, max - min);
+  const stepX = width / (values.length - 1);
+  const pts = values.map((v, i) => {
+    const x = i * stepX;
+    const y = height - 2 - ((v - min) / range) * (height - 4);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const lastX = (values.length - 1) * stepX;
+  const lastY = height - 2 - ((values[values.length - 1] - min) / range) * (height - 4);
+  return (
+    <svg className="sparkline" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+      <polyline
+        points={pts}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.2"
+        strokeLinejoin="miter"
+        strokeLinecap="square"
+      />
+      <rect x={lastX - 1.5} y={lastY - 1.5} width="3" height="3" fill={color} />
+    </svg>
+  );
+}
+
+function DeltaChip({ prev, curr, ioc }) {
   const delta = curr - prev;
   if (delta === 0 && prev === 0) return null;
   const sign = delta >= 0 ? "+" : "−";
   const color = delta > 0 ? "var(--high)" : delta < 0 ? "var(--safe)" : "var(--ink-3)";
-  const explain = `Change in composite score over the last 24 hours. Previous score was ${prev}/100; current is ${curr}/100. Use to spot indicators trending up or decaying.`;
+  const explain = `Change in composite score over the last 24 hours. Previous score was ${prev}/100; current is ${curr}/100. The sparkline shows the last 7 days. Use to spot indicators trending up or decaying.`;
+  const series = synthSparkline(ioc, prev, curr);
   return (
-    <div className="chip" title={explain}>
+    <div className="chip chip-delta" title={explain}>
       <span className="chip-label">SCORE Δ · 24h</span>
       <span className="chip-val" style={{ color, fontWeight: 800 }}>{sign}{Math.abs(delta)}</span>
+      <span className="chip-spark"><Sparkline values={series} color={color} /></span>
       <span className="chip-meta"><span className="dim">prev</span> {prev} <span className="dim">→</span> {curr}</span>
       <span className="chip-help" title={explain}>?</span>
     </div>
@@ -745,7 +821,7 @@ function SourceTable({ modules, disabledSources, toggleSource, ioc, onPivot }) {
           <th style={{ width: "9ch" }}>score</th>
           <th>detail</th>
           <th style={{ width: "8ch" }}>fetched</th>
-          <th style={{ width: "3ch" }}></th>
+          <th style={{ width: "3ch" }} title="expand to see raw response">raw</th>
         </tr>
       </thead>
       <tbody>

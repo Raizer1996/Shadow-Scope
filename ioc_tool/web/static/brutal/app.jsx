@@ -18,6 +18,7 @@ function sevOf(score) {
 
 function App() {
   const [tab, setTab] = useState("enrich");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [defang, setDefang] = useState(false);
   const [density, setDensity] = useState("normal");
   const [llm, setLlm] = useState(false);
@@ -130,7 +131,11 @@ function App() {
         e.preventDefault();
         document.getElementById("ioc-input")?.focus();
       }
-      if (e.key === "Escape") { setSourcesOpen(false); }
+      if (e.key === "?" && document.activeElement.tagName !== "TEXTAREA" && document.activeElement.tagName !== "INPUT") {
+        e.preventDefault();
+        setHelpOpen(v => !v);
+      }
+      if (e.key === "Escape") { setSourcesOpen(false); setHelpOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -172,7 +177,7 @@ function App() {
     <div className={`app ${density === "dense" ? "dense" : ""}`}>
       {!booted && <BootScreen onDone={() => { try { sessionStorage.setItem("ss_booted", "1"); } catch (e) {} setBooted(true); }} />}
       <PatternDefs />
-      <TopBar tab={tab} setTab={setTab} setSourcesOpen={setSourcesOpen} />
+      <TopBar tab={tab} setTab={setTab} setSourcesOpen={setSourcesOpen} setHelpOpen={setHelpOpen} />
       <AlertTicker feed={window.WATCH_FEED} setActiveIoc={setActiveIocId} setTab={setTab} fmt={fmt} />
       <InputBar onEnrich={onEnrich} defang={defang} setDefang={setDefang} llm={llm} setLlm={setLlm} enriching={enriching} />
 
@@ -187,6 +192,7 @@ function App() {
       <StatusBar results={results} />
 
       {sourcesOpen && <SourcesDrawer onClose={() => setSourcesOpen(false)} />}
+      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
       {tweaksOpen && <Tweaks accent={accent} setAccent={setAccent} density={density} setDensity={setDensity} patterns={patterns} setPatterns={setPatterns} onClose={() => { setTweaksOpen(false); window.parent.postMessage({ type: "__edit_mode_dismissed" }, "*"); }} />}
     </div>
   );
@@ -250,7 +256,76 @@ function SourcesBadge({ onClick }) {
 
 // ─────────── Top Bar / tabs ───────────
 
-function TopBar({ tab, setTab, setSourcesOpen }) {
+function HelpOverlay({ onClose }) {
+  React.useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="help-overlay" onClick={onClose}>
+      <div className="help-card" onClick={(e) => e.stopPropagation()}>
+        <div className="help-head">
+          <span className="help-title">KEYBOARD · SHORTCUTS</span>
+          <button className="help-close" onClick={onClose}>ESC</button>
+        </div>
+        <div className="help-body">
+          <div className="help-section">
+            <div className="help-section-title">navigate</div>
+            {[
+              [["g", "e"], "jump to enrich"],
+              [["g", "b"], "jump to batch"],
+              [["g", "w"], "jump to watch"],
+              [["g", "c"], "jump to cases"],
+              [["g", "d"], "jump to diff"],
+            ].map(([keys, desc]) => (
+              <div className="help-row" key={desc}>
+                <span className="help-keys">
+                  <span className="help-kbd">{keys[0]}</span>
+                  <span className="help-then">then</span>
+                  <span className="help-kbd">{keys[1]}</span>
+                </span>
+                <span className="help-desc">{desc}</span>
+              </div>
+            ))}
+          </div>
+          <div className="help-section">
+            <div className="help-section-title">input</div>
+            <div className="help-row">
+              <span className="help-keys"><span className="help-kbd">/</span></span>
+              <span className="help-desc">focus the IOC input</span>
+            </div>
+            <div className="help-row">
+              <span className="help-keys"><span className="help-kbd">⏎</span></span>
+              <span className="help-desc">submit · enrich the current IOC</span>
+            </div>
+            <div className="help-row">
+              <span className="help-keys"><span className="help-kbd">⇧</span><span className="help-then">+</span><span className="help-kbd">⏎</span></span>
+              <span className="help-desc">newline (multi-line paste)</span>
+            </div>
+          </div>
+          <div className="help-section">
+            <div className="help-section-title">panels</div>
+            <div className="help-row">
+              <span className="help-keys"><span className="help-kbd">g</span><span className="help-then">then</span><span className="help-kbd">s</span></span>
+              <span className="help-desc">toggle sources drawer</span>
+            </div>
+            <div className="help-row">
+              <span className="help-keys"><span className="help-kbd">?</span></span>
+              <span className="help-desc">toggle this overlay</span>
+            </div>
+            <div className="help-row">
+              <span className="help-keys"><span className="help-kbd">esc</span></span>
+              <span className="help-desc">close any open overlay</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopBar({ tab, setTab, setSourcesOpen, setHelpOpen }) {
   const tabs = [
     { id: "enrich", label: "ENRICH", kbd: "g e",
       help: "Single-IOC enrichment. Paste an IP / domain / URL / hash / CVE / ASN — every source queries in parallel and aggregates into the composite score." },
@@ -291,6 +366,7 @@ function TopBar({ tab, setTab, setSourcesOpen }) {
       <div className="topbar-right">
         <ClockLive />
         <SourcesBadge onClick={() => setSourcesOpen(true)} />
+        <button className="help-btn" title="keyboard shortcuts (?)" onClick={() => setHelpOpen(v => !v)}>?</button>
       </div>
     </header>
   );
@@ -369,7 +445,7 @@ function StatusBar({ results }) {
       <span className="sb-cell"><span className="sb-key">ENRICHED</span> {results.length}</span>
       <span className="sb-cell"><span className="sb-key" style={{color: "#f43f5e"}}>CRIT</span> {critical}</span>
       <span className="sb-cell"><span className="sb-key" style={{color: "#fb923c"}}>HIGH</span> {high}</span>
-      <span className="sb-cell"><span className="sb-key">SOURCES</span> 18 ok · 1 deg · 2 ✕</span>
+      <span className="sb-cell is-redundant"><span className="sb-key">SOURCES</span> 18 ok · 1 deg · 2 ✕</span>
       <span className="sb-cell right">by <b className="sb-credit">Raizer1996</b></span>
     </footer>
   );
