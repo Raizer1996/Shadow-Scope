@@ -845,16 +845,36 @@ function CaseChip({ caseId }) {
 
 // Inline case-assignment input — drops the active IOC into a case
 // label. Empty input + save = detach. Uses /api/ui/iocs/{value}/case.
-// Lazy: no autocomplete against existing cases yet, but the Cases tab
-// surfaces the canonical list so collisions are easy to avoid.
+// Autocomplete: native <datalist> populated from /api/ui/cases on first
+// focus (lazy — keeps panel render cheap). Cuts typo-driven case sprawl
+// by suggesting the canonical names already in the cache.
 function CaseAssignBar({ ioc }) {
   const [value, setValue] = React.useState(ioc.case || "");
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState(null);
+  const [cases, setCases] = React.useState(null); // null = not loaded yet
 
   // Reset when the active IOC changes — otherwise typing into one
   // record would bleed into the next.
   React.useEffect(() => { setValue(ioc.case || ""); setMsg(null); }, [ioc.id]);
+
+  // Lazy-load case names on first focus. window.shadowscopeCases hits
+  // /api/ui/cases — payload is small (one entry per case). Failure is
+  // silent — autocomplete is a nice-to-have, save still works.
+  const loadCases = () => {
+    if (cases !== null) return;          // already fetched / fetching
+    setCases([]);                        // mark in-flight to dedupe
+    if (!window.shadowscopeCases) return;
+    window.shadowscopeCases()
+      .then(rows => {
+        const names = (rows || [])
+          .map(c => c.id || c.case || "")
+          .filter(Boolean);
+        // Dedup + sort for stable suggestion order.
+        setCases(Array.from(new Set(names)).sort());
+      })
+      .catch(() => setCases([]));        // swallow — fail-quiet
+  };
 
   const save = () => {
     if (!window.shadowscopeSetCase) return;
@@ -864,10 +884,15 @@ function CaseAssignBar({ ioc }) {
       .then(body => {
         setMsg(body.case ? `assigned · ${body.case}` : "detached");
         setTimeout(() => setMsg(null), 2200);
+        // Refresh suggestions so the just-assigned case is in the list
+        // next time the input gets focus.
+        setCases(null);
       })
       .catch(e => setMsg("err: " + (e.message || e).slice(0, 80)))
       .finally(() => setBusy(false));
   };
+
+  const listId = `case-suggest-${ioc.id || "x"}`;
 
   return (
     <div className="case-assign">
@@ -877,9 +902,17 @@ function CaseAssignBar({ ioc }) {
         placeholder="campaign-name"
         value={value}
         onChange={e => setValue(e.target.value)}
+        onFocus={loadCases}
         onKeyDown={e => { if (e.key === "Enter") save(); }}
         disabled={busy}
+        list={listId}
+        autoComplete="off"
       />
+      {cases && cases.length > 0 && (
+        <datalist id={listId}>
+          {cases.map(name => <option key={name} value={name} />)}
+        </datalist>
+      )}
       <button className="case-assign-save" onClick={save} disabled={busy}>save</button>
       {msg && <span className="case-assign-msg dim small">{msg}</span>}
     </div>
