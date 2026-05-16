@@ -703,7 +703,7 @@ async def ui_enrich(
 
 @app.get("/api/ui/recent", dependencies=[Depends(require_token)])
 def ui_recent(
-    limit: int = Query(8, ge=1, le=50, description="Max rows to return"),
+    limit: int = Query(8, ge=1, le=500, description="Max rows to return"),
 ) -> list[dict[str, Any]]:
     """Return the newest cached IOCs reshaped for the brutalist dashboard.
 

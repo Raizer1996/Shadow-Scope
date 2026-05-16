@@ -744,17 +744,27 @@ function dateAgo(days) {
 
 // ─────────── Header alert ticker ───────────
 
-function AlertTicker({ feed, setActiveIoc, setTab, fmt }) {
-  // Take all CRITICAL/HIGH from feed, repeat for marquee continuity
-  const alerts = feed.filter(f => f.score >= 60).slice(0, 14);
+function AlertTicker({ results, setActiveIoc, setTab, fmt }) {
+  // Derived directly from the recent strip — every record there is a
+  // real cached enrichment. We surface only HIGH+ (≥60) so the ticker
+  // reads as an alert stream, not a generic activity log. Delta uses
+  // `prev_score` → `final_score` to show movement; first-seen records
+  // have prev_score == final_score, so delta = 0 reads as steady.
+  const alerts = (results || [])
+    .filter(r => r.final_score >= 60)
+    .slice(0, 14)
+    .map(r => ({
+      id: r.id,
+      ioc: r.ioc,
+      type: r.type,
+      score: r.final_score,
+      delta: r.final_score - (r.prev_score ?? r.final_score),
+    }));
   if (alerts.length === 0) return null;
 
-  const onClick = (_a) => {
-    // The WATCH_FEED items don't share IDs with real cached IOCs (this
-    // ticker is synthetic), so there's nothing meaningful to navigate
-    // to. Treat the click as a tab-switch hint and let the user enrich
-    // the value manually if they want details.
-    setTab("watch");
+  const onClick = (a) => {
+    setActiveIoc(a.id);
+    setTab("enrich");
   };
 
   return (
@@ -768,10 +778,10 @@ function AlertTicker({ feed, setActiveIoc, setTab, fmt }) {
           {[...alerts, ...alerts].map((a, i) => {
             const s = sevOf(a.score);
             return (
-              <span key={i} className="ticker-item" onClick={() => onClick(a)}>
+              <span key={`${a.id}-${i}`} className="ticker-item" onClick={() => onClick(a)}>
                 <span className="ti-score" style={{color: s.fg, borderColor: s.fg}}>{a.score}</span>
                 <span className="ti-ioc">{fmt(a.ioc)}</span>
-                <span className="ti-delta" style={{color: a.delta > 0 ? "var(--high)" : "var(--safe)"}}>
+                <span className="ti-delta" style={{color: a.delta > 0 ? "var(--high)" : a.delta < 0 ? "var(--safe)" : "var(--ink-3)"}}>
                   {a.delta > 0 ? "↑+" : a.delta < 0 ? "↓" : "·"}{a.delta !== 0 && Math.abs(a.delta)}
                 </span>
                 <span className="ti-sep">│</span>

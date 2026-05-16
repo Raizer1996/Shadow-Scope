@@ -392,8 +392,9 @@ def test_ui_route_skips_auth(monkeypatch):
 def test_static_files_served(client):
     """GET /static/shared/data.js returns 200 with a JS content type.
 
-    The brutalist UI pulls its mock data from ``/static/shared/data.js``;
-    this exercises the same StaticFiles mount the dashboard relies on.
+    The brutalist UI pulls its rendering helpers from
+    ``/static/shared/data.js``; this exercises the same StaticFiles
+    mount the dashboard relies on.
     """
     response = client.get("/static/shared/data.js")
     assert response.status_code == 200
@@ -401,8 +402,11 @@ def test_static_files_served(client):
     assert ("javascript" in ctype) or ctype.startswith("application/javascript"), (
         f"unexpected content-type for /static/shared/data.js: {ctype!r}"
     )
-    # Known marker — sanity-check it's really the data module.
-    assert "IOC_DB" in response.text
+    # Known marker — sanity-check it's really the data module. Demo
+    # fixtures were removed when the dashboard switched to real cache,
+    # so we anchor on a rendering helper that's still expected to ship.
+    assert "shadowscopeRecent" in response.text
+    assert "IOC_FLAGS" in response.text
 
 
 # /ui-classic was retired by PR #37 (22d564f) — brutalist v2 is now the
@@ -677,9 +681,11 @@ def test_ui_recent_requires_token(client, cache_db, monkeypatch):
 
 
 def test_ui_recent_rejects_out_of_range_limit(client, cache_db):
-    """limit must be 1..50 — FastAPI enforces this at the route layer."""
+    """limit must be 1..500 — FastAPI enforces this at the route layer.
+    The 500 ceiling lets the Watch tab pull a long history; the
+    PivotPanel still caps itself at 50 client-side for fast paint."""
     assert client.get("/api/ui/recent", params={"limit": 0}).status_code == 422
-    assert client.get("/api/ui/recent", params={"limit": 999}).status_code == 422
+    assert client.get("/api/ui/recent", params={"limit": 9999}).status_code == 422
 
 
 # ---------------------------------------------------------------------------

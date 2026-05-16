@@ -1,12 +1,18 @@
 // Dashboard helper data + rendering utilities.
 //
-// Demo IOC fixtures (IOC_DB, SHODAN_DATA, IOC_HISTORY, CASES) have all
-// been removed — the recent strip pulls from /api/ui/recent, pivot
-// hits go through /api/ui/pivot, and cases come from /api/ui/cases.
-// WATCH_FEED is the only synthetic block remaining; it backs the Watch
-// tab's rolling-feed demo until a real event stream exists.
-// IOC_FLAGS, HEUR_EXPLAIN, MITRE_MAP, PIVOT_KINDS, RISK_TIER, defangText
-// are pure rendering helpers that operate on whatever record they get.
+// Every demo IOC / event fixture has been removed. The dashboard now
+// reads exclusively from the SQLite cache via:
+//   /api/ui/recent  — strip seed + Watch tab history
+//   /api/ui/pivot   — PivotPanel related-IOC lookup
+//   /api/ui/cases   — Cases tab
+//   /api/ui/sources — Sources drawer + badge
+// The AlertTicker derives its high-severity items from the React
+// `results` state (the strip), so it tracks the actual enrichments
+// the analyst has cached.
+//
+// What remains here is pure rendering helpers that operate on
+// whatever record they get: IOC_FLAGS, HEUR_EXPLAIN, MITRE_MAP,
+// PIVOT_KINDS, RISK_TIER, defangText.
 
 window.SOURCES = [
   { id: "VirusTotal",     status: "ok",         latency_ms: 412, ioc_types: ["ip","domain","url","sha256"], key: "present" },
@@ -30,22 +36,6 @@ window.SOURCES = [
   { id: "MISP local",     status: "ok",         latency_ms: 45,  ioc_types: ["ip","domain","sha256"],        key: "present" },
   { id: "OpenPhish",      status: "ok",         latency_ms: 230, ioc_types: ["url"],                         key: "anonymous" },
   { id: "PhishTank",      status: "ok",         latency_ms: 198, ioc_types: ["url"],                         key: "anonymous" }
-];
-
-// Live "watch" feed — score deltas in the last 24h.
-window.WATCH_FEED = [
-  { ts: "14:32:11", ioc: "evil.example.com",         type: "domain", score: 85, delta: +7,  reason: "VT 6→7 mal · URLhaus tag added" },
-  { ts: "14:30:22", ioc: "paypa1-secure.com",         type: "domain", score: 92, delta: +92, reason: "first seen · NRD + typosquat" },
-  { ts: "14:29:01", ioc: "xkz9q2pmcvbnxhtreq.top",    type: "domain", score: 78, delta: +78, reason: "first seen · DGA-high" },
-  { ts: "14:20:17", ioc: "a1b2c3d4…f0a1b2",           type: "sha256", score: 62, delta: +12, reason: "VT 24→32 engines" },
-  { ts: "14:14:55", ioc: "45.142.214.13",             type: "ip",     score: 34, delta: -17, reason: "AbuseIPDB reports decayed" },
-  { ts: "14:10:11", ioc: "ns3.malware-c2.tk",         type: "domain", score: 81, delta: +81, reason: "first seen · C2 confirmed" },
-  { ts: "13:58:02", ioc: "185.220.101.45",            type: "ip",     score: 72, delta: +2,  reason: "AbuseIPDB +14 reports" },
-  { ts: "13:42:30", ioc: "kx9.dyndns.work",           type: "domain", score: 68, delta: +68, reason: "first seen · NRD(2d)" },
-  { ts: "13:30:09", ioc: "92.118.39.207",             type: "ip",     score: 55, delta: +5,  reason: "Feodo C2 listing" },
-  { ts: "13:14:51", ioc: "shop-amaz0n.cf",            type: "domain", score: 84, delta: +84, reason: "first seen · typosquat→amazon" },
-  { ts: "13:02:11", ioc: "AS14618",                   type: "asn",    score: 22, delta: 0,   reason: "no change · monitored" },
-  { ts: "12:48:33", ioc: "secure-bnk-login.com",      type: "domain", score: 90, delta: +90, reason: "first seen · phish kit match" }
 ];
 
 // Heuristic explainers used in chips / tooltips.
