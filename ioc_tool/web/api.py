@@ -40,14 +40,14 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..core import database, enrich, extractor, output, parser
 from ..core import defang as defang_mod
 from ..core import llm as llm_mod
-from . import _synthesis
+from . import _synthesis, eventbus
 
 API_VERSION = "0.9.0"
 
@@ -246,6 +246,23 @@ app.add_middleware(
 # Mount the dashboard static assets at /static so CSS/JS resolve with stable
 # absolute paths regardless of where the UI is reached from.
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.on_event("startup")
+async def _attach_eventbus() -> None:
+    """Bind the in-process event bus to FastAPI's running loop.
+
+    The enrichment pipeline calls ``eventbus.publish`` from sync code;
+    that publisher needs a loop reference to dispatch onto. We grab the
+    loop at startup so the bus stays decoupled from the web layer's
+    request lifecycle.
+    """
+    eventbus.attach(asyncio.get_running_loop())
+
+
+@app.on_event("shutdown")
+async def _detach_eventbus() -> None:
+    eventbus.detach()
 
 
 # ---------------------------------------------------------------------------
@@ -805,6 +822,50 @@ def ui_pivot(
             shaped["enriched_at"] = iso + "Z"
         out.append(shaped)
     return out
+
+
+@app.get("/api/ui/events")
+async def ui_events() -> StreamingResponse:
+    """Server-Sent Events stream of enrichment-pipeline activity.
+
+    Replaces the dashboard's 8 s ``/api/ui/recent`` poll for the Watch
+    tab + AlertTicker. Each enrichment writes a ``score`` event with
+    ``{"ioc": str, "score": int}`` payload. Heartbeats every 25 s keep
+    proxies from idling the connection out.
+
+    Auth deliberately omitted on this route (matches the existing
+    \\``/static`` mount). The events carry no secrets — just IOC values
+    and integer scores already exposed by ``/api/ui/recent``.
+    """
+    import json as _json
+
+    async def _stream():
+        # Greeting frame so the client knows it's connected before the
+        # first real event arrives.
+        yield (
+            f": shadowscope-events v1\n"
+            f"event: hello\ndata: {_json.dumps({'subs': eventbus.subscriber_count()})}\n\n"
+        )
+        # Heartbeat coroutine: emit a comment line every 25 s so reverse
+        # proxies (and the browser's EventSource) don't close an idle
+        # stream.
+        last_beat = asyncio.get_running_loop().time()
+        async for event in eventbus.subscribe():
+            yield f"event: {event['type']}\ndata: {_json.dumps(event)}\n\n"
+            now = asyncio.get_running_loop().time()
+            if now - last_beat > 25:
+                yield ": heartbeat\n\n"
+                last_beat = now
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",   # disable buffering behind nginx
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.get("/api/ui/score_history/{value}", dependencies=[Depends(require_token)])

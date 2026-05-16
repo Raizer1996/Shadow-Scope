@@ -476,6 +476,10 @@ def update_last_score(ioc_id: int, score: int) -> None:
     (instead of the previous one-step delta against ``last_score``).
     Cheap insert, fire-and-forget — same suppression that wraps the
     caller protects the enrichment pipeline from any storage failure.
+
+    Side-effect: publishes a ``score`` event on the in-process bus so any
+    connected SSE clients update in near-real-time. The publish is a
+    no-op when the web server isn't attached, so CLI runs are unaffected.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -486,8 +490,23 @@ def update_last_score(ioc_id: int, score: int) -> None:
         'VALUES (?, ?, ?)',
         (ioc_id, score_int, datetime.now()),
     )
+    # Resolve the IOC value for the event payload — the SSE consumer
+    # works in IOC-string space, not DB-id space.
+    row = cursor.execute(
+        'SELECT value FROM iocs WHERE id = ?', (ioc_id,)
+    ).fetchone()
     conn.commit()
     conn.close()
+
+    if row is not None:
+        # Lazy import — avoids a circular database↔web dependency at
+        # module load time. The web layer only loads when imported.
+        try:
+            from ..web import eventbus  # noqa: PLC0415
+            eventbus.publish("score", {"ioc": row["value"], "score": score_int})
+        except Exception:
+            # Eventbus is best-effort — never let it block the enrich path.
+            pass
 
 
 def get_score_history(ioc_id: int, *, limit: int = 200) -> list[dict]:
