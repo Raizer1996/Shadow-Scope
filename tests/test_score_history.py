@@ -11,8 +11,6 @@ Cover three behaviours:
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from ioc_tool.core import database
