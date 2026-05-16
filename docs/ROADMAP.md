@@ -153,6 +153,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [ ] **Plugin loader** — auto-discover `ioc_tool/modules/*.py` via `importlib`; no edits to `enrich.py` needed. **[issue]**
 - [ ] **Per-source rate-limit handler** — token bucket; back off on 429. **[issue]**
 - [x] **Pivot index** — denormalised `enrichment_fields` side table populated on insert + one-shot backfill at init. Pivot lookups for `kind in (tag, malware, family, registrar)` switch from full-scan LIKE on `enrichments.data` to indexed `(kind, value)` join. New `shadowscope cache reindex` subcommand for manual rebuild. (Future enhancement #3 from session_state.md)
+- [x] **True delta history** — `score_history(ioc_id, score, recorded_at)` snapshot table populated by `update_last_score` on every enrich. New `GET /api/ui/score_history/{value}?limit=N` endpoint returns chronological points for the Watch tab's score-over-time graph. (Future enhancement #1 from session_state.md)
 - [ ] **Provider failover / fallback** — if VT 429s, fall back to AlienVault OTX. **[issue]**
 
 ---

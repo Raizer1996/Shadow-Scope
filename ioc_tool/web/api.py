@@ -807,6 +807,41 @@ def ui_pivot(
     return out
 
 
+@app.get("/api/ui/score_history/{value}", dependencies=[Depends(require_token)])
+def ui_score_history(
+    value: str,
+    limit: int = Query(200, ge=1, le=2000, description="Max snapshots to return"),
+) -> dict[str, Any]:
+    """Return chronological score snapshots for an IOC.
+
+    Snapshots are written by ``update_last_score`` every time the
+    composite is recomputed (enrichment, watch re-enrich). Used by the
+    Watch tab to render a real score-over-time line graph instead of
+    the previous one-step delta against ``last_score``.
+
+    404 when the IOC is not in the cache; ``[]`` history when it exists
+    but predates the snapshot column (still rare — every enrich after
+    the schema migration adds a row).
+    """
+    database.init_db()
+    refanged = defang_mod.refang(value)
+    ioc_id = database.get_ioc_id(refanged)
+    if ioc_id is None:
+        raise HTTPException(status_code=404, detail=f"IOC not found: {value}")
+    history = database.get_score_history(ioc_id, limit=int(limit))
+    points = []
+    for row in history:
+        ts = row.get("recorded_at")
+        iso = str(ts).replace(" ", "T") if ts else None
+        if iso and "." in iso:
+            iso = iso.split(".", 1)[0]
+        points.append({
+            "score": int(row["score"]),
+            "recorded_at": (iso + "Z") if iso else None,
+        })
+    return {"ioc": refanged, "count": len(points), "points": points}
+
+
 @app.get("/api/ui/cases", dependencies=[Depends(require_token)])
 def ui_cases() -> list[dict[str, Any]]:
     """Return every case in the workspace with derived severity + opened.
