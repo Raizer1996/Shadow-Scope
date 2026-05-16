@@ -237,7 +237,11 @@ def ui() -> FileResponse:
     The current build is a React+Babel-standalone prototype using mock data
     from ``shared/data.js``. Backend wiring lands in a follow-up.
     """
-    return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/health", response_model=HealthResponse)
