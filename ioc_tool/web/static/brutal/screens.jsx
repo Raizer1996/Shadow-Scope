@@ -116,30 +116,67 @@ function BatchView({ results, setActiveIocId, setTab, fmt }) {
 
 // ─────────── Watch (live stream) ───────────
 
-function WatchView({ fmt }) {
-  const [feed, setFeed] = useState(window.WATCH_FEED);
-  const [paused, setPaused] = useState(false);
-  const [filter, setFilter] = useState("all");
+function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
+  // Cache-wide history — every IOC ever enriched, newest first. Backed
+  // by /api/ui/recent (limit bumped to 500 server-side for this view).
+  // Polls every 8s for fresh enrichments. Pause halts the poll but
+  // keeps the rendered list. Filter "big" surfaces only |Δ| ≥ 20.
+  const [feed, setFeed] = React.useState([]);
+  const [paused, setPaused] = React.useState(false);
+  const [filter, setFilter] = React.useState("all");
+  const [err, setErr] = React.useState(null);
+  const [loadedAt, setLoadedAt] = React.useState(null);
 
-  useEffect(() => {
+  const reload = React.useCallback(() => {
+    if (!window.shadowscopeRecent) return;
+    window.shadowscopeRecent(200)
+      .then(rows => {
+        setFeed(rows || []);
+        setLoadedAt(new Date());
+        setErr(null);
+      })
+      .catch(e => setErr(String(e.message || e)));
+  }, []);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  React.useEffect(() => {
     if (paused) return;
-    const t = setInterval(() => {
-      // Synthetic new tick — rotate the feed.
-      setFeed(f => {
-        const synth = { ...f[Math.floor(Math.random() * f.length)] };
-        synth.ts = new Date().toISOString().slice(11, 19);
-        return [synth, ...f].slice(0, 60);
-      });
-    }, 3800);
+    const t = setInterval(reload, 8000);
     return () => clearInterval(t);
-  }, [paused]);
+  }, [paused, reload]);
 
-  const filtered = filter === "all" ? feed : feed.filter(f => Math.abs(f.delta) >= 20);
+  // Derive ticker-shape rows from the brutalist UI shape. Delta from
+  // prev_score → final_score; "reason" synthesises a one-liner from
+  // the agreement summary + dominant flagging source.
+  const toEvent = (r) => {
+    const ts = (r.enriched_at || "").slice(11, 19) || "—";
+    const delta = r.final_score - (r.prev_score ?? r.final_score);
+    const top = Object.entries(r.modules || {})
+      .filter(([_, m]) => (m.score || 0) > 0)
+      .sort((a, b) => (b[1].score || 0) - (a[1].score || 0))[0];
+    const reason = top
+      ? `${top[0]} ${top[1].score} · ${r.agreement?.consensus || "?"}`
+      : (r.agreement?.consensus || "no signal");
+    return { id: r.id, ts, ioc: r.ioc, type: r.type, score: r.final_score, delta, reason };
+  };
+  const events = feed.map(toEvent);
+  const filtered = filter === "all" ? events : events.filter(e => Math.abs(e.delta) >= 20);
+
+  const onClick = (e) => {
+    // Add to strip if not there, then navigate to Enrich tab.
+    const target = feed.find(r => r.id === e.id);
+    if (target && setResults && !results.find(x => x.id === e.id)) {
+      setResults(prev => [target, ...prev.filter(x => x.id !== e.id)]);
+    }
+    if (setActiveIocId) setActiveIocId(e.id);
+    if (setTab) setTab("enrich");
+  };
 
   return (
     <div className="watch-view">
       <div className="watch-toolbar">
-        <span className="bt-title">WATCH · live score deltas</span>
+        <span className="bt-title">WATCH · enrichment history</span>
         <div className="bt-group">
           <button className={`pill ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>all</button>
           <button className={`pill ${filter === "big" ? "on" : ""}`} onClick={() => setFilter("big")}>|Δ| ≥ 20</button>
@@ -147,19 +184,29 @@ function WatchView({ fmt }) {
         <div className="bt-group">
           <button className={`pill ${paused ? "" : "on"}`} onClick={() => setPaused(false)}>● LIVE</button>
           <button className={`pill ${paused ? "on" : ""}`} onClick={() => setPaused(true)}>⏸ PAUSE</button>
+          <button className="pill" onClick={reload}>refresh</button>
         </div>
-        <span className="dim small">tail -f shadowscope.events · {feed.length} lines</span>
+        <span className="dim small">
+          {feed.length} cached IOC{feed.length !== 1 ? "s" : ""} · sourced /api/ui/recent
+          {loadedAt && ` · ${loadedAt.toTimeString().slice(0, 8)}`}
+        </span>
       </div>
+      {err && <div className="dim small" style={{ padding: 12, color: "var(--bad,#ff7474)" }}>// {err}</div>}
+      {!err && filtered.length === 0 && (
+        <div className="dim small" style={{ padding: 12 }}>
+          // {feed.length === 0 ? "no enrichments cached yet — start enriching some IOCs" : "no rows match the current filter"}
+        </div>
+      )}
       <div className="watch-stream">
         {filtered.map((e, i) => {
           const s = sevOf(e.score);
           const up = e.delta > 0;
           return (
-            <div key={i} className={`watch-row ${i === 0 && !paused ? "new" : ""}`}>
+            <div key={`${e.id}-${i}`} className="watch-row" onClick={() => onClick(e)} style={{ cursor: "pointer" }}>
               <span className="w-ts dim">{e.ts}</span>
               <span className="w-score" style={{color: s.fg}}>{String(e.score).padStart(3, " ")}</span>
               <span className="w-tier" style={{color: s.fg, borderColor: s.fg + "55"}}>{s.label.slice(0,4)}</span>
-              <span className="w-type dim">{e.type.padEnd(6, " ")}</span>
+              <span className="w-type dim">{(e.type || "").padEnd(6, " ")}</span>
               <span className="w-ioc"><Copyable text={fmt(e.ioc)}>{fmt(e.ioc)}</Copyable></span>
               <span className={`w-delta ${up ? "up" : e.delta < 0 ? "dn" : "zero"}`}>
                 {e.delta === 0 ? " ·  " : (up ? "↑+" : "↓") + String(Math.abs(e.delta)).padStart(2, " ")}

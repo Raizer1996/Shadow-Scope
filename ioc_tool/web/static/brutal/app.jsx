@@ -187,13 +187,13 @@ function App() {
       {!booted && <BootScreen onDone={() => { try { sessionStorage.setItem("ss_booted", "1"); } catch (e) {} setBooted(true); }} />}
       <PatternDefs />
       <TopBar tab={tab} setTab={setTab} setSourcesOpen={setSourcesOpen} setHelpOpen={setHelpOpen} />
-      <AlertTicker feed={window.WATCH_FEED} setActiveIoc={setActiveIocId} setTab={setTab} fmt={fmt} />
+      <AlertTicker results={results} setActiveIoc={setActiveIocId} setTab={setTab} fmt={fmt} />
       <InputBar onEnrich={onEnrich} defang={defang} setDefang={setDefang} llm={llm} setLlm={setLlm} enriching={enriching} />
 
       <main className="main">
         {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} />}
         {tab === "batch"  && <BatchView results={results} setActiveIocId={setActiveIocId} setTab={setTab} fmt={fmt} />}
-        {tab === "watch"  && <WatchView fmt={fmt} />}
+        {tab === "watch"  && <WatchView fmt={fmt} results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "diff"   && <DiffView results={results} diffPair={diffPair} setDiffPair={setDiffPair} fmt={fmt} />}
         {tab === "cache"  && <CacheView />}
