@@ -523,6 +523,13 @@ def print_aggregated_table(
             if org:
                 summary_parts.append(f"[dim]{org}[/dim]")
 
+        # rDNS — PTR hostname for the IP, if resolved
+        rdns_mod = modules.get('rDNS')
+        if rdns_mod:
+            ptr = (rdns_mod.get('data') or {}).get('ptr')
+            if ptr:
+                summary_parts.append(f"[dim]ptr={ptr}[/dim]")
+
         # Risk Score Coloring
         # Green: 0 (Safe)
         # Blue: 1-39 (Low)

@@ -527,6 +527,7 @@ _CACHED_SOURCES: tuple[tuple[str, str], ...] = (
     ("shodan",        "Shodan"),
     ("ipqs",          "IPQS"),
     ("ipinfo",        "IPinfo"),
+    ("rdns",          "rDNS"),
     ("censys",        "Censys"),
     ("abstract",      "AbstractAPI"),
     ("greynoise",     "GreyNoise"),
