@@ -119,6 +119,24 @@ def init_db():
         )
     ''')
 
+    # Table: score_history — append-only snapshots of the composite
+    # score per IOC, written by `update_last_score`. Backs the Watch
+    # tab's "score over time" graph (a real series instead of the old
+    # single-step delta against `last_score`).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS score_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ioc_id INTEGER NOT NULL,
+            score INTEGER NOT NULL,
+            recorded_at TIMESTAMP NOT NULL,
+            FOREIGN KEY (ioc_id) REFERENCES iocs (id)
+        )
+    ''')
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_score_history_ioc '
+        'ON score_history(ioc_id, recorded_at)'
+    )
+
     # Table: enrichment_fields — denormalised lookup index over the
     # structured fields stored inside `enrichments.data`. Pivot queries
     # that previously did `LOWER(data) LIKE '%"needle"%'` (a full table
@@ -451,12 +469,47 @@ def list_tags() -> list[dict]:
 
 
 def update_last_score(ioc_id: int, score: int) -> None:
-    """Persist the latest composite score on the iocs row. Drives watch-mode diffing."""
+    """Persist the latest composite score on the iocs row + append a history row.
+
+    The history row is a snapshot of ``(ioc_id, score, recorded_at)`` and
+    is the data source for the Watch tab's true score-over-time graph
+    (instead of the previous one-step delta against ``last_score``).
+    Cheap insert, fire-and-forget — same suppression that wraps the
+    caller protects the enrichment pipeline from any storage failure.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('UPDATE iocs SET last_score = ? WHERE id = ?', (int(score), ioc_id))
+    score_int = int(score)
+    cursor.execute('UPDATE iocs SET last_score = ? WHERE id = ?', (score_int, ioc_id))
+    cursor.execute(
+        'INSERT INTO score_history (ioc_id, score, recorded_at) '
+        'VALUES (?, ?, ?)',
+        (ioc_id, score_int, datetime.now()),
+    )
     conn.commit()
     conn.close()
+
+
+def get_score_history(ioc_id: int, *, limit: int = 200) -> list[dict]:
+    """Return chronological score snapshots for an IOC (oldest first).
+
+    Used by ``GET /api/ui/score_history/{value}`` to drive the Watch tab
+    graph. ``limit`` defaults to 200 because the Watch panel only needs
+    a recent window; older data is still preserved on disk for ad-hoc
+    queries. Returns an empty list when no history rows exist.
+    """
+    if limit <= 0:
+        return []
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            'SELECT id, score, recorded_at FROM score_history '
+            'WHERE ioc_id = ? ORDER BY recorded_at ASC, id ASC LIMIT ?',
+            (ioc_id, int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 def list_iocs(case: str | None = None) -> list[dict]:
