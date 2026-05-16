@@ -137,9 +137,9 @@ window.IOC_DB = [
     case: "campaign-xz-supply",
     agreement: { sources_total: 3, sources_flagged: 3, sources_missed: 0, consensus: "high" },
     modules: {
-      "NVD":         { score: 95, detail: "CVSS 10.0 · CRITICAL", data: { cvss: 10.0, vector: "AV:N/AC:L" } },
-      "CISA KEV":    { score: 95, detail: "Known exploited · added 2024-03-29", data: { kev: true, date_added: "2024-03-29" } },
-      "EPSS":        { score: 80, detail: "epss=0.94 · 94th pct", data: { epss: 0.94 } }
+      "NVD":  { score: 95, detail: "CVSS 10.0 · CRITICAL", data: { cvss: 10.0, vector: "AV:N/AC:L" } },
+      "KEV":  { score: 95, detail: "Known exploited · added 2024-03-29", data: { cveID: "CVE-2024-3094", dateAdded: "2024-03-29" } },
+      "EPSS": { score: 80, detail: "epss=0.94 · 94th pct", data: { epss: 0.94 } }
     }
   },
   {
@@ -337,8 +337,10 @@ window.IOC_FLAGS = (ioc) => {
   if (isMal) {
     out.push({ k: "MAL", glyph: "⚙", label: "Malware host", color: "#f43f5e", title: "Hosts malware payloads (loader / dropper / second stage)." });
   }
-  // CVE exploited in the wild
-  if (ioc.type === "cve" && ioc.modules["CISA KEV"]?.data?.kev) {
+  // CVE exploited in the wild — backend uses module key "KEV" with data.cveID
+  // on hit; fall back to the legacy mock key "CISA KEV" so demo data keeps
+  // rendering until it's migrated.
+  if (ioc.type === "cve" && (ioc.modules.KEV?.data?.cveID || ioc.modules["CISA KEV"]?.data?.kev)) {
     out.push({ k: "KEV", glyph: "★", label: "CISA KEV", color: "#f43f5e", title: "CISA Known Exploited Vulnerabilities catalog — confirmed exploited in the wild." });
   }
   // NRD shortcut

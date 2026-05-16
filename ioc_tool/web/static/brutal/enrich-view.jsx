@@ -464,13 +464,26 @@ function SpiderTypeGlyph({ type, sev }) {
 
 
 function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
-  // Whitelist by IOC type. Falls back to "everything that has score>0"
-  // for unknown / unmapped types so the chart still renders for
-  // future IOC kinds.
+  // Whitelist by IOC type. We render EVERY relevant source — sources that
+  // returned nothing get a score-0 axis with a "no hit" marker so analysts
+  // see what was queried, not just what fired. For unknown types we fall
+  // back to "everything in modules that scored above 0".
   const relevant = _SPIDER_RELEVANT_BY_TYPE[ioc.type];
-  const entries = Object.entries(ioc.modules).filter(([name, mod]) =>
-    relevant ? relevant.has(name) : mod.score > 0
-  );
+  let entries;
+  if (relevant) {
+    entries = Array.from(relevant).map(name => {
+      const mod = ioc.modules[name];
+      // missed = the source was relevant but never appeared in the response
+      // (cache miss without a hit, or the source returned None). Render as
+      // a 0-score axis with a distinctive marker.
+      const missed = !mod;
+      return [name, mod || { score: 0, data: {}, missed: true }, missed];
+    });
+  } else {
+    entries = Object.entries(ioc.modules)
+      .filter(([, mod]) => mod.score > 0)
+      .map(([name, mod]) => [name, mod, false]);
+  }
   const N = entries.length;
   const cx = 140, cy = 132, R = 88;
 
@@ -632,7 +645,7 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
         />
         {/* Scanline overlay — horizontal lines drift down the chart */}
         <rect className="spider-scanlines" x="20" y="20" width="240" height="240" fill={`url(#spider-scanlines-${ioc.id || "x"})`} pointerEvents="none" />
-        {entries.map(([name, m], i) => {
+        {entries.map(([name, m, missed], i) => {
           const off = disabledSources.has(name);
           const frac = off ? 0.015 : Math.max(0.015, m.score / 100);
           const p = point(i, frac);
@@ -646,11 +659,16 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
                   <animate attributeName="opacity" values="0.65;0;0.65" dur="2.2s" repeatCount="indefinite" />
                 </circle>
               )}
-              <rect x={p.x - 3} y={p.y - 3} width="6" height="6" fill="#0a0a0a" stroke={off ? "var(--line-2)" : s.fg} strokeWidth="1.5" />
+              {missed ? (
+                // Source was queried but returned no hit — hollow dashed marker.
+                <circle cx={p.x} cy={p.y} r="3.5" fill="#0a0a0a" stroke="#5a5a5a" strokeWidth="1" strokeDasharray="1.5 1.5" />
+              ) : (
+                <rect x={p.x - 3} y={p.y - 3} width="6" height="6" fill="#0a0a0a" stroke={off ? "var(--line-2)" : s.fg} strokeWidth="1.5" />
+              )}
             </g>
           );
         })}
-        {entries.map(([name, m], i) => {
+        {entries.map(([name, m, missed], i) => {
           const a = angle(i);
           const labelP = point(i, 1.16);
           const c = Math.cos(a);
@@ -661,9 +679,13 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
           const dy = s2 > 0.5 ? 10 : s2 < -0.5 ? -2 : 4;
           const off = disabledSources.has(name);
           return (
-            <g key={"t"+i} style={{ opacity: off ? 0.35 : 1, textDecoration: off ? "line-through" : "none" }}>
+            <g key={"t"+i} style={{ opacity: off ? 0.35 : (missed ? 0.55 : 1), textDecoration: off ? "line-through" : "none" }}>
               <text x={labelP.x} y={labelP.y + dy - 6} fill="#a8a8a8" fontFamily="JetBrains Mono" fontSize="9" letterSpacing="0.04em" textAnchor={anchor}>{name}</text>
-              <text x={labelP.x} y={labelP.y + dy + 6} fill={sevOf(m.score).fg} fontFamily="JetBrains Mono" fontSize="11" fontWeight="800" textAnchor={anchor}>{String(m.score).padStart(2, "0")}</text>
+              <text x={labelP.x} y={labelP.y + dy + 6}
+                fill={missed ? "#5a5a5a" : sevOf(m.score).fg}
+                fontFamily="JetBrains Mono" fontSize="11" fontWeight="800" textAnchor={anchor}>
+                {missed ? "no hit" : String(m.score).padStart(2, "0")}
+              </text>
             </g>
           );
         })}
