@@ -277,8 +277,15 @@ def _vt_scorer(data: dict) -> int:
 
 
 def _shodan_filter(data: dict) -> dict | None:
-    """Shodan returns ``{'error': ...}`` on auth/missing-key — treat as no-data."""
-    if isinstance(data, dict) and 'error' in data:
+    """Treat ``{}`` / ``{'error': ...}`` as no-data so we don't persist empty rows.
+
+    Both Shodan (`host_search`) and Censys (`host_lookup`) return an empty
+    dict when no API key is configured or the IP simply isn't in the index.
+    Persisting those would inflate the cache with `{}` rows that re-trigger
+    a fetch on every call (because there's no useful payload to compare
+    against) and clutter the per-source history view.
+    """
+    if not isinstance(data, dict) or not data or 'error' in data:
         return None
     return data
 

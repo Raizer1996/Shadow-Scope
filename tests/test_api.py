@@ -405,13 +405,9 @@ def test_static_files_served(client):
     assert "IOC_DB" in response.text
 
 
-def test_classic_ui_still_reachable(client):
-    """Legacy vanilla dashboard remains at /ui-classic until full API wiring lands."""
-    response = client.get("/ui-classic")
-    assert response.status_code == 200
-    # Markers from the classic HTML
-    assert "ShadowScope" in response.text
-    assert "/static/classic/styles.css" in response.text
+# /ui-classic was retired by PR #37 (22d564f) — brutalist v2 is now the
+# sole canonical dashboard at /ui. The old "legacy still reachable" test
+# was orphaned by that refactor; it stays removed.
 
 
 # ---------------------------------------------------------------------------

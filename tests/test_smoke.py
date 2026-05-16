@@ -573,12 +573,16 @@ def _stub_all_network(monkeypatch):
     from ioc_tool.modules import (
         abstract_api,
         abuseipdb,
+        censys,
         crtsh,
+        epss,
         feodo,
         greynoise,
         ip_quality_score,
         ipinfo_mod,
+        kev,
         malwarebazaar,
+        nvd,
         otx,
         pulsedive,
         shodan_mod,
@@ -591,9 +595,13 @@ def _stub_all_network(monkeypatch):
     )
     monkeypatch.setattr(abstract_api, "enrich_ip", lambda v: None)
     monkeypatch.setattr(abuseipdb, "enrich_ip", lambda v: None)
+    monkeypatch.setattr(censys, "host_lookup", lambda v: {})
     monkeypatch.setattr(crtsh, "enrich_domain", lambda v: None)
+    monkeypatch.setattr(epss, "enrich_cve", lambda v: None)
     monkeypatch.setattr(feodo, "enrich_ip", lambda v: None)
     monkeypatch.setattr(greynoise, "enrich_ip", lambda v: None)
+    monkeypatch.setattr(kev, "get_kev_entry", lambda v: None)
+    monkeypatch.setattr(nvd, "enrich_cve", lambda v: None)
     monkeypatch.setattr(ipinfo_mod, "enrich_ip", lambda v: None)
     monkeypatch.setattr(ip_quality_score, "enrich_ip", lambda v: None)
     monkeypatch.setattr(malwarebazaar, "enrich_hash", lambda v: None)
