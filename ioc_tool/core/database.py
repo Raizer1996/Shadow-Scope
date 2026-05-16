@@ -353,3 +353,198 @@ def get_latest_enrichment(ioc_id, source):
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Retention / cache maintenance
+# ---------------------------------------------------------------------------
+#
+# `add_enrichment` appends a new row on every fetch; without a janitor those
+# rows accumulate forever. The functions below let analysts (or the auto-
+# prune hook in `core/enrich.py`) bound the cache by age, by per-source row
+# count, or wipe slices explicitly. They all operate on the *currently active
+# workspace* — `set_workspace` rewires `DB_PATH` first.
+
+
+def prune_enrichments_older_than(days: float) -> int:
+    """Delete enrichment rows whose timestamp is older than ``days``.
+
+    Returns the number of rows removed. ``days <= 0`` is a no-op (returns 0)
+    so that misconfigured retention envs can't accidentally wipe everything.
+    """
+    if days <= 0:
+        return 0
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Stored as ISO 8601 with a space separator — `datetime('now', '-Nd')`
+    # produces the same shape, so a string comparison is exact.
+    cursor.execute(
+        "DELETE FROM enrichments WHERE timestamp < datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    removed = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return max(0, removed)
+
+
+def prune_enrichments_keep_last_n(n: int) -> int:
+    """Keep only the newest ``n`` rows per (ioc_id, source) pair.
+
+    Useful for capping history-bloat while still preserving the most recent
+    chronology that the `history` view renders. Returns the number of rows
+    removed. ``n <= 0`` is a no-op (returns 0).
+    """
+    if n <= 0:
+        return 0
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Window-function-free implementation: rank rows per group by descending
+    # timestamp via a correlated subquery, then delete anything past the cap.
+    cursor.execute(
+        '''
+        DELETE FROM enrichments
+        WHERE id IN (
+            SELECT e1.id FROM enrichments e1
+            WHERE (
+                SELECT COUNT(*) FROM enrichments e2
+                WHERE e2.ioc_id = e1.ioc_id
+                  AND e2.source = e1.source
+                  AND e2.timestamp > e1.timestamp
+            ) >= ?
+        )
+        ''',
+        (n,),
+    )
+    removed = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return max(0, removed)
+
+
+def clear_enrichments(
+    *,
+    source: str | None = None,
+    ioc_value: str | None = None,
+    all: bool = False,
+) -> int:
+    """Delete enrichment rows by source, by IOC value, or wholesale.
+
+    Exactly one of ``source``, ``ioc_value``, ``all`` must be truthy. The
+    function refuses an empty filter set rather than silently deleting
+    everything — pass ``all=True`` explicitly to wipe the table.
+    """
+    active = [bool(source), bool(ioc_value), bool(all)]
+    if sum(active) != 1:
+        raise ValueError(
+            "clear_enrichments: pass exactly one of source=, ioc_value=, all=True"
+        )
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    if all:
+        cursor.execute("DELETE FROM enrichments")
+    elif source:
+        cursor.execute("DELETE FROM enrichments WHERE source = ?", (source,))
+    else:
+        cursor.execute(
+            '''
+            DELETE FROM enrichments
+            WHERE ioc_id IN (SELECT id FROM iocs WHERE value = ?)
+            ''',
+            (ioc_value,),
+        )
+    removed = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return max(0, removed)
+
+
+def cache_stats() -> dict:
+    """Return a snapshot of the enrichment cache for the active workspace.
+
+    Shape:
+        {
+            "db_path": "...",
+            "db_size_bytes": int,
+            "ioc_count": int,
+            "enrichment_count": int,
+            "oldest_timestamp": str | None,
+            "newest_timestamp": str | None,
+            "per_source": [{"source": str, "rows": int}, ...],   # desc by rows
+        }
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM iocs")
+    ioc_count = int(cursor.fetchone()[0])
+    cursor.execute("SELECT COUNT(*) FROM enrichments")
+    enr_count = int(cursor.fetchone()[0])
+    cursor.execute(
+        "SELECT MIN(timestamp), MAX(timestamp) FROM enrichments"
+    )
+    oldest, newest = cursor.fetchone()
+    cursor.execute(
+        '''
+        SELECT source, COUNT(*) AS rows
+        FROM enrichments
+        GROUP BY source
+        ORDER BY rows DESC, source ASC
+        '''
+    )
+    per_source = [{"source": r[0], "rows": int(r[1])} for r in cursor.fetchall()]
+    conn.close()
+    size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+    return {
+        "db_path": DB_PATH,
+        "db_size_bytes": size,
+        "ioc_count": ioc_count,
+        "enrichment_count": enr_count,
+        "oldest_timestamp": oldest,
+        "newest_timestamp": newest,
+        "per_source": per_source,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Auto-prune scheduling marker
+# ---------------------------------------------------------------------------
+#
+# A tiny key/value meta table lets the auto-prune hook in core/enrich.py
+# remember when it last ran without bloating the schema with a dedicated
+# table. The table is created on demand so existing DBs migrate silently.
+
+
+def _ensure_meta_table(cursor) -> None:
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        '''
+    )
+
+
+def get_meta(key: str) -> str | None:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    _ensure_meta_table(cursor)
+    cursor.execute("SELECT value FROM meta WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def set_meta(key: str, value: str) -> None:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    _ensure_meta_table(cursor)
+    cursor.execute(
+        '''
+        INSERT INTO meta (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        ''',
+        (key, value),
+    )
+    conn.commit()
+    conn.close()

@@ -148,9 +148,12 @@ Tiers:
 ## Caching
 
 - **Backend**: SQLite at `ioc_tool/data/ioc.db`
-- **Tables**: `iocs` (id, value, type), `enrichments` (ioc_id, source, data_json, score, timestamp)
-- **TTL**: 24 h (`core.enrich.should_refresh`)
-- **Effect**: repeat queries within 24 h hit cache → no API spend
+- **Tables**: `iocs`, `enrichments`, `ioc_tags`, `meta` (key/value, used by auto-prune scheduling)
+- **Freshness TTL**: 24 h (`core.enrich.should_refresh`), tunable via `CACHE_TTL_HOURS` env. Controls *refetch*, not deletion.
+- **Retention**: 90 d (default) — `enrichments` rows older than `RETENTION_DAYS` env are removed by the auto-prune janitor. Set `AUTO_PRUNE=0` to disable the in-process janitor (e.g. when you run `shadowscope cache prune` from cron instead).
+- **Auto-prune**: at most once per process per workspace per day; silent on failure so it can never break the enrichment path.
+- **Manual maintenance**: `shadowscope cache stats|prune|clear` — `stats` shows row counts + on-disk size + per-source breakdown; `prune` accepts `--older-than 30d|12h|...` plus `--keep-last N` to cap per-(ioc, source) history; `clear` wipes by `--source`, `--ioc`, or `--all` (exactly one filter required, `--yes` for non-interactive use).
+- **Effect**: repeat queries within freshness TTL hit cache → no API spend; long-term disk growth is bounded by retention.
 
 ## LLM verdict
 

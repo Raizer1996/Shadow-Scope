@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime
 from typing import Any
 
 from rich.console import Console
@@ -1144,6 +1145,151 @@ def handle_workspaces(args: argparse.Namespace) -> None:
     console.print(t)
 
 
+def _parse_duration_days(spec: str) -> float:
+    """Parse retention specs like ``30``, ``30d``, ``12h`` → fractional days.
+
+    Used by the ``cache prune --older-than`` flag. We accept a bare integer
+    (treated as days) for ergonomic CLI use, and a numeric value with a
+    one-letter suffix for explicit units. Anything else raises ValueError.
+    """
+    s = str(spec).strip().lower()
+    if not s:
+        raise ValueError("empty duration")
+    if s[-1] in {"d", "h", "m"}:
+        unit = s[-1]
+        value = float(s[:-1])
+    else:
+        unit = "d"
+        value = float(s)
+    if value <= 0:
+        raise ValueError("duration must be positive")
+    if unit == "d":
+        return value
+    if unit == "h":
+        return value / 24.0
+    return value / 1440.0  # minutes
+
+
+def handle_cache(args: argparse.Namespace) -> None:
+    """Inspect, prune, or wipe the enrichment cache.
+
+    Subcommands (selected via ``args.cache_action``):
+
+    * ``stats``  — print row counts, on-disk size, oldest/newest timestamps,
+      and per-source row breakdown for the active workspace.
+    * ``prune``  — delete rows older than ``--older-than`` (default: the
+      ``RETENTION_DAYS`` env, fall-back 90 days), then optionally cap
+      remaining history per (ioc, source) via ``--keep-last``.
+    * ``clear``  — explicit wipe by ``--source`` / ``--ioc`` / ``--all``.
+      Refuses to run without a filter to prevent accidental ``DELETE FROM``.
+
+    Destructive ops (``prune`` / ``clear``) require ``--yes`` to skip
+    confirmation; otherwise they prompt before touching the DB.
+    """
+    action = getattr(args, 'cache_action', None)
+    if action == 'stats':
+        stats = database.cache_stats()
+        oldest = stats['oldest_timestamp'] or '—'
+        newest = stats['newest_timestamp'] or '—'
+        size_kb = max(1, stats['db_size_bytes'] // 1024)
+        t = Table(title="ShadowScope cache")
+        t.add_column("Metric")
+        t.add_column("Value")
+        t.add_row("DB path", stats['db_path'])
+        t.add_row("Size (KB)", str(size_kb))
+        t.add_row("IOCs", str(stats['ioc_count']))
+        t.add_row("Enrichment rows", str(stats['enrichment_count']))
+        t.add_row("Oldest row", str(oldest))
+        t.add_row("Newest row", str(newest))
+        console.print(t)
+        if stats['per_source']:
+            ps = Table(title="Rows per source")
+            ps.add_column("Source")
+            ps.add_column("Rows", justify="right")
+            for row in stats['per_source']:
+                ps.add_row(row['source'], str(row['rows']))
+            console.print(ps)
+        return
+
+    if action == 'prune':
+        # Resolve the retention window: explicit flag wins over env, which
+        # wins over the 90-day fallback.
+        if getattr(args, 'older_than', None):
+            try:
+                days = _parse_duration_days(args.older_than)
+            except ValueError:
+                console.print(f"[red]Bad --older-than value: {args.older_than}[/red]")
+                sys.exit(2)
+        else:
+            try:
+                days = float(os.getenv("RETENTION_DAYS", "90"))
+            except ValueError:
+                days = 90.0
+        keep_n = int(args.keep_last) if getattr(args, 'keep_last', None) else 0
+
+        if not getattr(args, 'yes', False):
+            actions = [f"rows older than {days:g} day(s)"]
+            if keep_n:
+                actions.append(f"keep newest {keep_n} per (ioc, source)")
+            console.print(
+                f"[yellow]About to prune: {', then '.join(actions)}[/yellow]"
+            )
+            confirm = Prompt.ask("Proceed?", choices=["y", "n"], default="n")
+            if confirm != "y":
+                console.print("[dim]Aborted — no rows deleted.[/dim]")
+                return
+
+        n_age = database.prune_enrichments_older_than(days)
+        n_cap = database.prune_enrichments_keep_last_n(keep_n) if keep_n else 0
+        # Record so the auto-prune hook can skip until tomorrow.
+        database.set_meta("last_prune", datetime.now().isoformat())
+        console.print(
+            f"[green]Pruned[/green] {n_age} row(s) older than {days:g}d"
+            + (f", {n_cap} row(s) over keep-last={keep_n}" if keep_n else "")
+        )
+        return
+
+    if action == 'clear':
+        # Validate filter combination at the CLI layer so we can produce a
+        # friendly error rather than the bare ValueError the DB raises.
+        filters = [
+            ('source', getattr(args, 'source', None)),
+            ('ioc', getattr(args, 'ioc', None)),
+            ('all', getattr(args, 'all', False)),
+        ]
+        active = [name for name, val in filters if val]
+        if len(active) != 1:
+            console.print(
+                "[red]cache clear: pass exactly one of --source, --ioc, --all[/red]"
+            )
+            sys.exit(2)
+
+        scope_desc = (
+            "ALL enrichment rows" if args.all else
+            f"every row for IOC '{args.ioc}'" if active[0] == 'ioc' else
+            f"every row from source '{args.source}'"
+        )
+        if not getattr(args, 'yes', False):
+            console.print(f"[red]About to delete {scope_desc}[/red]")
+            confirm = Prompt.ask("Proceed?", choices=["y", "n"], default="n")
+            if confirm != "y":
+                console.print("[dim]Aborted — no rows deleted.[/dim]")
+                return
+
+        removed = database.clear_enrichments(
+            source=args.source if active[0] == 'source' else None,
+            ioc_value=args.ioc if active[0] == 'ioc' else None,
+            all=bool(args.all) if active[0] == 'all' else False,
+        )
+        console.print(f"[green]Cleared[/green] {removed} row(s)")
+        return
+
+    # No action → show help.
+    console.print(
+        "[yellow]cache: pick a subcommand — stats | prune | clear[/yellow]"
+    )
+
+
 def handle_watch(args: argparse.Namespace) -> None:
     """Re-enrich a watchlist of IOCs and emit deltas.
 
@@ -1512,6 +1658,61 @@ def build_parser() -> argparse.ArgumentParser:
         help='List every workspace DB on disk (file path, IOC count, size)',
     )
 
+    # cache — inspect / prune / clear the enrichment cache for the active
+    # workspace. Nested subparsers so each action has its own flags without
+    # polluting the top-level help.
+    p_cache = subparsers.add_parser(
+        'cache',
+        help='Inspect, prune, or wipe the enrichment cache',
+    )
+    cache_sub = p_cache.add_subparsers(dest='cache_action')
+
+    cache_sub.add_parser(
+        'stats',
+        help='Show row counts, on-disk size, and per-source breakdown',
+    )
+
+    p_cache_prune = cache_sub.add_parser(
+        'prune',
+        help='Delete rows older than --older-than (or RETENTION_DAYS env, default 90d)',
+    )
+    p_cache_prune.add_argument(
+        '--older-than',
+        default=None,
+        help='Retention window (e.g. 90, 90d, 12h, 30m). Defaults to RETENTION_DAYS env or 90d',
+    )
+    p_cache_prune.add_argument(
+        '--keep-last',
+        type=int,
+        default=0,
+        help='After age-pruning, keep only the newest N rows per (ioc, source) pair',
+    )
+    p_cache_prune.add_argument(
+        '--yes',
+        action='store_true',
+        default=False,
+        help='Skip the confirmation prompt (for cron / scripts)',
+    )
+
+    p_cache_clear = cache_sub.add_parser(
+        'clear',
+        help='Wipe rows by source / by IOC / or all (exactly one filter required)',
+    )
+    p_cache_clear.add_argument('--source', default=None, help='Delete every row from this source')
+    p_cache_clear.add_argument('--ioc', default=None, help='Delete every row for this IOC value')
+    p_cache_clear.add_argument(
+        '--all',
+        action='store_true',
+        default=False,
+        help='Delete ALL enrichment rows (destructive — requires --yes for non-interactive use)',
+    )
+    p_cache_clear.add_argument(
+        '--yes',
+        action='store_true',
+        default=False,
+        help='Skip the confirmation prompt',
+    )
+
     # cases — list cases or list IOCs for a case
     p_cases = subparsers.add_parser(
         'cases',
@@ -1657,6 +1858,8 @@ def main() -> None:
         handle_diff(args)
     elif args.command == 'workspaces':
         handle_workspaces(args)
+    elif args.command == 'cache':
+        handle_cache(args)
     else:
         parser_arg.print_help()
 

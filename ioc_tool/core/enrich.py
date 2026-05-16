@@ -93,6 +93,70 @@ def _cache_ttl_hours() -> float:
         return _DEFAULT_CACHE_TTL_HOURS
     return value if value > 0 else _DEFAULT_CACHE_TTL_HOURS
 
+
+# ---------------------------------------------------------------------------
+# Cache retention (auto-prune)
+# ---------------------------------------------------------------------------
+#
+# ``CACHE_TTL_HOURS`` only governs *freshness* (when to refetch); without a
+# janitor the SQLite table would grow forever because ``add_enrichment``
+# always INSERTs. The hook below runs at most once per process *and* once
+# per 24 h per workspace, deleting rows older than ``RETENTION_DAYS``
+# (default 90 d). Set ``AUTO_PRUNE=0`` to disable entirely — analysts who
+# manage retention via cron / `shadowscope cache prune` can opt out.
+
+_DEFAULT_RETENTION_DAYS = 90.0
+_AUTO_PRUNE_INTERVAL_HOURS = 24.0
+_auto_prune_done: set[str] = set()  # workspaces already checked this process
+
+
+def _retention_days() -> float:
+    raw = os.getenv("RETENTION_DAYS", "").strip()
+    if not raw:
+        return _DEFAULT_RETENTION_DAYS
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_RETENTION_DAYS
+    return value if value > 0 else _DEFAULT_RETENTION_DAYS
+
+
+def _auto_prune_enabled() -> bool:
+    """Honour ``AUTO_PRUNE`` env. Default on; ``0``/``false``/``no`` disable."""
+    raw = os.getenv("AUTO_PRUNE", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off", ""}
+
+
+def maybe_auto_prune() -> None:
+    """Run an age-based prune at most once per process per workspace per day.
+
+    Silent: errors are swallowed so a broken DB never blocks enrichment. The
+    last-prune timestamp is stored in the workspace's ``meta`` table so a
+    long-running daemon and a one-shot CLI invocation see the same schedule.
+    """
+    if not _auto_prune_enabled():
+        return
+    try:
+        db_path = database.DB_PATH
+        if db_path in _auto_prune_done:
+            return
+        _auto_prune_done.add(db_path)
+
+        last_raw = database.get_meta("last_prune")
+        if last_raw:
+            try:
+                last = datetime.fromisoformat(last_raw)
+                if datetime.now() - last < timedelta(hours=_AUTO_PRUNE_INTERVAL_HOURS):
+                    return
+            except ValueError:
+                pass  # corrupt timestamp → fall through and run prune
+
+        database.prune_enrichments_older_than(_retention_days())
+        database.set_meta("last_prune", datetime.now().isoformat())
+    except Exception:
+        # Maintenance must never break the user-facing enrichment path.
+        pass
+
 # ---------------------------------------------------------------------------
 # Cache freshness
 # ---------------------------------------------------------------------------
@@ -287,6 +351,10 @@ async def enrich_ioc_async(
     Set ``no_cache=True`` to force a fresh fetch from every source,
     bypassing the SQLite cache.
     """
+    # Opportunistic cache janitor — bounded to one age-prune per process per
+    # workspace per day. Silent on failure so this can't break enrichment.
+    maybe_auto_prune()
+
     token = no_cache_ctx.set(no_cache) if no_cache else None
     try:
         return await _enrich_ioc_inner(value, ioc_type)
