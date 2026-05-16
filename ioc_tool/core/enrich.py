@@ -42,6 +42,7 @@ from ..modules import (
     abstract_api,
     abuseipdb,
     crtsh,
+    censys,
     epss,
     feodo,
     greynoise,
@@ -360,6 +361,16 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             lambda: ipinfo_mod.enrich_ip(value),
             None,
             info_only=True,
+        ))
+
+    # --- Censys Hosts v2 — IP only (info-only; deeper banners, JARM, cert chain, OS) ---
+    if ioc_type == 'ip':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'censys', 'Censys',
+            lambda: censys.host_lookup(value),
+            None,
+            info_only=True,
+            cache_filter=_shodan_filter,
         ))
 
     # --- AbstractAPI — IP only (anonymisation flags) ---

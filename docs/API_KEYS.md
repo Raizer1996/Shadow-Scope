@@ -30,6 +30,13 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 - **Used for**: classifying IPs as internet background noise (mass scanners like Censys, Shodan, Project Sonar, Mirai) vs targeted activity. Major false-positive killer in SOC IP triage.
 - **Scope**: IP only
 
+### Censys — `CENSYS_API_KEY`
+- **Signup**: https://accounts.censys.io/register → after login, create a Personal Access Token at https://platform.censys.io/settings/access-tokens
+- **Free tier**: 500 queries/month (Personal Access Token, Censys Platform v3)
+- **Used for**: deeper service banners, software fingerprints (vendor/product/version), OS detection, BGP prefix, full reverse-DNS list. Complements Shodan with a second-opinion port inventory and richer software identification.
+- **Scope**: IP only
+- **Endpoint**: `https://api.platform.censys.io/v3/global/asset/host/{ip}` (Bearer PAT auth)
+
 ## Free / freemium
 
 ### URLhaus (abuse.ch) — *no API key*
