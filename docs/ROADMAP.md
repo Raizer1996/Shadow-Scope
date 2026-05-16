@@ -30,6 +30,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [x] **Configurable cache TTL** — env `CACHE_TTL_HOURS` (float supported, fallback 24 h)
 - [x] **Tor list auto-refresh** — staleness check via file mtime + `TOR_LIST_TTL_HOURS` env (default 24 h); refresh on first miss or expiry
 - [x] **Force refresh flag** — `--no-cache` CLI flag + `enrich_ioc(no_cache=)` kwarg, propagated via `ContextVar`
+- [x] **Cache retention & cleanup** — `enrichments` rows no longer grow forever. New `RETENTION_DAYS` env (default 90 d) drives an opportunistic auto-prune janitor (one age-prune per process per workspace per 24 h; opt-out via `AUTO_PRUNE=0`). New `shadowscope cache {stats,prune,clear}` CLI for manual inspection and explicit wipes — `prune --older-than 30d|12h|...` with optional `--keep-last N` per (ioc, source); `clear --source X | --ioc Y | --all` (exactly one filter, `--yes` skips the confirm). New `meta` key/value table holds the last-prune timestamp (2026-05-16)
 
 ---
 
