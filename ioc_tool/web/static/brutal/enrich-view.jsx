@@ -157,6 +157,7 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
               <NamedThreatStrip ioc={ioc} compact />
               {ioc.prev_score !== undefined && <DeltaChip prev={ioc.prev_score} curr={ioc.final_score} ioc={ioc} />}
               {ioc.case && <CaseChip caseId={ioc.case} />}
+              <CaseAssignBar ioc={ioc} />
               {ioc.type === "domain" && (
                 <div className="hero-flags">
                   <div className="flags-label">HEURISTICS · local signals</div>
@@ -829,14 +830,58 @@ function DeltaChip({ prev, curr, ioc }) {
 }
 
 function CaseChip({ caseId }) {
-  const c = window.CASES.find(x => x.id === caseId);
-  const explain = `This IOC is grouped under an investigation case. Cases let you track related indicators across a campaign and view their cumulative risk.`;
+  // Case lookup is async via /api/ui/cases — for the inline chip we
+  // just render the case label (== id under the current schema) and
+  // skip the member count to avoid an extra round-trip per render.
+  const explain = "This IOC is grouped under an investigation case. Open the Cases tab to see members.";
   return (
     <div className="chip" title={explain}>
       <span className="chip-label">CASE</span>
-      <span className="chip-val">{c?.label || caseId}</span>
-      <span className="chip-meta dim small">{c?.iocs?.length || 1} IOC</span>
+      <span className="chip-val">{caseId}</span>
       <span className="chip-help" title={explain}>?</span>
+    </div>
+  );
+}
+
+// Inline case-assignment input — drops the active IOC into a case
+// label. Empty input + save = detach. Uses /api/ui/iocs/{value}/case.
+// Lazy: no autocomplete against existing cases yet, but the Cases tab
+// surfaces the canonical list so collisions are easy to avoid.
+function CaseAssignBar({ ioc }) {
+  const [value, setValue] = React.useState(ioc.case || "");
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+
+  // Reset when the active IOC changes — otherwise typing into one
+  // record would bleed into the next.
+  React.useEffect(() => { setValue(ioc.case || ""); setMsg(null); }, [ioc.id]);
+
+  const save = () => {
+    if (!window.shadowscopeSetCase) return;
+    setBusy(true);
+    setMsg(null);
+    window.shadowscopeSetCase(ioc.ioc, value.trim() || null)
+      .then(body => {
+        setMsg(body.case ? `assigned · ${body.case}` : "detached");
+        setTimeout(() => setMsg(null), 2200);
+      })
+      .catch(e => setMsg("err: " + (e.message || e).slice(0, 80)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="case-assign">
+      <span className="case-assign-label dim">case</span>
+      <input
+        className="case-assign-input"
+        placeholder="campaign-name"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") save(); }}
+        disabled={busy}
+      />
+      <button className="case-assign-save" onClick={save} disabled={busy}>save</button>
+      {msg && <span className="case-assign-msg dim small">{msg}</span>}
     </div>
   );
 }

@@ -821,3 +821,110 @@ def test_ui_pivot_respects_limit(client, cache_db):
         params={"kind": "malware", "value": "Lockbit", "limit": 2},
     )
     assert len(r.json()) == 2
+
+
+# ---------------------------------------------------------------------------
+# /api/ui/cases — backend-backed case views + mutations
+# ---------------------------------------------------------------------------
+
+
+def test_ui_cases_empty_workspace(client, cache_db):
+    """No cases tagged → []. The UI shows an empty-state prompt."""
+    r = client.get("/api/ui/cases")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_ui_cases_returns_distinct_cases(client, cache_db):
+    """Cases group by case_name with member counts + derived severity."""
+    ioc_a = cache_db.add_or_update_ioc("a.com", "domain")
+    ioc_b = cache_db.add_or_update_ioc("b.com", "domain")
+    ioc_c = cache_db.add_or_update_ioc("c.com", "domain")
+    cache_db.update_last_score(ioc_a, 80)
+    cache_db.update_last_score(ioc_b, 30)
+    cache_db.update_last_score(ioc_c, 90)
+    cache_db.tag_ioc(ioc_a, case="campaign-x")
+    cache_db.tag_ioc(ioc_b, case="campaign-x")
+    cache_db.tag_ioc(ioc_c, case="campaign-y")
+    r = client.get("/api/ui/cases")
+    assert r.status_code == 200
+    body = r.json()
+    # Severity descending → campaign-y (90) before campaign-x (80).
+    assert [c["label"] for c in body] == ["campaign-y", "campaign-x"]
+    by_id = {c["id"]: c for c in body}
+    assert by_id["campaign-x"]["ioc_count"] == 2
+    assert by_id["campaign-x"]["severity"] == 80
+    assert sorted(by_id["campaign-x"]["iocs"]) == ["a.com", "b.com"]
+    assert by_id["campaign-y"]["severity"] == 90
+
+
+def test_ui_cases_omits_tag_only_rows(client, cache_db):
+    """An ``ioc_tags`` row with tag=foo but no case_name shouldn't appear."""
+    ioc_id = cache_db.add_or_update_ioc("a.com", "domain")
+    cache_db.tag_ioc(ioc_id, tag="phishing")
+    assert client.get("/api/ui/cases").json() == []
+
+
+def test_ui_set_case_assigns_and_detaches(client, cache_db):
+    cache_db.add_or_update_ioc("a.com", "domain")
+    # Assign.
+    r = client.patch("/api/ui/iocs/a.com/case", json={"case": "campaign-x"})
+    assert r.status_code == 200
+    assert r.json() == {"ioc": "a.com", "case": "campaign-x"}
+    assert client.get("/api/ui/cases").json()[0]["label"] == "campaign-x"
+    # Detach.
+    r = client.patch("/api/ui/iocs/a.com/case", json={"case": None})
+    assert r.status_code == 200
+    assert r.json() == {"ioc": "a.com", "case": None}
+    assert client.get("/api/ui/cases").json() == []
+
+
+def test_ui_set_case_404_for_unknown_ioc(client, cache_db):
+    """Cannot tag what isn't in the cache yet — caller must enrich first."""
+    r = client.patch("/api/ui/iocs/ghost.com/case", json={"case": "x"})
+    assert r.status_code == 404
+
+
+def test_ui_set_case_refangs_path_value(client, cache_db):
+    cache_db.add_or_update_ioc("evil.com", "domain")
+    r = client.patch("/api/ui/iocs/evil[.]com/case", json={"case": "campaign-x"})
+    assert r.status_code == 200
+    assert r.json()["ioc"] == "evil.com"
+
+
+def test_ui_set_case_replaces_prior_assignment(client, cache_db):
+    """An IOC can only belong to one case at a time in the UI."""
+    cache_db.add_or_update_ioc("a.com", "domain")
+    client.patch("/api/ui/iocs/a.com/case", json={"case": "campaign-x"})
+    client.patch("/api/ui/iocs/a.com/case", json={"case": "campaign-y"})
+    cases = client.get("/api/ui/cases").json()
+    labels = [c["label"] for c in cases]
+    assert labels == ["campaign-y"]
+    assert cases[0]["ioc_count"] == 1
+
+
+def test_ui_delete_case_removes_every_assignment(client, cache_db):
+    ioc_a = cache_db.add_or_update_ioc("a.com", "domain")
+    ioc_b = cache_db.add_or_update_ioc("b.com", "domain")
+    cache_db.tag_ioc(ioc_a, case="campaign-x")
+    cache_db.tag_ioc(ioc_b, case="campaign-x")
+    r = client.delete("/api/ui/cases/campaign-x")
+    assert r.status_code == 200
+    assert r.json()["removed"] == 2
+    assert client.get("/api/ui/cases").json() == []
+
+
+def test_ui_delete_case_unknown_returns_zero(client, cache_db):
+    """Unknown case is a silent no-op — keeps the UI's delete path simple."""
+    r = client.delete("/api/ui/cases/no-such-case")
+    assert r.status_code == 200
+    assert r.json() == {"case": "no-such-case", "removed": 0}
+
+
+def test_ui_cases_requires_token(client, cache_db, monkeypatch):
+    monkeypatch.setenv("SHADOWSCOPE_API_TOKEN", "secret")
+    assert client.get("/api/ui/cases").status_code == 401
+    assert client.patch("/api/ui/iocs/x/case", json={"case": "y"}).status_code == 401
+    assert client.delete("/api/ui/cases/x").status_code == 401
+    h = {"Authorization": "Bearer secret"}
+    assert client.get("/api/ui/cases", headers=h).status_code == 200

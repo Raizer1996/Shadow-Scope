@@ -1,9 +1,10 @@
 // Dashboard helper data + rendering utilities.
 //
-// Demo IOC fixtures (IOC_DB, SHODAN_DATA, IOC_HISTORY) were removed when
-// the recent strip switched to /api/ui/recent — the dashboard now reflects
-// real cache state only. WATCH_FEED + CASES remain as synthetic demo
-// scaffolding for the Watch / Cases tabs (no backend equivalent yet).
+// Demo IOC fixtures (IOC_DB, SHODAN_DATA, IOC_HISTORY, CASES) have all
+// been removed — the recent strip pulls from /api/ui/recent, pivot
+// hits go through /api/ui/pivot, and cases come from /api/ui/cases.
+// WATCH_FEED is the only synthetic block remaining; it backs the Watch
+// tab's rolling-feed demo until a real event stream exists.
 // IOC_FLAGS, HEUR_EXPLAIN, MITRE_MAP, PIVOT_KINDS, RISK_TIER, defangText
 // are pure rendering helpers that operate on whatever record they get.
 
@@ -29,13 +30,6 @@ window.SOURCES = [
   { id: "MISP local",     status: "ok",         latency_ms: 45,  ioc_types: ["ip","domain","sha256"],        key: "present" },
   { id: "OpenPhish",      status: "ok",         latency_ms: 230, ioc_types: ["url"],                         key: "anonymous" },
   { id: "PhishTank",      status: "ok",         latency_ms: 198, ioc_types: ["url"],                         key: "anonymous" }
-];
-
-window.CASES = [
-  { id: "campaign-emotet-q2",   label: "Emotet Q2 resurgence",    iocs: ["ioc_01","ioc_08","ioc_13"],  opened: "2026-05-08", severity: 85 },
-  { id: "campaign-phish-may",   label: "PayPal phish wave (May)", iocs: ["ioc_03","ioc_05"],          opened: "2026-05-12", severity: 92 },
-  { id: "campaign-tor-exit",    label: "Tor exit abuse",          iocs: ["ioc_02"],                    opened: "2026-04-30", severity: 72 },
-  { id: "campaign-xz-supply",   label: "XZ Utils supply chain",   iocs: ["ioc_07"],                    opened: "2024-03-30", severity: 95 }
 ];
 
 // Live "watch" feed — score deltas in the last 24h.
@@ -216,6 +210,62 @@ window.shadowscopeRecent = async function (limit) {
     if (tok) headers["Authorization"] = "Bearer " + tok;
   } catch (e) {}
   const r = await fetch("/api/ui/recent?limit=" + n, { headers });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error("HTTP " + r.status + " " + body.slice(0, 200));
+  }
+  return await r.json();
+};
+
+// Cases — list every case in the workspace with members + derived
+// severity / opened-at. Used by CasesView; replaces the hardcoded
+// window.CASES demo list.
+window.shadowscopeCases = async function () {
+  const headers = {};
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const r = await fetch("/api/ui/cases", { headers });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error("HTTP " + r.status + " " + body.slice(0, 200));
+  }
+  return await r.json();
+};
+
+// Assign / detach a case for an IOC. Pass `case: null` (or "") to
+// detach. Returns the server's `{ioc, case}` echo on success.
+window.shadowscopeSetCase = async function (iocValue, caseName) {
+  const headers = { "Content-Type": "application/json" };
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const r = await fetch(`/api/ui/iocs/${encodeURIComponent(iocValue)}/case`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ case: caseName || null }),
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error("HTTP " + r.status + " " + body.slice(0, 200));
+  }
+  return await r.json();
+};
+
+// Delete a case (detaches every IOC from it). The IOCs themselves stay
+// in cache. Returns `{case, removed}` with the row count.
+window.shadowscopeDeleteCase = async function (caseName) {
+  const headers = {};
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const r = await fetch(`/api/ui/cases/${encodeURIComponent(caseName)}`, {
+    method: "DELETE",
+    headers,
+  });
   if (!r.ok) {
     const body = await r.text().catch(() => "");
     throw new Error("HTTP " + r.status + " " + body.slice(0, 200));

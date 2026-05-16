@@ -207,6 +207,89 @@ def list_cases() -> list[dict]:
     return rows
 
 
+def list_cases_with_summary() -> list[dict]:
+    """List cases enriched with derived severity + opened timestamps.
+
+    Severity = max ``iocs.last_score`` across the case's members. Opened
+    = min ``ioc_tags.created`` for the case_name. Both are derived at
+    query time rather than stored as separate columns — the existing
+    ``ioc_tags`` schema doesn't carry them, and re-deriving keeps the
+    case view always in sync with whatever the latest enrichment said.
+    Used by the brutalist Cases tab via ``/api/ui/cases``.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT
+            t.case_name,
+            COUNT(DISTINCT t.ioc_id) AS ioc_count,
+            COALESCE(MAX(i.last_score), 0) AS severity,
+            MIN(t.created) AS opened_at
+        FROM ioc_tags t
+        JOIN iocs i ON i.id = t.ioc_id
+        WHERE t.case_name IS NOT NULL AND t.case_name != ''
+        GROUP BY t.case_name
+        ORDER BY severity DESC, ioc_count DESC, t.case_name ASC
+        '''
+    )
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def remove_case(case_name: str) -> int:
+    """Detach every IOC from ``case_name``.
+
+    Deletes the ``ioc_tags`` rows whose ``case_name`` matches. Returns
+    the count of removed rows; ``0`` for a no-op or unknown case. The
+    underlying IOCs and their enrichments are preserved — this only
+    untags the case relationship.
+    """
+    if not case_name:
+        return 0
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM ioc_tags WHERE case_name = ?",
+        (case_name,),
+    )
+    removed = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return max(0, removed)
+
+
+def set_ioc_case(ioc_value: str, case_name: str | None) -> bool:
+    """Assign or unassign a case for an IOC.
+
+    ``case_name=None`` (or empty) removes every case_name row for the IOC
+    — but preserves other tag-only rows. A non-empty value first clears
+    any existing case_name rows for the IOC (an IOC can only belong to
+    one case at a time in the UI), then inserts the fresh assignment.
+
+    Returns True if the IOC was found, False otherwise. The mutation is
+    idempotent: setting the same case twice silently re-inserts via the
+    UPSERT path in ``tag_ioc``.
+    """
+    ioc_id = get_ioc_id(ioc_value)
+    if ioc_id is None:
+        return False
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Clear any prior case assignment first — single-case-per-IOC is the
+    # UI's mental model. Tag-only rows (case_name IS NULL) stay intact.
+    cursor.execute(
+        "DELETE FROM ioc_tags WHERE ioc_id = ? AND case_name IS NOT NULL",
+        (ioc_id,),
+    )
+    conn.commit()
+    conn.close()
+    if case_name and case_name.strip():
+        tag_ioc(ioc_id, tag=None, case=case_name.strip(), note=None)
+    return True
+
+
 def list_tags() -> list[dict]:
     """List every distinct tag with its IOC count (case-agnostic)."""
     conn = get_db_connection()
