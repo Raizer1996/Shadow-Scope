@@ -239,23 +239,6 @@ def ui() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
 
 
-@app.get("/ui-classic", include_in_schema=False)
-def ui_classic() -> FileResponse:
-    """Serve the legacy vanilla dashboard at ``/ui-classic``.
-
-    Kept reachable so the previous backend-wired UI stays available while
-    the brutalist React prototype gets its API integration. Will be
-    removed once the brutalist UI is fully wired to the real endpoints.
-    """
-    return FileResponse(STATIC_DIR / "classic" / "index.html", media_type="text/html")
-
-
-@app.get("/ui-v2", include_in_schema=False)
-def ui_v2() -> FileResponse:
-    """Serve the Brutalist v2 polish-pass dashboard at ``/ui-v2``."""
-    return FileResponse(STATIC_DIR / "brutal-v2.html", media_type="text/html")
-
-
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     """Liveness check — always public so healthchecks don't need a token."""
