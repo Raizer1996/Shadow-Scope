@@ -197,6 +197,39 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .recent-pill.on .recent-ioc { color: var(--bg) !important; }
 .recent-score { font-weight: 800; padding: 0 4px; border-right: 1px solid currentColor; font-size: 11px; }
 .recent-empty { font-size: 11.5px; padding: 4px 8px; }
+
+/* ─── Inline case assignment ─── */
+.case-assign {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 6px;
+  border: 1px dashed var(--line);
+  background: var(--bg-2);
+  font-size: 11px;
+}
+.case-assign-label { text-transform: uppercase; letter-spacing: 0.12em; padding: 0 4px; }
+.case-assign-input {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 3px 6px;
+  font-family: inherit;
+  font-size: 11px;
+  min-width: 160px;
+}
+.case-assign-input:focus { outline: none; border-color: var(--accent); }
+.case-assign-save {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  padding: 3px 8px;
+  cursor: pointer;
+  text-transform: lowercase;
+}
+.case-assign-save:hover { color: var(--ink); border-color: var(--accent); }
+.case-assign-save:disabled { opacity: 0.5; cursor: not-allowed; }
+.case-assign-msg { padding: 0 4px; }
 .recent-clear {
   margin-left: auto;
   background: transparent;

@@ -176,26 +176,75 @@ function WatchView({ fmt }) {
 // ─────────── Cases (campaign grouping) ───────────
 
 function CasesView({ results, fmt, setActiveIocId, setTab }) {
-  const [openId, setOpenId] = useState(window.CASES[0].id);
-  const open = window.CASES.find(c => c.id === openId);
-  // Only members that are currently visible in the strip render here.
-  // Cases are still seeded from a synthetic list (no backend equivalent yet),
-  // so groups can appear partial when the user hasn't enriched all members.
-  const openIocs = open.iocs.map(id => results.find(r => r.id === id)).filter(Boolean);
+  // Cases load from /api/ui/cases — no more hardcoded fixtures. Each
+  // case carries its IOC values (strings); we resolve them against the
+  // recent strip OR enrich on click so panels can render.
+  const [cases, setCases] = React.useState([]);
+  const [openId, setOpenId] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  const reload = React.useCallback(() => {
+    if (!window.shadowscopeCases) return;
+    window.shadowscopeCases()
+      .then(rows => {
+        setCases(rows || []);
+        if (rows && rows.length && !rows.find(c => c.id === openId)) {
+          setOpenId(rows[0].id);
+        }
+      })
+      .catch(e => setErr(String(e.message || e)));
+  }, [openId]);
+
+  React.useEffect(() => { reload(); }, []);
+
+  const open = cases.find(c => c.id === openId);
+
+  if (err) {
+    return (
+      <div className="cases-view">
+        <div className="dim small" style={{ padding: 20 }}>// failed to load cases: {err}</div>
+      </div>
+    );
+  }
+  if (cases.length === 0) {
+    return (
+      <div className="cases-view">
+        <div className="dim small" style={{ padding: 20 }}>
+          // no cases yet — assign an IOC to a case from the Enrich tab to start one
+        </div>
+      </div>
+    );
+  }
+  if (!open) return null;
+
+  // Resolve members against the visible strip first; show plain rows
+  // for cache-only members that haven't been re-enriched this session.
+  const openMembers = open.iocs.map(value => {
+    const hit = results.find(r => r.ioc === value);
+    return { value, record: hit || null };
+  });
+
+  const deleteCase = () => {
+    if (!confirm(`Detach every IOC from case "${open.label}"? The IOCs themselves stay in cache.`)) return;
+    window.shadowscopeDeleteCase(open.id)
+      .then(() => reload())
+      .catch(e => setErr(String(e.message || e)));
+  };
+
   return (
     <div className="cases-view">
       <aside className="case-list">
-        <div className="sec-head"><span className="sec-title">CASES · {window.CASES.length}</span></div>
-        {window.CASES.map(c => {
+        <div className="sec-head"><span className="sec-title">CASES · {cases.length}</span></div>
+        {cases.map(c => {
           const s = sevOf(c.severity);
           return (
             <button key={c.id} className={`case-card ${c.id === openId ? "on" : ""}`} onClick={() => setOpenId(c.id)} style={{ borderLeft: `3px solid ${s.fg}` }}>
               <div className="case-card-top">
                 <span className="case-sev" style={{color: s.fg}}>{c.severity}</span>
-                <span className="case-iocs dim">{c.iocs.length} IOC</span>
+                <span className="case-iocs dim">{c.ioc_count} IOC</span>
               </div>
               <div className="case-label">{c.label}</div>
-              <div className="case-meta dim small">{c.id} · opened {c.opened}</div>
+              <div className="case-meta dim small">opened {c.opened || "—"}</div>
             </button>
           );
         })}
@@ -207,23 +256,36 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
             <span className="case-detail-title">{open.label}</span>
           </div>
           <div className="case-detail-meta">
-            <span className="dim">id:</span> <Copyable text={open.id}>{open.id}</Copyable>
-            <span className="dim"> · opened {open.opened}</span>
-            <span className="dim"> · cumulative risk</span>{" "}
+            <span className="dim">opened</span> {open.opened || "—"}
+            <span className="dim"> · max member score</span>{" "}
             <b style={{color: sevOf(open.severity).fg}}>{open.severity}</b>
+            <button className="pill warn" style={{ marginLeft: 12 }} onClick={deleteCase}>delete case</button>
           </div>
         </header>
         <table className="batch-table">
           <thead><tr><th>score</th><th>type</th><th>indicator</th><th>flagged</th><th></th></tr></thead>
           <tbody>
-            {openIocs.map(r => {
-              const s = sevOf(r.final_score);
+            {openMembers.map(({ value, record }) => {
+              if (record) {
+                const s = sevOf(record.final_score);
+                return (
+                  <tr key={value} className="batch-row" onClick={() => { setActiveIocId(record.id); setTab("enrich"); }}>
+                    <td className="bt-score" style={{color: s.fg, borderLeft: `3px solid ${s.fg}`}}>{record.final_score}</td>
+                    <td className="mono dim">{record.type}</td>
+                    <td className="bt-ioc">{fmt(record.ioc)}</td>
+                    <td className="dim small">{record.agreement.sources_flagged}/{record.agreement.sources_total} · {record.agreement.consensus}</td>
+                    <td className="bt-arrow">▸</td>
+                  </tr>
+                );
+              }
+              // Cached but not on the strip — render as a plain row
+              // with a hint that clicking enriches.
               return (
-                <tr key={r.id} className="batch-row" onClick={() => { setActiveIocId(r.id); setTab("enrich"); }}>
-                  <td className="bt-score" style={{color: s.fg, borderLeft: `3px solid ${s.fg}`}}>{r.final_score}</td>
-                  <td className="mono dim">{r.type}</td>
-                  <td className="bt-ioc">{fmt(r.ioc)}</td>
-                  <td className="dim small">{r.agreement.sources_flagged}/{r.agreement.sources_total} · {r.agreement.consensus}</td>
+                <tr key={value} className="batch-row dim" title="not on recent strip — click to enrich">
+                  <td className="bt-score" style={{ borderLeft: "3px solid var(--line)" }}>—</td>
+                  <td className="mono dim">cached</td>
+                  <td className="bt-ioc">{fmt(value)}</td>
+                  <td className="dim small">// re-enrich to show details</td>
                   <td className="bt-arrow">▸</td>
                 </tr>
               );
@@ -231,7 +293,7 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
           </tbody>
         </table>
 
-        <CaseGraph iocs={openIocs} />
+        <CaseGraph iocs={openMembers.map(m => m.record).filter(Boolean)} />
       </section>
     </div>
   );

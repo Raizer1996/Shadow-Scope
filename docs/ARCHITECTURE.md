@@ -213,6 +213,9 @@ All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. 
 | GET    | `/sources` | Map of `source_name → bool` indicating whether the API key is set. **Never returns key values.** |
 | GET    | `/api/ui/recent?limit=N` | Newest cached IOCs (default 8, max 50) reshaped for the dashboard's recent strip. Reads `iocs` desc by `last_seen`, rebuilds modules from cache — no API spend. Empty list when the workspace has never been enriched. |
 | GET    | `/api/ui/pivot?kind=<kind>&value=<v>[&limit=N&exclude=<ioc>]` | Cache-wide related-IOC lookup. `kind`: `tag` / `malware` / `family` / `registrar` / `ioc` / `any`. Substring scan over persisted JSON; quoted-literal match for known string-field kinds avoids false positives (`"emotet"` won't match `emotetable`). Powers the dashboard's PivotPanel "RELATED" groups. |
+| GET    | `/api/ui/cases` | List every case in the workspace with member IOC values, count, derived severity (max member `last_score`), and earliest tag creation as `opened`. Backs the Cases tab. |
+| PATCH  | `/api/ui/iocs/{value}/case` | Body `{"case": "<name>" \| null}` — assign or detach. Refangs the path value. 404 when the IOC isn't in the cache (enrich first). An IOC can belong to at most one case at a time; reassigning replaces the prior tag row. |
+| DELETE | `/api/ui/cases/{case}` | Detach every IOC from a case. The underlying IOCs + their enrichments are preserved; only the case relationship is removed. Idempotent: unknown case returns `removed: 0`. |
 | GET    | `/ui` | Dashboard SPA shell (HTML). No auth — the data behind it is what's gated. |
 | GET    | `/static/*` | Dashboard CSS / JS assets. No auth. |
 

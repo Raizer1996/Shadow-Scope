@@ -480,6 +480,16 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
         "agreement": output.consensus_summary(result),
         "modules": modules_ui,
     }
+    # Look up the case_name attached to this IOC (if any). The CaseChip
+    # + Cases tab consume this. Skip when the IOC isn't in the DB yet —
+    # /show / /api/ui/enrich both write the iocs row before calling
+    # this reshaper, but we stay defensive.
+    ioc_id = database.get_ioc_id(ioc)
+    if ioc_id is not None:
+        tags = database.get_tags_for_ioc(ioc_id)
+        case_name = next((t["case_name"] for t in tags if t.get("case_name")), None)
+        if case_name:
+            shaped["case"] = case_name
     if ioc_type == "ip":
         geo = _synthesize_geo(modules_raw)
         if geo is not None:
@@ -794,6 +804,79 @@ def ui_pivot(
             shaped["enriched_at"] = iso + "Z"
         out.append(shaped)
     return out
+
+
+@app.get("/api/ui/cases", dependencies=[Depends(require_token)])
+def ui_cases() -> list[dict[str, Any]]:
+    """Return every case in the workspace with derived severity + opened.
+
+    Severity = max ``last_score`` across the case's IOC members. Opened
+    = earliest ``ioc_tags.created`` for the case_name. Derived at query
+    time so the view stays in sync with the latest enrichments without
+    a maintenance job. The ``iocs`` field carries the member values
+    (just strings) so the dashboard can resolve them on demand via
+    ``/show`` or ``/api/ui/enrich``.
+    """
+    database.init_db()
+    cases = database.list_cases_with_summary()
+    out: list[dict[str, Any]] = []
+    for case in cases:
+        name = case["case_name"]
+        members = database.list_iocs_for_case(name)
+        opened = case.get("opened_at")
+        if opened:
+            opened = str(opened).split(" ", 1)[0]  # date only
+        out.append({
+            "id": name,
+            "label": name,
+            "iocs": [m["value"] for m in members],
+            "ioc_count": int(case["ioc_count"]),
+            "severity": int(case["severity"]),
+            "opened": opened,
+        })
+    return out
+
+
+class CaseAssignRequest(BaseModel):
+    """Body for `PATCH /api/ui/iocs/{value}/case`."""
+
+    case: str | None = Field(
+        None,
+        description="Case label to assign. Empty / null detaches from any case.",
+    )
+
+
+@app.patch("/api/ui/iocs/{value}/case", dependencies=[Depends(require_token)])
+def ui_set_ioc_case(value: str, req: CaseAssignRequest) -> dict[str, Any]:
+    """Assign an IOC to a case (or detach it when ``case`` is empty).
+
+    Defangs the path value first so the dashboard can pass either form.
+    404 when the IOC isn't in the cache — we don't auto-create an empty
+    iocs row, the caller should enrich first.
+    """
+    refanged = defang_mod.refang(value)
+    database.init_db()
+    ok = database.set_ioc_case(refanged, req.case)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail=f"IOC {refanged!r} not found in cache — enrich first",
+        )
+    return {"ioc": refanged, "case": (req.case or None)}
+
+
+@app.delete("/api/ui/cases/{case}", dependencies=[Depends(require_token)])
+def ui_delete_case(case: str) -> dict[str, Any]:
+    """Detach every IOC from ``case`` and remove its tag rows.
+
+    The underlying IOCs and their enrichments are preserved — this only
+    nukes the case relationship. Idempotent: returns ``removed: 0`` for
+    an unknown case rather than 404 so the UI's delete-on-empty path
+    stays simple.
+    """
+    database.init_db()
+    removed = database.remove_case(case)
+    return {"case": case, "removed": int(removed)}
 
 
 @app.get("/enrich", dependencies=[Depends(require_token)])
