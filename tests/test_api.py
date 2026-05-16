@@ -473,3 +473,142 @@ def test_ui_enrich_carries_no_cache_param(client, monkeypatch):
     monkeypatch.setattr(api_mod.enrich, "enrich_ioc_async", _stub)
     client.get("/api/ui/enrich?ioc=8.8.8.8&no_cache=true")
     assert seen["no_cache"] is True
+
+
+# ---------------------------------------------------------------------------
+# /api/cache/{stats,prune,clear} — cache maintenance endpoints
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cache_db(monkeypatch, tmp_path):
+    """Tmp-path SQLite for the cache endpoints. Each test starts empty."""
+    from ioc_tool.core import database as _db
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
+    _db.init_db()
+    return _db
+
+
+def _seed_cache_row(db, ioc_value, source, age_days, score=0):
+    """Insert one enrichment row aged ``now - age_days``. Returns ioc_id."""
+    from datetime import datetime, timedelta
+    ioc_id = db.add_or_update_ioc(ioc_value, "ip")
+    ts = (datetime.now() - timedelta(days=age_days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = db.get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO enrichments (ioc_id, source, data, timestamp, score) VALUES (?,?,?,?,?)",
+        (ioc_id, source, "{}", ts, score),
+    )
+    conn.commit()
+    conn.close()
+    return ioc_id
+
+
+def test_cache_stats_empty(client, cache_db):
+    r = client.get("/api/cache/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ioc_count"] == 0
+    assert body["enrichment_count"] == 0
+    assert body["oldest_timestamp"] is None
+    assert body["per_source"] == []
+
+
+def test_cache_stats_populated(client, cache_db):
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=10)
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=1)
+    _seed_cache_row(cache_db, "1.1.1.1", "abuseipdb", age_days=5)
+    r = client.get("/api/cache/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ioc_count"] == 1
+    assert body["enrichment_count"] == 3
+    by_src = {row["source"]: row["rows"] for row in body["per_source"]}
+    assert by_src == {"vt": 2, "abuseipdb": 1}
+
+
+def test_cache_prune_uses_request_window(client, cache_db):
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=30)
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=2)
+    r = client.post("/api/cache/prune", json={"older_than_days": 10})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["used_older_than_days"] == 10
+    assert body["removed_by_age"] == 1
+
+
+def test_cache_prune_defaults_to_retention_env(client, cache_db, monkeypatch):
+    monkeypatch.setenv("RETENTION_DAYS", "5")
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=30)
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=1)
+    r = client.post("/api/cache/prune", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["used_older_than_days"] == 5
+    assert body["removed_by_age"] == 1
+
+
+def test_cache_prune_keep_last_caps_history(client, cache_db):
+    for hours in range(5):
+        _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=hours / 24)
+    r = client.post(
+        "/api/cache/prune",
+        json={"older_than_days": 365, "keep_last": 2},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["removed_by_age"] == 0
+    assert body["removed_by_keep_last"] == 3
+
+
+def test_cache_clear_by_source(client, cache_db):
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=1)
+    _seed_cache_row(cache_db, "1.1.1.1", "abuseipdb", age_days=1)
+    r = client.post("/api/cache/clear", json={"source": "vt"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scope"] == "source=vt"
+    assert body["removed"] == 1
+
+
+def test_cache_clear_by_ioc(client, cache_db):
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=1)
+    _seed_cache_row(cache_db, "2.2.2.2", "vt", age_days=1)
+    r = client.post("/api/cache/clear", json={"ioc": "1.1.1.1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scope"] == "ioc=1.1.1.1"
+    assert body["removed"] == 1
+
+
+def test_cache_clear_all_requires_all_true(client, cache_db):
+    _seed_cache_row(cache_db, "1.1.1.1", "vt", age_days=1)
+    r = client.post("/api/cache/clear", json={"all": True})
+    assert r.status_code == 200
+    assert r.json() == {"scope": "all", "removed": 1}
+
+
+def test_cache_clear_rejects_empty_filter(client, cache_db):
+    """No filter at all → 400, not an accidental wipe."""
+    r = client.post("/api/cache/clear", json={})
+    assert r.status_code == 400
+
+
+def test_cache_clear_rejects_multiple_filters(client, cache_db):
+    r = client.post(
+        "/api/cache/clear",
+        json={"source": "vt", "ioc": "1.1.1.1"},
+    )
+    assert r.status_code == 400
+
+
+def test_cache_endpoints_require_token(client, cache_db, monkeypatch):
+    """When SHADOWSCOPE_API_TOKEN is set, the endpoints reject unauth'd calls."""
+    monkeypatch.setenv("SHADOWSCOPE_API_TOKEN", "secret")
+    assert client.get("/api/cache/stats").status_code == 401
+    assert client.post("/api/cache/prune", json={}).status_code == 401
+    assert client.post("/api/cache/clear", json={"all": True}).status_code == 401
+    # With the right token, they pass through.
+    h = {"Authorization": "Bearer secret"}
+    assert client.get("/api/cache/stats", headers=h).status_code == 200

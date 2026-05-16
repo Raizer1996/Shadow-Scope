@@ -514,3 +514,235 @@ function Tweaks({ accent, setAccent, density, setDensity, patterns, setPatterns,
     </div>
   );
 }
+
+
+// ---------------------------------------------------------------------------
+// Cache — inspect / prune / wipe the SQLite enrichment store.
+//
+// Mirrors `shadowscope cache stats|prune|clear`. Read-only stats render on
+// mount; destructive actions go through a single confirm gate. Auth token
+// (if set) is pulled from sessionStorage just like shadowscopeFetch in
+// /static/shared/data.js — that way the banner-captured token works here too.
+// ---------------------------------------------------------------------------
+
+function _cacheAuthHeaders() {
+  const headers = {};
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  return headers;
+}
+
+function CacheView() {
+  const [stats, setStats] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  // Prune form state.
+  const [pruneDays, setPruneDays] = useState("");      // blank → server default
+  const [pruneKeep, setPruneKeep] = useState("");      // blank → no cap
+
+  // Clear form state — exactly one of these is sent.
+  const [clearSource, setClearSource] = useState("");
+  const [clearIoc, setClearIoc] = useState("");
+
+  const loadStats = () => {
+    setErr(null);
+    fetch("/api/cache/stats", { headers: _cacheAuthHeaders() })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+      .then(setStats)
+      .catch(e => setErr(String(e.message || e)));
+  };
+
+  useEffect(() => { loadStats(); }, []);
+
+  const flash = (text) => {
+    setMsg(text);
+    setTimeout(() => setMsg(null), 4000);
+  };
+
+  const postJSON = (path, body) => {
+    setBusy(true);
+    setErr(null);
+    return fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._cacheAuthHeaders() },
+      body: JSON.stringify(body),
+    })
+      .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, body: j })))
+      .then(({ ok, status, body }) => {
+        if (!ok) throw new Error(body.detail || ("HTTP " + status));
+        return body;
+      })
+      .finally(() => setBusy(false));
+  };
+
+  const doPrune = () => {
+    const payload = {};
+    if (pruneDays.trim()) payload.older_than_days = parseFloat(pruneDays);
+    if (pruneKeep.trim()) payload.keep_last = parseInt(pruneKeep, 10);
+    if (!confirm(
+      "Prune rows older than " +
+      (payload.older_than_days ?? "RETENTION_DAYS (default 90)") + " days" +
+      (payload.keep_last ? ", keep last " + payload.keep_last + " per (ioc,source)" : "") +
+      "?"
+    )) return;
+    postJSON("/api/cache/prune", payload)
+      .then(body => {
+        flash(
+          "pruned " + body.removed_by_age + " by age (" + body.used_older_than_days + "d)" +
+          (body.removed_by_keep_last ? ", " + body.removed_by_keep_last + " by keep-last" : "")
+        );
+        loadStats();
+      })
+      .catch(e => setErr(String(e.message || e)));
+  };
+
+  const doClearAll = () => {
+    if (!confirm("WIPE every enrichment row in this workspace? This cannot be undone.")) return;
+    if (!confirm("Really? Type-confirm step skipped — second click commits.")) return;
+    postJSON("/api/cache/clear", { all: true })
+      .then(body => { flash("cleared " + body.removed + " row(s) — " + body.scope); loadStats(); })
+      .catch(e => setErr(String(e.message || e)));
+  };
+
+  const doClearSource = () => {
+    const s = clearSource.trim();
+    if (!s) { setErr("pick a source first"); return; }
+    if (!confirm("Delete every cached row from source '" + s + "'?")) return;
+    postJSON("/api/cache/clear", { source: s })
+      .then(body => { flash("cleared " + body.removed + " row(s) — " + body.scope); setClearSource(""); loadStats(); })
+      .catch(e => setErr(String(e.message || e)));
+  };
+
+  const doClearIoc = () => {
+    const v = clearIoc.trim();
+    if (!v) { setErr("paste an IOC value first"); return; }
+    if (!confirm("Delete every cached row for IOC '" + v + "'?")) return;
+    postJSON("/api/cache/clear", { ioc: v })
+      .then(body => { flash("cleared " + body.removed + " row(s) — " + body.scope); setClearIoc(""); loadStats(); })
+      .catch(e => setErr(String(e.message || e)));
+  };
+
+  const fmtBytes = (n) => {
+    if (n == null) return "—";
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1024 / 1024).toFixed(2) + " MB";
+  };
+
+  return (
+    <div className="cache-view">
+      <div className="batch-toolbar">
+        <span className="bt-title">CACHE · enrichment maintenance</span>
+        <div className="bt-group">
+          <button className="pill" onClick={loadStats} disabled={busy}>refresh</button>
+          {msg && <span className="bt-label" style={{ color: "var(--ok, #6cf08a)" }}>{msg}</span>}
+          {err && <span className="bt-label" style={{ color: "var(--bad, #ff7474)" }}>err: {err}</span>}
+        </div>
+      </div>
+
+      {!stats && !err && <div className="dim" style={{ padding: 16 }}>loading…</div>}
+
+      {stats && (
+        <div className="cache-grid">
+          <section className="cache-panel">
+            <h3>workspace</h3>
+            <table className="kv">
+              <tbody>
+                <tr><td>DB path</td><td className="mono">{stats.db_path}</td></tr>
+                <tr><td>size</td><td>{fmtBytes(stats.db_size_bytes)}</td></tr>
+                <tr><td>IOCs</td><td>{stats.ioc_count}</td></tr>
+                <tr><td>enrichment rows</td><td>{stats.enrichment_count}</td></tr>
+                <tr><td>oldest</td><td className="mono">{stats.oldest_timestamp || "—"}</td></tr>
+                <tr><td>newest</td><td className="mono">{stats.newest_timestamp || "—"}</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section className="cache-panel">
+            <h3>rows per source</h3>
+            {stats.per_source.length === 0
+              ? <div className="dim">no rows cached</div>
+              : (
+                <table className="kv">
+                  <tbody>
+                    {stats.per_source.map(r => (
+                      <tr key={r.source}>
+                        <td>{r.source}</td>
+                        <td style={{ textAlign: "right" }}>{r.rows}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+          </section>
+
+          <section className="cache-panel">
+            <h3>prune</h3>
+            <div className="cache-form">
+              <label>older than (days)
+                <input
+                  type="number"
+                  step="0.5"
+                  placeholder="default: RETENTION_DAYS or 90"
+                  value={pruneDays}
+                  onChange={e => setPruneDays(e.target.value)}
+                />
+              </label>
+              <label>keep last N per (ioc, source)
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="optional cap"
+                  value={pruneKeep}
+                  onChange={e => setPruneKeep(e.target.value)}
+                />
+              </label>
+              <button className="pill warn" onClick={doPrune} disabled={busy}>prune</button>
+            </div>
+            <div className="dim" style={{ marginTop: 8 }}>
+              age-prune deletes rows older than the cutoff; keep-last caps surviving history per pair.
+            </div>
+          </section>
+
+          <section className="cache-panel">
+            <h3>clear</h3>
+            <div className="cache-form">
+              <label>by source
+                <input
+                  type="text"
+                  placeholder="e.g. virustotal"
+                  value={clearSource}
+                  onChange={e => setClearSource(e.target.value)}
+                  list="cache-source-list"
+                />
+                <datalist id="cache-source-list">
+                  {stats.per_source.map(r => <option key={r.source} value={r.source} />)}
+                </datalist>
+              </label>
+              <button className="pill warn" onClick={doClearSource} disabled={busy}>clear source</button>
+
+              <label>by IOC value
+                <input
+                  type="text"
+                  placeholder="e.g. 1.1.1.1"
+                  value={clearIoc}
+                  onChange={e => setClearIoc(e.target.value)}
+                />
+              </label>
+              <button className="pill warn" onClick={doClearIoc} disabled={busy}>clear ioc</button>
+
+              <button className="pill bad" onClick={doClearAll} disabled={busy}>WIPE ALL</button>
+            </div>
+            <div className="dim" style={{ marginTop: 8 }}>
+              destructive — confirms before hitting the API. wipe-all double-confirms.
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}

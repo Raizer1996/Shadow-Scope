@@ -106,6 +106,60 @@ class ExtractRequest(BaseModel):
     )
 
 
+class CachePerSourceRow(BaseModel):
+    source: str
+    rows: int
+
+
+class CacheStatsResponse(BaseModel):
+    """Snapshot of the enrichment cache for the active workspace."""
+
+    db_path: str
+    db_size_bytes: int
+    ioc_count: int
+    enrichment_count: int
+    oldest_timestamp: str | None
+    newest_timestamp: str | None
+    per_source: list[CachePerSourceRow]
+
+
+class CachePruneRequest(BaseModel):
+    """Request body for ``POST /api/cache/prune``."""
+
+    older_than_days: float | None = Field(
+        default=None,
+        description="Retention window in days (float supported). Defaults to RETENTION_DAYS env or 90.",
+    )
+    keep_last: int | None = Field(
+        default=None,
+        description="After age-pruning, cap rows per (ioc, source) to the newest N.",
+    )
+
+
+class CachePruneResponse(BaseModel):
+    used_older_than_days: float
+    used_keep_last: int
+    removed_by_age: int
+    removed_by_keep_last: int
+
+
+class CacheClearRequest(BaseModel):
+    """Request body for ``POST /api/cache/clear``.
+
+    Exactly one of ``source`` / ``ioc`` / ``all`` must be set, mirroring
+    the CLI's safety check so callers can't accidentally wipe everything.
+    """
+
+    source: str | None = None
+    ioc: str | None = None
+    all: bool = False
+
+
+class CacheClearResponse(BaseModel):
+    scope: str  # human-readable description of what was deleted
+    removed: int
+
+
 class HealthResponse(BaseModel):
     status: str
 
@@ -745,6 +799,88 @@ def show_cached(
         "final_score": final_score,
     }
     return _apply_output_defang(result, defang)
+
+
+@app.get(
+    "/api/cache/stats",
+    response_model=CacheStatsResponse,
+    dependencies=[Depends(require_token)],
+)
+def cache_stats_endpoint() -> CacheStatsResponse:
+    """Return row counts, on-disk size, and per-source breakdown.
+
+    Mirrors `shadowscope cache stats`. Read-only — safe to expose to any
+    authenticated UI consumer; never returns enrichment payloads or
+    secrets, only aggregate counts.
+    """
+    return CacheStatsResponse(**database.cache_stats())
+
+
+@app.post(
+    "/api/cache/prune",
+    response_model=CachePruneResponse,
+    dependencies=[Depends(require_token)],
+)
+def cache_prune_endpoint(req: CachePruneRequest) -> CachePruneResponse:
+    """Delete enrichment rows older than `older_than_days` then optionally
+    cap per (ioc, source) to the newest `keep_last`.
+
+    No request body fields → uses the same defaults as the CLI:
+    `RETENTION_DAYS` env or 90 days, with no per-key cap. Returns the
+    exact retention window used so UI clients can display it.
+    """
+    if req.older_than_days is not None:
+        days = float(req.older_than_days)
+    else:
+        try:
+            days = float(os.getenv("RETENTION_DAYS", "90"))
+        except ValueError:
+            days = 90.0
+    keep_last = int(req.keep_last or 0)
+
+    removed_age = database.prune_enrichments_older_than(days)
+    removed_cap = database.prune_enrichments_keep_last_n(keep_last) if keep_last else 0
+    # Match the CLI's last-prune bookkeeping so the auto-prune janitor
+    # backs off until tomorrow.
+    database.set_meta("last_prune", datetime.now(timezone.utc).isoformat())
+    return CachePruneResponse(
+        used_older_than_days=days,
+        used_keep_last=keep_last,
+        removed_by_age=removed_age,
+        removed_by_keep_last=removed_cap,
+    )
+
+
+@app.post(
+    "/api/cache/clear",
+    response_model=CacheClearResponse,
+    dependencies=[Depends(require_token)],
+)
+def cache_clear_endpoint(req: CacheClearRequest) -> CacheClearResponse:
+    """Wipe rows by source, by IOC value, or wholesale.
+
+    Exactly one of ``source`` / ``ioc`` / ``all`` must be set. The check
+    is enforced at the API layer so we can return a clean HTTP 400 rather
+    than the ValueError the DB function would raise.
+    """
+    filters = [bool(req.source), bool(req.ioc), bool(req.all)]
+    if sum(filters) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Pass exactly one of: source, ioc, all=true",
+        )
+    if req.all:
+        scope = "all"
+        removed = database.clear_enrichments(all=True)
+    elif req.source:
+        scope = f"source={req.source}"
+        removed = database.clear_enrichments(source=req.source)
+    else:
+        # req.ioc is set per the sum-of-filters check above.
+        assert req.ioc is not None
+        scope = f"ioc={req.ioc}"
+        removed = database.clear_enrichments(ioc_value=req.ioc)
+    return CacheClearResponse(scope=scope, removed=removed)
 
 
 @app.get("/sources", dependencies=[Depends(require_token)])
