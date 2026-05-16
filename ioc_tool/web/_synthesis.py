@@ -172,8 +172,11 @@ def synth_ports(modules_raw: dict[str, Any]) -> list[dict[str, Any]]:
     for b in (shodan.get("data") or []):
         if not isinstance(b, dict):
             continue
+        raw_port = b.get("port")
+        if raw_port is None:
+            continue
         try:
-            port = int(b.get("port"))
+            port = int(raw_port)
         except (TypeError, ValueError):
             continue
         transport = (b.get("transport") or "tcp").lower()
@@ -189,8 +192,11 @@ def synth_ports(modules_raw: dict[str, Any]) -> list[dict[str, Any]]:
     for s in (censys.get("services") or []):
         if not isinstance(s, dict):
             continue
+        raw_port = s.get("port")
+        if raw_port is None:
+            continue
         try:
-            port = int(s.get("port"))
+            port = int(raw_port)
         except (TypeError, ValueError):
             continue
         transport = (s.get("transport_protocol") or "tcp").lower()
@@ -262,8 +268,13 @@ def synth_anon(modules_raw: dict[str, Any]) -> dict[str, Any] | None:
     aipdb = _abuseipdb_data(modules_raw)
     tor = _data(modules_raw, "TOR")
 
-    ipinfo_priv = ipinfo.get("privacy") if isinstance(ipinfo.get("privacy"), dict) else {}
-    abstract_sec = abstract.get("security") if isinstance(abstract.get("security"), dict) else {}
+    # Single-assign so mypy can narrow the type — otherwise the duplicated
+    # `.get()` calls in the ternary make it think the result might be `None`
+    # on later attribute access.
+    _priv = ipinfo.get("privacy")
+    ipinfo_priv: dict = _priv if isinstance(_priv, dict) else {}
+    _sec = abstract.get("security")
+    abstract_sec: dict = _sec if isinstance(_sec, dict) else {}
 
     def collect(flag_key_per_src: dict[str, Any]) -> list[str]:
         return [src for src, val in flag_key_per_src.items() if bool(val)]
@@ -694,13 +705,14 @@ def synth_core_cve(modules_raw: dict[str, Any]) -> dict[str, Any] | None:
     vector_parsed: list[dict[str, str]] = []
     if cvss31_list and isinstance(cvss31_list[0], dict):
         data = cvss31_list[0].get("cvssData") or {}
+        vector_str: str = data.get("vectorString") or ""
         cvss = {
             "version": data.get("version") or "",
-            "vector": data.get("vectorString") or "",
+            "vector": vector_str,
             "base_score": data.get("baseScore"),
             "severity": data.get("baseSeverity") or "",
         }
-        vector_parsed = _parse_cvss_vector(cvss["vector"])
+        vector_parsed = _parse_cvss_vector(vector_str)
 
     weaknesses = nvd.get("weaknesses") or []
     cwes = []
