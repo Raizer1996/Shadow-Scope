@@ -458,6 +458,7 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
     {"id": "Shodan",        "env": "SHODAN_API_KEY",            "types": ["ip"]},
     {"id": "IPQS",          "env": "IPQS_API_KEY",              "types": ["ip"]},
     {"id": "IPinfo",        "env": "IPINFO_API_KEY",            "types": ["ip"],            "anonymous_ok": True},
+    {"id": "Censys",        "env": "CENSYS_API_KEY",            "types": ["ip"]},
     {"id": "GreyNoise",     "env": "GREYNOISE_API_KEY",         "types": ["ip"]},
     {"id": "OTX",           "env": "OTX_API_KEY",               "types": ["ip", "domain", "url", "hash"]},
     {"id": "URLscan",       "env": "URLSCAN_API_KEY",           "types": ["ip", "domain", "url"]},

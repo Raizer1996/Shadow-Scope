@@ -211,21 +211,24 @@ function collectThreats(ioc) {
   return Array.from(seen.values()).sort((a, b) => order[a.kind] - order[b.kind]);
 }
 
-function NamedThreatStrip({ ioc }) {
+function NamedThreatStrip({ ioc, compact = false }) {
   const threats = collectThreats(ioc);
   if (threats.length === 0) return null;
 
   const adv = threats.filter(t => t.kind === "adversary");
   const fam = threats.filter(t => t.kind === "family");
   const thr = threats.filter(t => t.kind === "threat");
-  const tag = threats.filter(t => t.kind === "tag").slice(0, 12);
+  // Tag count caps lower in compact mode — hero-meta is real-estate constrained.
+  const tag = threats.filter(t => t.kind === "tag").slice(0, compact ? 6 : 12);
 
   return (
-    <section className="threat-strip">
+    <section className={`threat-strip ${compact ? "threat-strip-compact" : ""}`}>
       <div className="ts-head">
-        <span className="sec-title glitch" data-text="NAMED ATTRIBUTION">NAMED ATTRIBUTION</span>
+        <span className={compact ? "sec-title-sm" : "sec-title glitch"} data-text="NAMED ATTRIBUTION">NAMED ATTRIBUTION</span>
         <span className="sec-meta">{adv.length} adv · {fam.length} fam · {thr.length} threat · {tag.length} tag</span>
-        <span className="sec-meta dim">de-duplicated across OTX / VT / Pulsedive / ThreatFox / URLhaus / MalwareBazaar</span>
+        {!compact && (
+          <span className="sec-meta dim">de-duplicated across OTX / VT / Pulsedive / ThreatFox / URLhaus / MalwareBazaar</span>
+        )}
       </div>
       <div className="ts-body">
         {adv.length > 0 && <ThreatRow kind="adversary" items={adv} />}

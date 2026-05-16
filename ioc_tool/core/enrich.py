@@ -504,7 +504,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
     results: dict[str, Any] = {}
-    scores: list[int] = []
+    scores: list[tuple[str, int]] = []
     for item in raw_results:
         if isinstance(item, BaseException):
             # Source crashed in the thread — swallow per the never-crash contract.
@@ -514,7 +514,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         display_name, data, src_score, contributes = item
         results[display_name] = {'score': src_score, 'data': data}
         if contributes:
-            scores.append(src_score)
+            scores.append((display_name, src_score))
 
     # ---------------------------------------------------------------------
     # Local heuristics — pure functions on data we already have.
@@ -553,7 +553,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         )
         results['Heuristics'] = {'score': composite, 'data': heuristics_data}
         if composite > 0:
-            scores.append(composite)
+            scores.append(('Heuristics', composite))
 
     final_score = score.calculate_final_risk(scores)
     # Stamp the latest composite onto the iocs row — drives watch-mode
