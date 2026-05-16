@@ -23,8 +23,8 @@ function App() {
   const [density, setDensity] = useState("normal");
   const [llm, setLlm] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [results, setResults] = useState(window.IOC_DB.slice(0, 8));
-  const [activeIocId, setActiveIocId] = useState("ioc_01");
+  const [results, setResults] = useState([]);
+  const [activeIocId, setActiveIocId] = useState(null);
   const [diffPair, setDiffPair] = useState(["ioc_01", "ioc_03"]);
   const [enriching, setEnriching] = useState(false);
   const [tweaksOpen, setTweaksOpen] = useState(false);
@@ -56,6 +56,30 @@ function App() {
   // Reset disabled sources when navigating to a different IOC
   useEffect(() => { setDisabledSources(new Set()); }, [activeIocId]);
 
+  // Seed the recent strip from real cache on mount. Silent failure —
+  // dashboard renders the empty-state prompt and waits for the user to
+  // enrich something. We never fall back to demo fixtures here so the
+  // UI always reflects actual workspace state.
+  useEffect(() => {
+    if (!window.shadowscopeRecent) return;
+    window.shadowscopeRecent(8)
+      .then(rows => {
+        if (!Array.isArray(rows) || rows.length === 0) return;
+        setResults(rows);
+        setActiveIocId(rows[0].id);
+      })
+      .catch(err => {
+        console.warn("[shadowscope] /api/ui/recent failed:", err.message);
+      });
+  }, []);
+
+  // Clear just the recent strip (UI state). Does NOT touch the SQLite
+  // cache — that lives behind the Cache tab's explicit wipe action.
+  const clearRecentStrip = () => {
+    setResults([]);
+    setActiveIocId(null);
+  };
+
   useEffect(() => {
     const handler = (e) => {
       if (e.data?.type === "__activate_edit_mode") setTweaksOpen(true);
@@ -66,51 +90,31 @@ function App() {
     return () => window.removeEventListener("message", handler);
   }, []);
 
-  // Pivot — given a kind + value, find or fabricate an IOC and switch to it.
+  // Pivot — drilling a chip (tag / malware family / registrar). First try
+  // to jump to a record already on the strip; otherwise treat the value
+  // as a new IOC and enrich it. The backend is the source of truth — we
+  // no longer fall back to a demo corpus.
   const onPivot = (kind, value) => {
     const v = String(value).toLowerCase();
-    let match = null;
-
-    // Check every IOC's modules for any field matching the value (fuzzy across kinds)
-    for (const r of window.IOC_DB) {
-      if (r.id === activeIocId) continue;
-      if (r.ioc === value) { match = r; break; }
-      const hit = Object.values(r.modules).some(m => {
-        const d = m.data || {};
-        if (typeof d.malware === "string" && d.malware.toLowerCase() === v) return true;
-        if (typeof d.family  === "string" && d.family.toLowerCase()  === v) return true;
-        if (Array.isArray(d.tags) && d.tags.some(t => String(t).toLowerCase() === v)) return true;
-        if (typeof d.registrar === "string" && d.registrar.toLowerCase() === v) return true;
-        // Also match malware family fuzzy: "emotet" tag matches "Emotet" family
-        if (kind === "tag" || kind === "malware") {
-          if (typeof d.malware === "string" && d.malware.toLowerCase().includes(v)) return true;
-          if (typeof d.family  === "string" && d.family.toLowerCase().includes(v))  return true;
-        }
-        return false;
-      });
-      if (hit) { match = r; break; }
-    }
-
-    if (match) {
-      setResults(prev => prev.find(r => r.id === match.id) ? prev : [match, ...prev]);
-      setActiveIocId(match.id);
+    const inStrip = results.find(r => r.id !== activeIocId && r.ioc.toLowerCase() === v);
+    if (inStrip) {
+      setActiveIocId(inStrip.id);
       setTab("enrich");
-      // Brief flash to confirm pivot happened
-      requestAnimationFrame(() => {
-        const main = document.querySelector(".main");
-        if (main) {
-          main.classList.add("pivot-flash");
-          setTimeout(() => main.classList.remove("pivot-flash"), 600);
-        }
-      });
-    } else {
-      // Surface "no pivot found" toast briefly
-      const toast = document.createElement("div");
-      toast.className = "pivot-toast";
-      toast.textContent = `// no related IOC for ${kind}=${value}`;
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 2200);
+      return;
     }
+    // Only enrich values that look like IOCs (ip/domain/url/hash/cve).
+    // Free-form chips (tag/malware/registrar) have no enrichable form —
+    // surface a toast so the click doesn't appear to do nothing.
+    const looksEnrichable = /^([\w.-]+\.[a-z]{2,}|\d+\.\d+\.\d+\.\d+|[a-f0-9]{32,}|cve-\d{4}-\d+)$/i.test(value);
+    if (looksEnrichable) {
+      onEnrich(value);
+      return;
+    }
+    const toast = document.createElement("div");
+    toast.className = "pivot-toast";
+    toast.textContent = `// "${kind}=${value}" not directly enrichable`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2200);
   };
 
   useEffect(() => {
@@ -162,10 +166,14 @@ function App() {
         setActiveIocId(record.id);
       })
       .catch((err) => {
-        console.warn("[shadowscope] /api/ui/enrich failed — falling back to mock:", err.message);
-        const fab = fabricateRecord(value);
-        setResults(prev => [fab, ...prev.filter(r => r.id !== fab.id && r.ioc !== fab.ioc)]);
-        setActiveIocId(fab.id);
+        console.warn("[shadowscope] /api/ui/enrich failed:", err.message);
+        // Show a transient toast and leave the strip unchanged. Falling
+        // back to fake records would hide real backend / auth problems.
+        const toast = document.createElement("div");
+        toast.className = "pivot-toast";
+        toast.textContent = `// enrich failed: ${err.message.slice(0, 120)}`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3500);
       })
       .finally(() => {
         setEnriching(false);
@@ -183,7 +191,7 @@ function App() {
       <InputBar onEnrich={onEnrich} defang={defang} setDefang={setDefang} llm={llm} setLlm={setLlm} enriching={enriching} />
 
       <main className="main">
-        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} />}
+        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} />}
         {tab === "batch"  && <BatchView results={results} setActiveIocId={setActiveIocId} setTab={setTab} fmt={fmt} />}
         {tab === "watch"  && <WatchView fmt={fmt} />}
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}
@@ -198,28 +206,6 @@ function App() {
       {tweaksOpen && <Tweaks accent={accent} setAccent={setAccent} density={density} setDensity={setDensity} patterns={patterns} setPatterns={setPatterns} onClose={() => { setTweaksOpen(false); window.parent.postMessage({ type: "__edit_mode_dismissed" }, "*"); }} />}
     </div>
   );
-}
-
-function fabricateRecord(text) {
-  // Hash-ish deterministic score
-  let h = 0; for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
-  const score = 30 + (h % 60);
-  const type = /^\d+\.\d+\.\d+\.\d+$/.test(text) ? "ip"
-             : /^[a-f0-9]{64}$/i.test(text) ? "sha256"
-             : /^CVE-/i.test(text) ? "cve"
-             : /^AS\d+/i.test(text) ? "asn"
-             : "domain";
-  const id = "ioc_fab_" + h.toString(16).slice(0,6);
-  return {
-    id, ioc: text, type, final_score: score, enriched_at: new Date().toISOString(), prev_score: 0, case: null,
-    agreement: { sources_total: 4, sources_flagged: score >= 50 ? 3 : 1, sources_missed: score >= 50 ? 1 : 3, consensus: score >= 60 ? "high" : "medium" },
-    modules: {
-      VirusTotal:  { score: Math.max(0, score - 10), detail: `${Math.floor(score/15)} engines malicious`, data: {} },
-      Pulsedive:   { score: Math.max(0, score - 5),  detail: `risk=${score >= 60 ? "high" : "medium"}`,   data: {} },
-      WHOIS:       { score: 50, detail: "created 2026-04-21 · 24d old", data: {} },
-      Heuristics:  { score: score, detail: "NRD(24d)", data: { nrd: { age_days: 24, score } } }
-    }
-  };
 }
 
 // Live source-status badge — fetches /api/ui/sources once on mount and

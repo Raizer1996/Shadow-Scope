@@ -749,10 +749,12 @@ function AlertTicker({ feed, setActiveIoc, setTab, fmt }) {
   const alerts = feed.filter(f => f.score >= 60).slice(0, 14);
   if (alerts.length === 0) return null;
 
-  const onClick = (a) => {
-    // Try to map back to IOC_DB
-    const match = window.IOC_DB.find(r => r.ioc.startsWith(a.ioc.slice(0, 10)) || a.ioc.startsWith(r.ioc.slice(0, 10)));
-    if (match) { setActiveIoc(match.id); setTab("enrich"); }
+  const onClick = (_a) => {
+    // The WATCH_FEED items don't share IDs with real cached IOCs (this
+    // ticker is synthetic), so there's nothing meaningful to navigate
+    // to. Treat the click as a tab-switch hint and let the user enrich
+    // the value manually if they want details.
+    setTab("watch");
   };
 
   return (
@@ -785,21 +787,22 @@ function AlertTicker({ feed, setActiveIoc, setTab, fmt }) {
 // ─────────── Pivot panel: related IOCs ───────────
 
 function PivotPanel({ ioc, results, setActiveIocId }) {
-  // Find related IOCs by case match + shared malware family
-  const sameCase = ioc.case ? window.IOC_DB.filter(r => r.case === ioc.case && r.id !== ioc.id) : [];
+  // Find related IOCs across whatever is currently on the recent strip.
+  // A future iteration can back this with a /api/ui/pivot endpoint that
+  // queries the SQLite cache for matches across the whole workspace.
+  const corpus = (results || []).filter(r => r.id !== ioc.id);
+  const sameCase = ioc.case ? corpus.filter(r => r.case === ioc.case) : [];
   const family = Object.values(ioc.modules).find(m => m.data?.malware)?.data?.malware ||
                  Object.values(ioc.modules).find(m => m.data?.family)?.data?.family;
-  const sameFamily = family ? window.IOC_DB.filter(r => {
-    if (r.id === ioc.id) return false;
-    return Object.values(r.modules).some(m => m.data?.malware === family || m.data?.family === family);
-  }) : [];
+  const sameFamily = family ? corpus.filter(r =>
+    Object.values(r.modules).some(m => m.data?.malware === family || m.data?.family === family)
+  ) : [];
 
   // Same WHOIS registrar
   const registrar = ioc.modules.WHOIS?.data?.registrar;
-  const sameRegistrar = registrar ? window.IOC_DB.filter(r => {
-    if (r.id === ioc.id) return false;
-    return r.modules.WHOIS?.data?.registrar === registrar;
-  }) : [];
+  const sameRegistrar = registrar ? corpus.filter(r =>
+    r.modules.WHOIS?.data?.registrar === registrar
+  ) : [];
 
   const groups = [
     sameCase.length      && { title: "SAME CASE",      pivot: ioc.case || "—",        items: sameCase },
@@ -949,28 +952,12 @@ window.recomputeComposite = recomputeComposite;
 //
 // IpCorePanel renders the IP identity column (country, ASN, org, hostnames,
 // open ports, tags). NetworkGeoPanel renders the Leaflet map. Both consume
-// ioc.geo (live backend) when present, and fall back to the mock
-// window.SHODAN_DATA[ioc.id] used by the design prototype so screenshots
-// still render with the canned eight-IOC set.
+// ``ioc.geo`` which the backend synthesises from Shodan + IPinfo modules.
+// The panels are hidden upstream (``hasGeo``) when geo is absent, so this
+// helper only needs to return either the real block or ``null``.
 
 function _geoFor(ioc) {
   if (ioc.geo && (ioc.geo.lat != null || ioc.geo.country)) return ioc.geo;
-  const mock = window.SHODAN_DATA && window.SHODAN_DATA[ioc.id];
-  if (mock) {
-    return {
-      country: mock.country,
-      country_name: mock.country_name,
-      city: mock.city,
-      region: mock.region || "",
-      lat: mock.lat,
-      lon: mock.lon,
-      asn: mock.asn,
-      org: mock.org,
-      hostnames: mock.hostnames || [],
-      ports: (mock.ports || []).map(p => typeof p === "object" ? p : { port: p }),
-      tags: mock.tags || []
-    };
-  }
   return null;
 }
 

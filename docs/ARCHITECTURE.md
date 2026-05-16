@@ -211,6 +211,7 @@ All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. 
 | POST   | `/extract` | Body `{"text": "..."}` — pull IOCs from a text blob, then enrich each |
 | GET    | `/show?ioc=<value>[&defang=true]` | Return cached enrichment without refetching — 404 if not in cache |
 | GET    | `/sources` | Map of `source_name → bool` indicating whether the API key is set. **Never returns key values.** |
+| GET    | `/api/ui/recent?limit=N` | Newest cached IOCs (default 8, max 50) reshaped for the dashboard's recent strip. Reads `iocs` desc by `last_seen`, rebuilds modules from cache — no API spend. Empty list when the workspace has never been enriched. |
 | GET    | `/ui` | Dashboard SPA shell (HTML). No auth — the data behind it is what's gated. |
 | GET    | `/static/*` | Dashboard CSS / JS assets. No auth. |
 
@@ -252,6 +253,8 @@ The dashboard (`GET /ui`) is a single-page UI served from `ioc_tool/web/static/`
 ```
 
 The dashboard reads `?token=<v>` from `window.location.search` on load and injects it into every fetch as `Authorization: Bearer <v>`. The HTML sets `<meta name="referrer" content="no-referrer">` and ShadowScope does not emit `X-Frame-Options` / `Content-Security-Policy: frame-ancestors`, so embedding works out of the box. Lock down CORS (`SHADOWSCOPE_CORS_ORIGINS`) to the embedding dashboard's origin in production.
+
+**Recent strip** — the row of score pills at the top of the Enrich tab seeds from `/api/ui/recent` on mount (newest 8 cached IOCs), then prepends each new enrichment in front. A fresh workspace shows an empty-state prompt instead of demo data, so the strip always reflects real cache state. The "clear strip" button next to the count is **view-only**: it resets the React `results` array but leaves SQLite untouched. To delete cached enrichments use the Cache tab → `/api/cache/clear` (gated, requires a filter — by source / IOC / `all=true`).
 
 ## Container deployment
 

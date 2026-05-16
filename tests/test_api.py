@@ -612,3 +612,71 @@ def test_cache_endpoints_require_token(client, cache_db, monkeypatch):
     # With the right token, they pass through.
     h = {"Authorization": "Bearer secret"}
     assert client.get("/api/cache/stats", headers=h).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# /api/ui/recent — dashboard recent strip seed
+# ---------------------------------------------------------------------------
+
+
+def test_ui_recent_empty_workspace_returns_empty_list(client, cache_db):
+    """Fresh workspace → []. Dashboard renders the empty-state prompt."""
+    r = client.get("/api/ui/recent")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_ui_recent_returns_newest_first(client, cache_db):
+    """Two IPs, second seeded with newer last_seen → comes first."""
+    _seed_cache_row(cache_db, "1.1.1.1", "virustotal", age_days=5, score=10)
+    _seed_cache_row(cache_db, "2.2.2.2", "virustotal", age_days=1, score=20)
+    # add_or_update_ioc bumps last_seen on touch — re-touch the second
+    # IOC so it definitively ranks newest.
+    cache_db.add_or_update_ioc("2.2.2.2", "ip")
+    r = client.get("/api/ui/recent")
+    assert r.status_code == 200
+    rows = r.json()
+    assert [row["ioc"] for row in rows] == ["2.2.2.2", "1.1.1.1"]
+    # Each row carries the brutalist-UI shape contract.
+    for row in rows:
+        assert {"id", "ioc", "type", "final_score", "modules", "enriched_at"} <= row.keys()
+
+
+def test_ui_recent_respects_limit(client, cache_db):
+    for i in range(5):
+        _seed_cache_row(cache_db, f"10.0.0.{i}", "virustotal", age_days=i, score=0)
+    r = client.get("/api/ui/recent", params={"limit": 2})
+    assert r.status_code == 200
+    assert len(r.json()) == 2
+
+
+def test_ui_recent_skips_iocs_with_no_enrichments(client, cache_db):
+    """An ``iocs`` row without any enrichment rows isn't useful — omit it."""
+    cache_db.add_or_update_ioc("9.9.9.9", "ip")  # row exists, no enrichments
+    _seed_cache_row(cache_db, "1.1.1.1", "virustotal", age_days=1, score=50)
+    r = client.get("/api/ui/recent")
+    assert r.status_code == 200
+    iocs = [row["ioc"] for row in r.json()]
+    assert iocs == ["1.1.1.1"]
+
+
+def test_ui_recent_normalises_timestamp_to_iso(client, cache_db):
+    """`enriched_at` must end in `Z` so the JS Relative component parses it."""
+    _seed_cache_row(cache_db, "1.1.1.1", "virustotal", age_days=1, score=0)
+    r = client.get("/api/ui/recent")
+    rows = r.json()
+    assert rows[0]["enriched_at"].endswith("Z")
+    assert "T" in rows[0]["enriched_at"]
+
+
+def test_ui_recent_requires_token(client, cache_db, monkeypatch):
+    monkeypatch.setenv("SHADOWSCOPE_API_TOKEN", "secret")
+    assert client.get("/api/ui/recent").status_code == 401
+    h = {"Authorization": "Bearer secret"}
+    assert client.get("/api/ui/recent", headers=h).status_code == 200
+
+
+def test_ui_recent_rejects_out_of_range_limit(client, cache_db):
+    """limit must be 1..50 — FastAPI enforces this at the route layer."""
+    assert client.get("/api/ui/recent", params={"limit": 0}).status_code == 422
+    assert client.get("/api/ui/recent", params={"limit": 999}).status_code == 422
