@@ -398,3 +398,37 @@
   width: 12px !important;
   height: 16px !important;
 }
+
+/* ───────── 17. Score 100 — scale down so 3 digits fit the box
+   Base font is 168px tuned for 2-digit values. At 100 the third digit
+   overflows the .score-block column (≈280px wide at typical hero
+   layout). Targeted shrink via the data-score attribute already set
+   on .score-num-big. Scoped to exactly "100" — every other 3-char
+   path (shouldn't exist for a 0-100 score, but defensive) is untouched. */
+.score-num-big[data-score="100"] {
+  font-size: 116px !important;
+  letter-spacing: -0.09em !important;
+  padding: 42px 0 30px !important;
+}
+
+/* ───────── 18. Source-attribution row alignment + continuous underline
+   Root cause: `.src-score` sets `display:flex` on a <td>, which yanks
+   the cell out of table-cell layout. Result: (a) its content sits
+   slightly higher than middle-aligned siblings and (b) its
+   border-bottom renders at a different y than other tds → the dotted
+   row underline breaks at the score column.
+
+   Fix: revert the score cell to a normal table-cell. The score number
+   and bar are already inline-block; we just add vertical-align:middle
+   and a left margin on the bar to recover the visual `gap: 8px`. */
+.src-table td.src-score {
+  display: table-cell !important;
+  white-space: nowrap;
+}
+.src-score-num,
+.src-score-bar {
+  vertical-align: middle !important;
+}
+.src-score-bar {
+  margin-left: 8px;
+}
