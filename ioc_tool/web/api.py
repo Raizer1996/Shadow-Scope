@@ -250,6 +250,12 @@ def ui_classic() -> FileResponse:
     return FileResponse(STATIC_DIR / "classic" / "index.html", media_type="text/html")
 
 
+@app.get("/ui-v2", include_in_schema=False)
+def ui_v2() -> FileResponse:
+    """Serve the Brutalist v2 polish-pass dashboard at ``/ui-v2``."""
+    return FileResponse(STATIC_DIR / "brutal-v2.html", media_type="text/html")
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     """Liveness check — always public so healthchecks don't need a token."""
