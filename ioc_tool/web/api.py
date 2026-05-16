@@ -505,6 +505,62 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
     return shaped
 
 
+# Canonical source_key → display_name mapping. Mirrors the order in
+# ``core.enrich.enrich_ioc_async`` so every source that writes to SQLite
+# can be read back by display name. Tor is intentionally absent — it's
+# evaluated against a local exit-node list, never persisted as an
+# enrichment row. Used by ``/show`` and ``/api/ui/recent`` to reconstruct
+# modules dicts straight from the cache without re-fetching.
+_CACHED_SOURCES: tuple[tuple[str, str], ...] = (
+    ("virustotal",    "VirusTotal"),
+    ("abuseipdb",     "AbuseIPDB"),
+    ("shodan",        "Shodan"),
+    ("ipqs",          "IPQS"),
+    ("ipinfo",        "IPinfo"),
+    ("censys",        "Censys"),
+    ("abstract",      "AbstractAPI"),
+    ("greynoise",     "GreyNoise"),
+    ("urlhaus",       "URLhaus"),
+    ("threatfox",     "ThreatFox"),
+    ("otx",           "OTX"),
+    ("urlscan",       "URLscan"),
+    ("pulsedive",     "Pulsedive"),
+    ("malwarebazaar", "MalwareBazaar"),
+    ("feodo",         "Feodo"),
+    ("sslbl",         "SSLBL"),
+    ("crtsh",         "crt.sh"),
+    ("whois",         "WHOIS"),
+    ("asn_bgpview",   "ASN"),
+    ("nvd",           "NVD"),
+    ("epss",          "EPSS"),
+    ("kev",           "KEV"),
+)
+
+
+def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[int]]:
+    """Reconstruct a ``modules`` dict + per-source scores from SQLite rows.
+
+    Shared by ``/show`` and ``/api/ui/recent``. Returns the same shape the
+    orchestrator emits so downstream reshapers (``_to_ui_shape``) work
+    unchanged. Rows with un-parseable JSON degrade silently to an empty
+    data dict — the score is still kept so the composite stays honest.
+    """
+    import json as _json
+    modules: dict[str, dict[str, Any]] = {}
+    scores: list[int] = []
+    for source_key, display_name in _CACHED_SOURCES:
+        row = database.get_latest_enrichment(ioc_id, source_key)
+        if row is None:
+            continue
+        try:
+            data = _json.loads(row["data"])
+        except (TypeError, ValueError):
+            data = {}
+        modules[display_name] = {"score": row["score"], "data": data}
+        scores.append(row["score"] or 0)
+    return modules, scores
+
+
 _SOURCE_REGISTRY: list[dict[str, Any]] = [
     # (id, env var or None for no-auth, IOC types it covers)
     {"id": "VirusTotal",    "env": "VT_API_KEY",                "types": ["ip", "domain", "url", "hash"]},
@@ -635,6 +691,55 @@ async def ui_enrich(
     return shaped
 
 
+@app.get("/api/ui/recent", dependencies=[Depends(require_token)])
+def ui_recent(
+    limit: int = Query(8, ge=1, le=50, description="Max rows to return"),
+) -> list[dict[str, Any]]:
+    """Return the newest cached IOCs reshaped for the brutalist dashboard.
+
+    Reads ``iocs`` ordered by ``last_seen`` desc, rebuilds each module
+    dict from cache (no API calls, no API spend), and runs the same UI
+    reshape ``/api/ui/enrich`` produces. Empty list when the workspace
+    has never been used — the dashboard renders an empty-state prompt
+    instead of demo fixtures.
+
+    ``enriched_at`` is the IOC's ``last_seen`` timestamp so the "enriched
+    Xm ago" relative-time chip reflects real cache age, not page load.
+    """
+    from ..core import score as score_mod
+
+    database.init_db()
+    rows = database.get_recent_iocs(limit)
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        modules, scores = _build_modules_from_cache(row["id"])
+        if not modules:
+            # Defensive: iocs row exists but every enrichment was pruned.
+            # Skip rather than emit a record with no signal — the strip
+            # pill would render with empty modules and break panels.
+            continue
+        result = {
+            "ioc": row["value"],
+            "type": row["type"],
+            "modules": modules,
+            "final_score": score_mod.calculate_final_risk(scores),
+        }
+        last_score = row.get("last_score")
+        prev_score = int(last_score) if last_score is not None else None
+        shaped = _to_ui_shape(result, prev_score)
+        last_seen = row.get("last_seen")
+        if last_seen:
+            # Persisted as "YYYY-MM-DD HH:MM:SS[.ffffff]" — normalise to
+            # ISO-8601 with 'T' and a trailing 'Z' so the dashboard's
+            # Relative component parses it the same way as live records.
+            iso = str(last_seen).replace(" ", "T")
+            if "." in iso:
+                iso = iso.split(".", 1)[0]
+            shaped["enriched_at"] = iso + "Z"
+        out.append(shaped)
+    return out
+
+
 @app.get("/enrich", dependencies=[Depends(require_token)])
 async def enrich_single(
     ioc: str = Query(..., description="IOC value (auto-detected, refanged)"),
@@ -756,38 +861,8 @@ def show_cached(
 
     # Pull every cached source row for this IOC. We don't re-fetch — this
     # is the "show" semantic. Each source gets its latest cached row.
-    import json as _json
-
     ioc_type = parser.detect_type(refanged)
-    modules: dict[str, dict[str, Any]] = {}
-    scores: list[int] = []
-
-    # Iterate over every source the orchestrator might have written.
-    # We deliberately query the DB directly here rather than calling the
-    # orchestrator, to honour the "show = no refetch" contract.
-    for source_key, display_name in (
-        ("virustotal", "VirusTotal"),
-        ("abuseipdb", "AbuseIPDB"),
-        ("shodan", "Shodan"),
-        ("ipqs", "IPQS"),
-        ("ipinfo", "IPinfo"),
-        ("greynoise", "GreyNoise"),
-        ("urlhaus", "URLhaus"),
-        ("threatfox", "ThreatFox"),
-        ("malwarebazaar", "MalwareBazaar"),
-        ("otx", "OTX"),
-        ("urlscan", "URLscan"),
-        ("whois", "WHOIS"),
-    ):
-        row = database.get_latest_enrichment(ioc_id, source_key)
-        if row is None:
-            continue
-        try:
-            data = _json.loads(row["data"])
-        except (TypeError, ValueError):
-            data = {}
-        modules[display_name] = {"score": row["score"], "data": data}
-        scores.append(row["score"] or 0)
+    modules, scores = _build_modules_from_cache(ioc_id)
 
     from ..core import score as score_mod
     final_score = score_mod.calculate_final_risk(scores)

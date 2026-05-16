@@ -355,6 +355,38 @@ def get_latest_enrichment(ioc_id, source):
     return dict(row) if row else None
 
 
+def get_recent_iocs(limit: int = 8) -> list[dict]:
+    """Return newest IOCs that have at least one enrichment row.
+
+    Ordered by `iocs.last_seen` desc so the dashboard recent strip mirrors
+    "what was enriched most recently in this workspace". Each entry has the
+    columns the brutalist UI shape needs upstream:
+        {id, value, type, last_seen, last_score}
+
+    Used by the `/api/ui/recent` endpoint to seed the dashboard from real
+    cache instead of demo fixtures. `limit <= 0` returns an empty list.
+    """
+    if limit <= 0:
+        return []
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''
+        SELECT i.id, i.value, i.type, i.last_seen, i.last_score
+        FROM iocs i
+        WHERE EXISTS (
+            SELECT 1 FROM enrichments e WHERE e.ioc_id = i.id
+        )
+        ORDER BY i.last_seen DESC
+        LIMIT ?
+        ''',
+        (int(limit),),
+    )
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Retention / cache maintenance
 # ---------------------------------------------------------------------------
