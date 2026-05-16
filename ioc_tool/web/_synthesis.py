@@ -131,17 +131,45 @@ def _abuseipdb_data(modules_raw: dict[str, Any]) -> dict[str, Any]:
 # IP synthesizers
 # ---------------------------------------------------------------------------
 def synth_ports(modules_raw: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return Shodan ports enriched to ``{port, transport, service, product, version, banner_snippet, risk}``.
+    """Return ports enriched to ``{port, transport, service, product, version, banner_snippet, risk, sources}``.
 
-    De-duplicates by (port, transport) and prefers the entry with the richest
-    banner. Falls back to ``ports[]`` (numbers only) when ``data[]`` banner
-    list is empty.
+    Merges Shodan ``data[]`` banners with Censys ``services[]`` — deduplicated by
+    ``(port, transport)``. Each entry's ``sources`` field lists every provider
+    that observed the port. Falls back to Shodan ``ports[]`` numbers when no
+    banner data is present.
     """
     shodan = _data(modules_raw, "Shodan")
-    banners = shodan.get("data") if isinstance(shodan.get("data"), list) else []
+    censys = _data(modules_raw, "Censys")
     enriched: dict[tuple[int, str], dict[str, Any]] = {}
 
-    for b in banners or []:
+    def upsert(port: int, transport: str, entry_patch: dict[str, Any], source: str) -> None:
+        key = (port, transport)
+        existing = enriched.get(key)
+        if existing is None:
+            entry = {
+                "port": port,
+                "transport": transport,
+                "service": port_service(port, transport),
+                "product": "",
+                "version": "",
+                "banner_snippet": "",
+                "risk": _port_risk(port, transport),
+                "sources": [source],
+            }
+            for k, v in entry_patch.items():
+                if v not in (None, ""):
+                    entry[k] = v
+            enriched[key] = entry
+            return
+        if source not in existing["sources"]:
+            existing["sources"].append(source)
+        for k, v in entry_patch.items():
+            if v in (None, ""):
+                continue
+            if not existing.get(k):
+                existing[k] = v
+
+    for b in (shodan.get("data") or []):
         if not isinstance(b, dict):
             continue
         try:
@@ -150,24 +178,47 @@ def synth_ports(modules_raw: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         transport = (b.get("transport") or "tcp").lower()
         info = (b.get("info") or "").strip()
-        snippet = (info[:120] + "…") if len(info) > 120 else info
         product = (b.get("product") or "").strip()
-        version = (b.get("version") or "").strip()
-        svc = product.lower() if product else port_service(port, transport)
-        risk = _port_risk(port, transport)
-        entry = {
-            "port": port,
-            "transport": transport,
-            "service": svc or port_service(port, transport),
+        upsert(port, transport, {
+            "service": product.lower() if product else port_service(port, transport),
+            "product": product,
+            "version": (b.get("version") or "").strip(),
+            "banner_snippet": (info[:120] + "…") if len(info) > 120 else info,
+        }, "Shodan")
+
+    for s in (censys.get("services") or []):
+        if not isinstance(s, dict):
+            continue
+        try:
+            port = int(s.get("port"))
+        except (TypeError, ValueError):
+            continue
+        transport = (s.get("transport_protocol") or "tcp").lower()
+        svc_name = (s.get("protocol") or s.get("service_name") or "").lower()
+        product = ""
+        version = ""
+        for sw in (s.get("software") or []):
+            if isinstance(sw, dict) and sw.get("product"):
+                product = (sw.get("vendor", "") + " " + sw.get("product", "")).strip()
+                version = sw.get("version", "") or ""
+                break
+        title = ""
+        for ep in (s.get("endpoints") or []):
+            if not isinstance(ep, dict):
+                continue
+            http = ep.get("http") or {}
+            for tag in (http.get("html_tags") or []):
+                if isinstance(tag, str) and tag.startswith("<title>"):
+                    title = tag.replace("<title>", "").replace("</title>", "").strip()[:120]
+                    break
+            if title:
+                break
+        upsert(port, transport, {
+            "service": svc_name or port_service(port, transport),
             "product": product,
             "version": version,
-            "banner_snippet": snippet,
-            "risk": risk,
-        }
-        key = (port, transport)
-        prev = enriched.get(key)
-        if prev is None or (entry["product"] and not prev.get("product")):
-            enriched[key] = entry
+            "banner_snippet": title,
+        }, "Censys")
 
     if enriched:
         return sorted(enriched.values(), key=lambda e: (e["port"], e["transport"]))
@@ -182,6 +233,7 @@ def synth_ports(modules_raw: dict[str, Any]) -> list[dict[str, Any]]:
             "version": "",
             "banner_snippet": "",
             "risk": _port_risk(int(p), "tcp"),
+            "sources": ["Shodan"],
         }
         for p in raw_ports if isinstance(p, (int, str)) and str(p).isdigit()
     ]
@@ -350,7 +402,40 @@ def synth_core_ip(modules_raw: dict[str, Any]) -> dict[str, Any] | None:
 
     aipdb_hosts = [h for h in (aipdb.get("hostnames") or []) if h]
     shodan_hosts = [h for h in (shodan.get("hostnames") or []) if h]
-    hostnames_extra = sorted(set(aipdb_hosts + shodan_hosts))
+    censys = _data(modules_raw, "Censys")
+    censys_dns = censys.get("dns") or {}
+    censys_hosts = list(censys_dns.get("names") or [])
+    rev = censys_dns.get("reverse_dns")
+    if isinstance(rev, dict):
+        censys_hosts.extend(rev.get("names") or [])
+    hostnames_extra = sorted({h for h in aipdb_hosts + shodan_hosts + censys_hosts if isinstance(h, str) and h})
+
+    censys_software: list[str] = []
+    censys_software_seen: set[str] = set()
+    for svc in (censys.get("services") or []):
+        if not isinstance(svc, dict):
+            continue
+        for sw in (svc.get("software") or []):
+            if not isinstance(sw, dict):
+                continue
+            label = " ".join(filter(None, [sw.get("vendor"), sw.get("product"), sw.get("version")])).strip()
+            if label and label.lower() not in censys_software_seen:
+                censys_software_seen.add(label.lower())
+                censys_software.append(label)
+
+    censys_os = ""
+    cos = censys.get("operating_system")
+    if isinstance(cos, dict):
+        censys_os = " ".join(filter(None, [cos.get("vendor"), cos.get("product"), cos.get("version")])).strip()
+
+    censys_meta: dict[str, Any] = {}
+    if censys:
+        censys_meta = {
+            "service_count": censys.get("service_count") or len(censys.get("services") or []),
+            "last_updated_at": censys.get("last_updated_at") or "",
+            "asn_name": (censys.get("autonomous_system") or {}).get("name") or "",
+            "bgp_prefix": (censys.get("autonomous_system") or {}).get("bgp_prefix") or "",
+        }
 
     core = {
         "ssl_cert": ssl_cert or None,
@@ -363,6 +448,9 @@ def synth_core_ip(modules_raw: dict[str, Any]) -> dict[str, Any] | None:
         "abuse_confidence": abuse_conf,
         "network_rir": network_rir,
         "hostnames_extra": hostnames_extra,
+        "software": censys_software,
+        "os": censys_os,
+        "censys": censys_meta,
     }
     if not any(v for v in core.values() if v not in (None, "", [], {})):
         return None

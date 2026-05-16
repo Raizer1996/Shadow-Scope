@@ -1242,6 +1242,32 @@ function IpCorePanel({ ioc, fmt }) {
             </span>
           </div>
         )}
+        {core?.os && (
+          <div className="ipc-row">
+            <span className="ipc-k">OS</span>
+            <span className="ipc-v">{core.os} <span className="dim">(Censys)</span></span>
+          </div>
+        )}
+        {core?.software?.length > 0 && (
+          <div className="ipc-row">
+            <span className="ipc-k">SOFTWARE</span>
+            <span className="ipc-v">
+              {core.software.slice(0, 6).map((s, i) => <span key={i} className="cat-chip">{s}</span>)}
+              {core.software.length > 6 && <span className="dim"> +{core.software.length - 6}</span>}
+              <span className="dim"> · Censys</span>
+            </span>
+          </div>
+        )}
+        {core?.censys?.service_count > 0 && (
+          <div className="ipc-row">
+            <span className="ipc-k">CENSYS</span>
+            <span className="ipc-v">
+              {core.censys.service_count} services
+              {core.censys.bgp_prefix ? <span className="dim"> · BGP {core.censys.bgp_prefix}</span> : null}
+              {core.censys.last_updated_at ? <span className="dim"> · scanned {core.censys.last_updated_at.slice(0,10)}</span> : null}
+            </span>
+          </div>
+        )}
       </div>
 
       {anon && (
