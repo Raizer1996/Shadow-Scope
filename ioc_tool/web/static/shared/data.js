@@ -302,9 +302,25 @@ window.HEUR_EXPLAIN = {
 // Symbolic flag library — surfaces at-a-glance category icons on IOCs.
 window.IOC_FLAGS = (ioc) => {
   const out = [];
-  // Tor exit
-  if (ioc.case === "campaign-tor-exit" || /tor/i.test(JSON.stringify(ioc.modules))) {
-    out.push({ k: "TOR", glyph: "⊙", label: "Tor exit node", color: "#a78bfa", title: "Tor exit node — traffic anonymized via Tor network. Treat source IP as unattributable." });
+  const anon = ioc.anon || {};
+  // Tor exit — only when the structured anon block confirms it (not a substring match on serialized JSON).
+  if (anon.is_tor === true || ioc.case === "campaign-tor-exit") {
+    const srcs = (anon.confidence_sources?.tor || []).length;
+    out.push({ k: "TOR", glyph: "⊙", label: anon.tor_hostname ? `Tor exit · ${anon.tor_hostname}` : "Tor exit node", color: "#a78bfa", title: `Tor exit node — traffic anonymized via Tor network. Confirmed by ${srcs || 1} source(s).` });
+  }
+  // VPN — surface brand when known. Suppress when TOR is already flagged
+  // (the TOR chip is the primary classification; e.g. AbstractAPI tags Tor
+  // exits as VPN+TOR, no need to show both).
+  if (anon.is_vpn === true && anon.is_tor !== true) {
+    const srcs = (anon.confidence_sources?.vpn || []).length;
+    const label = anon.vpn_brand ? `VPN · ${anon.vpn_brand}` : "VPN";
+    out.push({ k: "VPN", glyph: "⛨", label, color: "#f59e0b", title: `Anonymizing VPN. Confirmed by ${srcs} source(s)${anon.vpn_brand ? ` — brand: ${anon.vpn_brand}` : ""}.` });
+  }
+  // Proxy (incl. residential proxy)
+  if (anon.is_proxy === true || anon.is_residential_proxy === true) {
+    const isRes = anon.is_residential_proxy === true;
+    const srcs = (anon.confidence_sources?.[isRes ? "residential_proxy" : "proxy"] || []).length;
+    out.push({ k: "PROXY", glyph: "⇄", label: isRes ? "Residential proxy" : "Proxy", color: "#f97316", title: `${isRes ? "Residential proxy — rotated through real-user IPs (hard to block)" : "Open / commercial proxy"}. Confirmed by ${srcs} source(s).` });
   }
   // C2 channel
   const isC2 = Object.values(ioc.modules).some(m => /c2|command/i.test(m.detail || "") || m.data?.threat === "c2_server");
