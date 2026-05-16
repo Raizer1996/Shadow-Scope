@@ -53,6 +53,7 @@ from ..modules import (
     nvd,
     otx,
     pulsedive,
+    rdns,
     shodan_mod,
     sslbl,
     threatfox,
@@ -434,6 +435,15 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         tasks.append(asyncio.to_thread(
             _run_source, ioc_id, 'ipinfo', 'IPinfo',
             lambda: ipinfo_mod.enrich_ip(value),
+            None,
+            info_only=True,
+        ))
+
+    # --- Reverse DNS (PTR) — IP only (info-only, stdlib lookup) ---
+    if ioc_type == 'ip':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'rdns', 'rDNS',
+            lambda: rdns.enrich_ip(value),
             None,
             info_only=True,
         ))
