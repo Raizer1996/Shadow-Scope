@@ -496,6 +496,27 @@
 .cve-affected-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .cpe-chip { display: inline-block; padding: 1px 4px; background: var(--bg-2); border: 1px solid var(--line); font-size: 10px; font-family: var(--mono, monospace); color: var(--ink-2); }
 
+/* Compact NamedThreatStrip — lives inside .hero-meta next to the consensus chip. */
+.threat-strip-compact {
+  margin: 6px 0 0 0;
+  padding: 6px 8px;
+  border: 1px dotted var(--line);
+  background: transparent;
+}
+.threat-strip-compact .ts-head {
+  display: flex; gap: 8px; align-items: baseline; padding-bottom: 4px;
+}
+.threat-strip-compact .sec-title-sm {
+  font-size: 10px; letter-spacing: 0.14em; color: var(--accent); font-weight: 700;
+}
+.threat-strip-compact .sec-meta { font-size: 9.5px; }
+.threat-strip-compact .ts-body { display: flex; flex-direction: column; gap: 3px; }
+.threat-strip-compact .ts-row { display: flex; gap: 6px; align-items: center; }
+.threat-strip-compact .ts-kind { font-size: 9px; padding: 0 4px; letter-spacing: 0.08em; min-width: 56px; }
+.threat-strip-compact .ts-chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.threat-strip-compact .ts-chip { font-size: 10px; padding: 1px 4px; }
+.threat-strip-compact .ts-chip-src { display: none; }
+
 /* ─────────── Beacon improvements (v1.1.2) ─────────── */
 
 /* Tier-aware override of the base .ss-beacon styles.

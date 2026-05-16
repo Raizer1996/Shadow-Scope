@@ -1,6 +1,46 @@
 from datetime import datetime
 
 
+# Per-source trust weights for the composite final risk.
+#
+# Tiering rationale:
+#   Tier 1 (1.0)   — government / vendor-curated ground-truth blocklists.
+#                    A hit is a near-confirmed bad indicator.
+#   Tier 2 (0.85+) — well-resourced reputation engines & national CVE
+#                    databases. High signal, but room for false positives.
+#   Tier 3 (0.6-0.7) — community-maintained or single-vendor feeds. Fresh
+#                    but noisier; useful as corroborating sources.
+#   Tier 4 (<0.6)  — single-signal heuristic detectors or thin-tier APIs.
+#                    Treat as soft votes.
+#
+# Missing entries default to 0.5 in calculate_final_risk().
+SOURCE_WEIGHTS: dict[str, float] = {
+    # Tier 1 — ground truth
+    "KEV":           1.0,    # CISA Known Exploited Vulnerabilities
+    "Feodo":         1.0,    # abuse.ch botnet C2 IP blocklist
+    "SSLBL":         1.0,    # abuse.ch malicious-cert blocklist
+    "MalwareBazaar": 0.95,
+    "URLhaus":       0.95,
+    # Tier 2 — well-resourced reputation
+    "VirusTotal":    0.9,
+    "AbuseIPDB":     0.9,
+    "NVD":           0.9,
+    "EPSS":          0.85,
+    # Tier 3 — community / fresh-but-noisy
+    "ThreatFox":     0.7,
+    "GreyNoise":     0.7,
+    "TOR":           0.7,
+    "IPQS":          0.7,
+    "OTX":           0.7,
+    "URLscan":       0.6,
+    "WHOIS":         0.6,
+    # Tier 4 — single-signal / heuristic
+    "Pulsedive":     0.5,
+    "Heuristics":    0.5,
+    "AbstractAPI":   0.4,
+}
+
+
 def calculate_vt_score(stats):
     """
     VirusTotal score = (# of positives / total vendors) * 100
@@ -373,10 +413,37 @@ def calculate_pulsedive_score(data: dict | None) -> int:
     }.get(risk, 0)
 
 
-def calculate_final_risk(scores):
+def calculate_final_risk(named_scores):
+    """Weighted average of ``(source_name, score)`` tuples.
+
+    Each source's contribution is multiplied by its ``SOURCE_WEIGHTS`` entry
+    so that ground-truth blocklists (CISA KEV, abuse.ch Feodo / SSLBL) carry
+    more weight than thin-tier APIs (Pulsedive, AbstractAPI). Sources not in
+    the weights table default to 0.5 — neither boosted nor suppressed.
+
+    Backwards-compatible with the old bare-int list: any int in ``named_scores``
+    is treated as ``(?, score)`` with the default weight, so legacy callers
+    don't crash. Prefer the tuple form in new code.
+
+    Returns 0 when no scores are passed.
     """
-    Average of all module scores
-    """
-    if not scores:
+    if not named_scores:
         return 0
-    return int(sum(scores) / len(scores))
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for item in named_scores:
+        if isinstance(item, tuple) and len(item) == 2:
+            name, score_val = item
+            weight = SOURCE_WEIGHTS.get(name, 0.5)
+        else:
+            score_val = item
+            weight = 0.5
+        try:
+            score_val = float(score_val)
+        except (TypeError, ValueError):
+            continue
+        weighted_sum += weight * score_val
+        total_weight += weight
+    if total_weight == 0:
+        return 0
+    return int(weighted_sum / total_weight)

@@ -135,32 +135,35 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
 
             <div className="hero-meta">
               <ConsensusChip a={ioc.agreement} ioc={ioc} />
+              <NamedThreatStrip ioc={ioc} compact />
               {ioc.prev_score !== undefined && <DeltaChip prev={ioc.prev_score} curr={ioc.final_score} ioc={ioc} />}
               {ioc.case && <CaseChip caseId={ioc.case} />}
-              <div className="hero-flags">
-                <div className="flags-label">HEURISTICS · local signals</div>
-                {flags.length === 0 && <div className="flags-empty">// no flags fired</div>}
-                {flags.map((f, i) => {
-                  const explanation = window.HEUR_EXPLAIN[f.k] || "";
-                  const fullName = {
-                    NRD: "Newly Registered Domain",
-                    DGA: "Domain Generation Algorithm",
-                    TYPOSQUAT: "Typosquat against brand",
-                    IDN: "IDN homograph attack"
-                  }[f.k] || f.k;
-                  return (
-                    <div key={i} className="flag-row" title={explanation}>
-                      <span className="flag-k" style={{ color: sevOf(f.score).fg }}>{f.k}</span>
-                      <span className="flag-v">
-                        <span className="flag-fullname">{fullName}</span>
-                        <span className="flag-detail dim">{f.v}</span>
-                      </span>
-                      <span className="flag-bar"><span style={{ width: `${f.score}%`, background: sevOf(f.score).fg }} /></span>
-                      <span className="flag-score">{f.score}</span>
-                    </div>
-                  );
-                })}
-              </div>
+              {ioc.type === "domain" && (
+                <div className="hero-flags">
+                  <div className="flags-label">HEURISTICS · local signals</div>
+                  {flags.length === 0 && <div className="flags-empty">// no flags fired</div>}
+                  {flags.map((f, i) => {
+                    const explanation = window.HEUR_EXPLAIN[f.k] || "";
+                    const fullName = {
+                      NRD: "Newly Registered Domain",
+                      DGA: "Domain Generation Algorithm",
+                      TYPOSQUAT: "Typosquat against brand",
+                      IDN: "IDN homograph attack"
+                    }[f.k] || f.k;
+                    return (
+                      <div key={i} className="flag-row" title={explanation}>
+                        <span className="flag-k" style={{ color: sevOf(f.score).fg }}>{f.k}</span>
+                        <span className="flag-v">
+                          <span className="flag-fullname">{fullName}</span>
+                          <span className="flag-detail dim">{f.v}</span>
+                        </span>
+                        <span className="flag-bar"><span style={{ width: `${f.score}%`, background: sevOf(f.score).fg }} /></span>
+                        <span className="flag-score">{f.score}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
@@ -175,7 +178,6 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
         </div>
       </section>
 
-      <NamedThreatStrip ioc={ioc} />
       <CveBlock ioc={ioc} />
       <HashCorePanel ioc={ioc} />
       <DomainCorePanel ioc={ioc} />
@@ -218,9 +220,9 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
 const _SPIDER_RELEVANT_BY_TYPE = {
   ip:     new Set(["VirusTotal", "AbuseIPDB", "GreyNoise", "OTX",
                    "Pulsedive", "IPQS", "ThreatFox", "URLhaus",
-                   "Feodo", "TOR"]),
+                   "Feodo", "TOR", "AbstractAPI"]),
   domain: new Set(["VirusTotal", "OTX", "Pulsedive", "ThreatFox",
-                   "URLhaus", "Heuristics", "WHOIS"]),
+                   "URLhaus", "Heuristics", "WHOIS", "URLscan"]),
   url:    new Set(["VirusTotal", "OTX", "Pulsedive", "ThreatFox",
                    "URLhaus", "URLscan"]),
   hash:   new Set(["VirusTotal", "MalwareBazaar", "ThreatFox", "OTX",
