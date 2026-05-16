@@ -35,8 +35,20 @@ const fireCrabState = (label) => {
   try { window.dispatchEvent(new CustomEvent("cc:state", { detail: label })); } catch {}
 };
 
-function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, setDisabledSources, onPivot }) {
-  if (!ioc) return null;
+function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, setDisabledSources, onPivot, clearRecentStrip }) {
+  // Empty workspace (or strip just cleared) — render a prompt instead of
+  // collapsing to a blank screen. The "/" key shortcut already focuses
+  // the top input so the hint is actionable.
+  if (!ioc) {
+    return (
+      <div className="enrich-view">
+        <div className="recent-strip">
+          <span className="recent-label">recent <span className="recent-count">0</span></span>
+          <span className="recent-empty dim">// no enrichments cached — paste an IOC above to begin</span>
+        </div>
+      </div>
+    );
+  }
 
   const modules = Object.entries(ioc.modules);
   const heuristics = ioc.modules.Heuristics?.data || {};
@@ -50,7 +62,7 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
   const adjustedScore = disabledSources.size > 0 ? window.recomputeComposite(ioc, disabledSources) : ioc.final_score;
   const sev = sevOf(adjustedScore);
   const symbolicFlags = window.IOC_FLAGS(ioc);
-  const hasGeo = !!(ioc.geo || window.SHODAN_DATA[ioc.id]);
+  const hasGeo = !!(ioc.geo && (ioc.geo.lat != null || ioc.geo.country));
 
   // Animated score — counts up from previous IOC's score on each switch
   const animatedScore = useCounter(adjustedScore, 700);
@@ -87,6 +99,13 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
             </button>
           );
         })}
+        {results.length > 0 && clearRecentStrip && (
+          <button
+            className="recent-clear"
+            title="Clear the recent strip (view only — cached data stays in SQLite)"
+            onClick={clearRecentStrip}
+          >clear strip</button>
+        )}
       </div>
 
       <section className="hero">

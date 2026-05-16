@@ -178,7 +178,10 @@ function WatchView({ fmt }) {
 function CasesView({ results, fmt, setActiveIocId, setTab }) {
   const [openId, setOpenId] = useState(window.CASES[0].id);
   const open = window.CASES.find(c => c.id === openId);
-  const openIocs = open.iocs.map(id => results.find(r => r.id === id) || window.IOC_DB.find(r => r.id === id)).filter(Boolean);
+  // Only members that are currently visible in the strip render here.
+  // Cases are still seeded from a synthetic list (no backend equivalent yet),
+  // so groups can appear partial when the user hasn't enriched all members.
+  const openIocs = open.iocs.map(id => results.find(r => r.id === id)).filter(Boolean);
   return (
     <div className="cases-view">
       <aside className="case-list">
@@ -278,8 +281,17 @@ function CaseGraph({ iocs }) {
 // ─────────── Diff ───────────
 
 function DiffView({ results, diffPair, setDiffPair, fmt }) {
-  const [a, b] = diffPair.map(id => results.find(r => r.id === id) || window.IOC_DB.find(r => r.id === id));
-  if (!a || !b) return null;
+  const [a, b] = diffPair.map(id => results.find(r => r.id === id));
+  if (!a || !b) {
+    return (
+      <div className="diff-view">
+        <div className="batch-toolbar">
+          <span className="bt-title">DIFF · side-by-side</span>
+          <span className="dim small">// need two enrichments on the strip — enrich some IOCs first</span>
+        </div>
+      </div>
+    );
+  }
   const allSources = Array.from(new Set([...Object.keys(a.modules), ...Object.keys(b.modules)]));
   return (
     <div className="diff-view">
