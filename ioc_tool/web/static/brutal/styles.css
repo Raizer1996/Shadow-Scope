@@ -2243,3 +2243,63 @@ body.patterns .ti-score::after {
 .pill.warn:hover { background: var(--warn, #f0c674); color: var(--bg); }
 .pill.bad   { border-color: var(--bad, #ff7474); color: var(--bad, #ff7474); }
 .pill.bad:hover  { background: var(--bad, #ff7474); color: var(--bg); }
+.pill.bad:disabled { opacity: 0.4; cursor: not-allowed; }
+.pill.bad:disabled:hover { background: transparent; color: var(--bad, #ff7474); }
+
+/* ─── Wipe-cache confirmation modal ─── */
+.wipe-modal-backdrop {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.wipe-modal {
+  background: var(--bg);
+  border: 2px solid var(--bad, #ff7474);
+  width: min(540px, 92vw);
+  font-size: 13px;
+  box-shadow: 0 0 60px rgba(255, 116, 116, 0.25);
+}
+.wipe-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bad, #ff7474);
+  color: var(--bg);
+}
+.wipe-modal-title { font-weight: 800; letter-spacing: 0.14em; }
+.wipe-modal-close {
+  background: transparent; border: 0; color: var(--bg);
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 0 6px;
+}
+.wipe-modal-body { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.wipe-modal-stats {
+  display: flex; gap: 10px;
+  padding: 6px 10px;
+  border: 1px dashed var(--line);
+  background: var(--bg-2);
+  font-size: 12px;
+}
+.wipe-modal-body p { margin: 0; color: var(--ink-2); line-height: 1.5; }
+.wipe-modal-warn { color: var(--bad, #ff7474); font-weight: 700; }
+.wipe-modal-confirm { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-2); }
+.wipe-modal-confirm code {
+  background: var(--bg-2);
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  color: var(--bad, #ff7474);
+  font-weight: 700;
+}
+.wipe-modal-confirm input {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.wipe-modal-confirm input:focus { outline: none; border-color: var(--bad, #ff7474); }
+.wipe-modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--line);
+}

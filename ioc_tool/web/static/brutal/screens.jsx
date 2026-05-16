@@ -560,6 +560,14 @@ function CacheView() {
   const [clearSource, setClearSource] = useState("");
   const [clearIoc, setClearIoc] = useState("");
 
+  // Wipe-all confirmation modal state. The action is irreversible — a
+  // double-confirm dialog is the wrong UX for that (a stray Enter
+  // press sails through both prompts). Type-to-confirm forces the
+  // analyst to acknowledge the scope by retyping the magic phrase.
+  const [wipeModalOpen, setWipeModalOpen] = useState(false);
+  const [wipeTyped, setWipeTyped] = useState("");
+  const WIPE_PHRASE = "wipe all";
+
   const loadStats = () => {
     setErr(null);
     fetch("/api/cache/stats", { headers: _cacheAuthHeaders() })
@@ -612,9 +620,21 @@ function CacheView() {
       .catch(e => setErr(String(e.message || e)));
   };
 
+  // Opens the type-to-confirm modal; the actual API call happens in
+  // `confirmWipeAll` once the analyst has retyped the magic phrase.
   const doClearAll = () => {
-    if (!confirm("WIPE every enrichment row in this workspace? This cannot be undone.")) return;
-    if (!confirm("Really? Type-confirm step skipped — second click commits.")) return;
+    setWipeTyped("");
+    setWipeModalOpen(true);
+  };
+
+  const closeWipeModal = () => {
+    setWipeModalOpen(false);
+    setWipeTyped("");
+  };
+
+  const confirmWipeAll = () => {
+    if (wipeTyped.trim().toLowerCase() !== WIPE_PHRASE) return;
+    closeWipeModal();
     postJSON("/api/cache/clear", { all: true })
       .then(body => { flash("cleared " + body.removed + " row(s) — " + body.scope); loadStats(); })
       .catch(e => setErr(String(e.message || e)));
@@ -750,9 +770,58 @@ function CacheView() {
               <button className="pill bad" onClick={doClearAll} disabled={busy}>WIPE ALL</button>
             </div>
             <div className="dim" style={{ marginTop: 8 }}>
-              destructive — confirms before hitting the API. wipe-all double-confirms.
+              destructive — single-source / single-IOC clears confirm once. WIPE ALL requires retyping "{WIPE_PHRASE}" to commit.
             </div>
           </section>
+        </div>
+      )}
+      {wipeModalOpen && (
+        <div className="wipe-modal-backdrop" onClick={closeWipeModal}>
+          <div className="wipe-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="wipe-modal-head">
+              <span className="wipe-modal-title">WIPE ENRICHMENT CACHE</span>
+              <button className="wipe-modal-close" onClick={closeWipeModal} aria-label="Close">×</button>
+            </div>
+            <div className="wipe-modal-body">
+              <div className="wipe-modal-stats">
+                <span className="dim">scope</span>
+                <span>
+                  {stats ? stats.enrichment_count : "?"} enrichment rows across {stats ? stats.ioc_count : "?"} IOCs
+                </span>
+              </div>
+              <p>
+                This will permanently delete every cached enrichment in the active workspace.
+                Refetching what you wipe will burn through your API quotas.
+              </p>
+              <p className="wipe-modal-warn">
+                This <strong>cannot</strong> be undone.
+              </p>
+              <label className="wipe-modal-confirm">
+                Type <code>{WIPE_PHRASE}</code> to enable the button:
+                <input
+                  type="text"
+                  autoFocus
+                  value={wipeTyped}
+                  onChange={e => setWipeTyped(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && wipeTyped.trim().toLowerCase() === WIPE_PHRASE) confirmWipeAll();
+                    if (e.key === "Escape") closeWipeModal();
+                  }}
+                  placeholder={WIPE_PHRASE}
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </label>
+            </div>
+            <div className="wipe-modal-actions">
+              <button className="pill" onClick={closeWipeModal} disabled={busy}>cancel</button>
+              <button
+                className="pill bad"
+                onClick={confirmWipeAll}
+                disabled={busy || wipeTyped.trim().toLowerCase() !== WIPE_PHRASE}
+              >wipe permanently</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
