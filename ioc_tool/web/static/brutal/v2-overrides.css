@@ -495,3 +495,83 @@
 .cve-kev-row { font-size: 11.5px; margin: 2px 0; }
 .cve-affected-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .cpe-chip { display: inline-block; padding: 1px 4px; background: var(--bg-2); border: 1px solid var(--line); font-size: 10px; font-family: var(--mono, monospace); color: var(--ink-2); }
+
+/* ─────────── Beacon improvements (v1.1.2) ─────────── */
+
+/* Tier-aware override of the base .ss-beacon styles.
+ * --beacon-color is injected per-marker via inline style from JS
+ * (sevOf(score).fg). Falls back to accent if unset. */
+.ss-beacon { pointer-events: auto; }
+.ss-beacon-icon, .ss-beacon-icon-small { background: transparent; border: none; }
+.ss-beacon-icon-small .ss-beacon { width: 36px; height: 36px; }
+
+.ss-beacon-ring,
+.ss-beacon-dot {
+  border-color: var(--beacon-color, var(--accent, #ff6b35)) !important;
+  background: var(--beacon-color, var(--accent, #ff6b35));
+  box-shadow: 0 0 10px var(--beacon-color, var(--accent, #ff6b35)),
+              0 0 22px var(--beacon-color, var(--accent, #ff6b35));
+}
+.ss-beacon-ring { background: transparent; }
+.ss-beacon-crosshair-h,
+.ss-beacon-crosshair-v {
+  background: var(--beacon-color, var(--accent, #ff6b35));
+}
+
+/* Active beacon stays visibly bigger; secondary beacons have dimmer fill,
+ * no animation by default — saves perf when many points are plotted. */
+.ss-beacon-icon-small .ss-beacon-ring { animation: none; opacity: 0.4; width: 22px; height: 22px; }
+.ss-beacon-icon-small .ss-beacon-dot { width: 6px; height: 6px; }
+
+/* Anonymization glyph: TOR/VPN/PROXY indicator above the dot. */
+.ss-beacon-glyph {
+  position: absolute;
+  bottom: 0; left: 50%;
+  transform: translate(-50%, 100%);
+  background: var(--beacon-color, var(--accent));
+  color: #0a0a0a;
+  font-weight: 800;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  border: 1px solid #0a0a0a;
+  letter-spacing: 0;
+}
+.ss-beacon-icon-small .ss-beacon-glyph { font-size: 9px; padding: 1px 3px; }
+
+/* Score badge top-right of the beacon. */
+.ss-beacon-score {
+  position: absolute;
+  top: 0; right: 0;
+  transform: translate(50%, -50%);
+  background: #0a0a0a;
+  color: var(--beacon-color, var(--accent));
+  border: 1px solid var(--beacon-color, var(--accent));
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 4px;
+  font-family: var(--mono, monospace);
+  letter-spacing: 0;
+}
+.ss-beacon-icon-small .ss-beacon-score { font-size: 8.5px; padding: 0 3px; }
+
+/* Hover: pause the pulse, scale the static dot, raise z-index so the popup
+ * isn't blocked by other beacons. */
+.ss-beacon:hover .ss-beacon-ring { animation-play-state: paused; opacity: 0.7; }
+.ss-beacon:hover .ss-beacon-dot { transform: translate(-50%, -50%) scale(1.6); transition: transform 120ms ease-out; }
+.ss-beacon-icon-small:hover { z-index: 999 !important; }
+.ss-beacon-icon-small:hover .ss-beacon-ring { animation: ss-beacon-pulse 1.8s ease-out infinite; opacity: 1; }
+
+/* Popup body — brutalist override of Leaflet defaults. */
+.leaflet-popup-content-wrapper { background: #0a0a0a !important; color: var(--ink); border: 1px solid var(--line); border-radius: 0; box-shadow: 0 0 14px rgba(0,0,0,0.6); }
+.leaflet-popup-tip { background: #0a0a0a !important; }
+.leaflet-popup-content { margin: 8px 10px !important; font-family: var(--mono, monospace); }
+.ss-pop { min-width: 220px; font-size: 11.5px; }
+.ss-pop-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 4px; border-bottom: 1px dotted var(--line); margin-bottom: 4px; }
+.ss-pop-ioc { font-weight: 700; }
+.ss-pop-score { padding: 1px 6px; border: 1px solid; font-size: 11px; font-weight: 800; }
+.ss-pop-row { font-size: 11px; padding: 1px 0; }
+.ss-pop-k { color: var(--ink-3); letter-spacing: 0.08em; font-size: 9.5px; margin-right: 4px; }
+.ss-pop-row code { background: var(--bg); padding: 0 3px; border: 1px solid var(--line); font-size: 10px; margin-right: 3px; }
+.ss-pop-flags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; padding-top: 4px; border-top: 1px dotted var(--line); }
+.ss-pop-flag { font-size: 9.5px; padding: 1px 4px; border: 1px solid; font-weight: 700; }

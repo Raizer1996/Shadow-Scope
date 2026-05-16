@@ -171,7 +171,7 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
 
         <div className={`hero-right ${hasGeo ? "has-geo" : ""}`}>
           <SpiderChart ioc={ioc} sev={sev} disabledSources={disabledSources} />
-          {hasGeo && <NetworkGeoPanel ioc={ioc} />}
+          {hasGeo && <NetworkGeoPanel ioc={ioc} results={results} setActiveIocId={setActiveIocId} />}
         </div>
       </section>
 

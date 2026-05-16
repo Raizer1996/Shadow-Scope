@@ -1356,10 +1356,71 @@ function IpCorePanel({ ioc, fmt }) {
 
 // Leaflet map panel — real OpenStreetMap tiles. Initialised once per IOC
 // via useEffect; cleaned up when the IOC changes so we don't leak handles.
-function NetworkGeoPanel({ ioc }) {
+//
+// Multi-IOC: when ``results`` is provided, every enriched IOC with geo data
+// gets its own beacon, sized & colored by score tier. The active IOC's
+// beacon is bigger and stays centered.
+function NetworkGeoPanel({ ioc, results, setActiveIocId }) {
   const g = _geoFor(ioc);
   const ref = React.useRef(null);
   const mapRef = React.useRef(null);
+
+  // Build beacon DOM for one IOC. Centralised so active + secondary beacons
+  // share the same structure — they only differ via the ``active`` class.
+  const buildBeacon = (rec, active) => {
+    const score = rec.final_score || 0;
+    const sev = sevOf(score);
+    const color = sev.fg;
+    const tierLabel = sev.label;
+    const anon = rec.anon || {};
+    // Anonymization glyph: TOR > VPN > residential proxy > proxy.
+    let glyph = "";
+    let glyphTitle = "";
+    if (anon.is_tor) { glyph = "⊙"; glyphTitle = `Tor exit — ${anon.tor_hostname || "anonymized"}`; }
+    else if (anon.is_vpn) { glyph = "⛨"; glyphTitle = `VPN — ${anon.vpn_brand || "anonymized"}`; }
+    else if (anon.is_residential_proxy) { glyph = "⇄"; glyphTitle = "Residential proxy"; }
+    else if (anon.is_proxy) { glyph = "⇄"; glyphTitle = "Proxy"; }
+    const glyphHtml = glyph
+      ? `<span class="ss-beacon-glyph" title="${glyphTitle.replace(/"/g, "&quot;")}">${glyph}</span>`
+      : "";
+    return `
+      <div class="ss-beacon ${active ? "active" : ""}" style="--beacon-color: ${color};" data-tier="${tierLabel}">
+        <span class="ss-beacon-ring r1"></span>
+        <span class="ss-beacon-ring r2"></span>
+        <span class="ss-beacon-ring r3"></span>
+        <span class="ss-beacon-crosshair-v"></span>
+        <span class="ss-beacon-crosshair-h"></span>
+        <span class="ss-beacon-dot"></span>
+        ${glyphHtml}
+        <span class="ss-beacon-score">${score}</span>
+      </div>`;
+  };
+
+  // Build enriched popup HTML for one IOC.
+  const buildPopup = (rec, recGeo) => {
+    const score = rec.final_score || 0;
+    const sev = sevOf(score);
+    const flags = (window.IOC_FLAGS ? window.IOC_FLAGS(rec) : []).slice(0, 4);
+    const portObjs = (recGeo.ports || []).filter(p => typeof p === "object");
+    const portCount = portObjs.length || (recGeo.ports || []).length;
+    const topPorts = portObjs.slice(0, 4)
+      .map(p => `<code>${p.port}/${p.service || "·"}</code>`)
+      .join(" ");
+    const flagsHtml = flags.length
+      ? `<div class="ss-pop-flags">${flags.map(f => `<span class="ss-pop-flag" style="color:${f.color};border-color:${f.color}">${f.glyph} ${f.label}</span>`).join("")}</div>`
+      : "";
+    return `
+      <div class="ss-pop">
+        <div class="ss-pop-head">
+          <span class="ss-pop-ioc">${rec.ioc}</span>
+          <span class="ss-pop-score" style="color:${sev.fg};border-color:${sev.fg}">${score}</span>
+        </div>
+        <div class="ss-pop-row"><span class="ss-pop-k">LOC</span> ${recGeo.city || "—"} ${recGeo.country || ""}</div>
+        ${recGeo.asn ? `<div class="ss-pop-row"><span class="ss-pop-k">ASN</span> ${recGeo.asn} ${recGeo.org ? `<span class="dim">· ${recGeo.org}</span>` : ""}</div>` : ""}
+        ${portCount ? `<div class="ss-pop-row"><span class="ss-pop-k">PORTS</span> ${portCount}${topPorts ? ` · ${topPorts}` : ""}</div>` : ""}
+        ${flagsHtml}
+      </div>`;
+  };
 
   React.useEffect(() => {
     if (!g || g.lat == null || g.lon == null) return;
@@ -1380,26 +1441,48 @@ function NetworkGeoPanel({ ioc }) {
       attribution: '© OSM',
       className: "ss-tile",
     }).addTo(map);
-    // Beacon marker — three concentric pulsing rings + crosshair + dot.
-    // SVG inside a Leaflet DivIcon so the CSS keyframes drive the
-    // animation rather than redrawing on each frame.
-    const beaconHtml = `
-      <div class="ss-beacon">
-        <span class="ss-beacon-ring r1"></span>
-        <span class="ss-beacon-ring r2"></span>
-        <span class="ss-beacon-ring r3"></span>
-        <span class="ss-beacon-crosshair-v"></span>
-        <span class="ss-beacon-crosshair-h"></span>
-        <span class="ss-beacon-dot"></span>
-      </div>`;
-    const icon = L.divIcon({
-      html: beaconHtml,
+
+    // Build the set of secondary beacons from the rest of the enriched
+    // session. Active IOC always gets a beacon (drawn last → on top).
+    const everyOtherIoc = (results || []).filter(r => {
+      if (!r || r.id === ioc.id) return false;
+      const rg = r.geo;
+      return rg && rg.lat != null && rg.lon != null;
+    });
+
+    const allLatLngs = [[g.lat, g.lon]];
+    everyOtherIoc.forEach(rec => {
+      const rg = rec.geo;
+      const icon = L.divIcon({
+        html: buildBeacon(rec, false),
+        className: "ss-beacon-icon ss-beacon-icon-small",
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
+      });
+      const m = L.marker([rg.lat, rg.lon], { icon }).addTo(map)
+        .bindPopup(buildPopup(rec, rg));
+      m.on("mouseover", () => m.openPopup());
+      m.on("click", () => { if (setActiveIocId) setActiveIocId(rec.id); });
+      allLatLngs.push([rg.lat, rg.lon]);
+    });
+
+    // Active beacon (always last, always animated, bigger).
+    const activeIcon = L.divIcon({
+      html: buildBeacon(ioc, true),
       className: "ss-beacon-icon",
       iconSize: [60, 60],
       iconAnchor: [30, 30],
     });
-    L.marker([g.lat, g.lon], { icon }).addTo(map)
-      .bindPopup(`<b>${ioc.ioc}</b><br>${g.city || ""} ${g.country || ""}`);
+    const activeMarker = L.marker([g.lat, g.lon], { icon: activeIcon, zIndexOffset: 1000 }).addTo(map)
+      .bindPopup(buildPopup(ioc, g));
+    activeMarker.on("mouseover", () => activeMarker.openPopup());
+
+    // Auto-fit to include every plotted beacon, with a generous padding so
+    // beacons aren't clipped at the edges.
+    if (allLatLngs.length > 1) {
+      map.fitBounds(allLatLngs, { padding: [40, 40], maxZoom: 6 });
+    }
+
     mapRef.current = map;
     return () => {
       if (mapRef.current) {
@@ -1407,7 +1490,7 @@ function NetworkGeoPanel({ ioc }) {
         mapRef.current = null;
       }
     };
-  }, [ioc.id, g && g.lat, g && g.lon]);
+  }, [ioc.id, g && g.lat, g && g.lon, (results || []).length, ioc.final_score, JSON.stringify(ioc.anon || {})]);
 
   if (!g) return null;
   return (
