@@ -616,6 +616,11 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             heuristics_data['typosquat'] = typo
             heuristics_scores.append(typo['score'])
 
+        tld = heuristics.tld_check(value)
+        if tld is not None:
+            heuristics_data['tld'] = tld
+            heuristics_scores.append(tld['score'])
+
         idn = heuristics.idn_check(value)
         if idn is not None:
             heuristics_data['idn'] = idn
