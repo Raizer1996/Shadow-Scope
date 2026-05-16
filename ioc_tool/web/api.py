@@ -740,6 +740,62 @@ def ui_recent(
     return out
 
 
+@app.get("/api/ui/pivot", dependencies=[Depends(require_token)])
+def ui_pivot(
+    kind: str = Query(..., description="Pivot kind: tag, malware, family, registrar, ioc, any"),
+    value: str = Query(..., min_length=1, description="Value to search for"),
+    limit: int = Query(16, ge=1, le=50, description="Max related IOCs to return"),
+    exclude: str | None = Query(None, description="IOC value to exclude (typically the active one)"),
+) -> list[dict[str, Any]]:
+    """Return cached IOCs whose enrichments mention ``value``.
+
+    Backs the PivotPanel's "RELATED" groups — same brutalist UI shape
+    as ``/api/ui/recent``. Read-only, cache-only, no API spend.
+
+    The search is intentionally cheap: a case-insensitive substring
+    scan over the persisted JSON text. For ``kind`` values that we
+    know are stored as quoted string literals (``tag``, ``malware``,
+    ``family``, ``registrar``), the needle is wrapped in quotes to
+    avoid substring false positives ("emotet" won't match "emotetable").
+    Empty result list when nothing matches.
+    """
+    allowed = {"tag", "malware", "family", "registrar", "ioc", "any"}
+    if kind not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid kind {kind!r}. Allowed: {sorted(allowed)}",
+        )
+
+    from ..core import score as score_mod
+
+    database.init_db()
+    rows = database.find_iocs_by_field(
+        value, kind=kind, limit=limit, exclude_value=exclude
+    )
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        modules, scores = _build_modules_from_cache(row["id"])
+        if not modules:
+            continue
+        result = {
+            "ioc": row["value"],
+            "type": row["type"],
+            "modules": modules,
+            "final_score": score_mod.calculate_final_risk(scores),
+        }
+        last_score = row.get("last_score")
+        prev_score = int(last_score) if last_score is not None else None
+        shaped = _to_ui_shape(result, prev_score)
+        last_seen = row.get("last_seen")
+        if last_seen:
+            iso = str(last_seen).replace(" ", "T")
+            if "." in iso:
+                iso = iso.split(".", 1)[0]
+            shaped["enriched_at"] = iso + "Z"
+        out.append(shaped)
+    return out
+
+
 @app.get("/enrich", dependencies=[Depends(require_token)])
 async def enrich_single(
     ioc: str = Query(..., description="IOC value (auto-detected, refanged)"),

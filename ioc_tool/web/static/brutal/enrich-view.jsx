@@ -35,7 +35,7 @@ const fireCrabState = (label) => {
   try { window.dispatchEvent(new CustomEvent("cc:state", { detail: label })); } catch {}
 };
 
-function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, setDisabledSources, onPivot, clearRecentStrip }) {
+function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, clearRecentStrip }) {
   // Empty workspace (or strip just cleared) — render a prompt instead of
   // collapsing to a blank screen. The "/" key shortcut already focuses
   // the top input so the hint is actionable.
@@ -220,7 +220,7 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
           />
         </section>
 
-        <PivotPanel ioc={ioc} results={results} setActiveIocId={setActiveIocId} />
+        <PivotPanel ioc={ioc} results={results} setResults={setResults} setActiveIocId={setActiveIocId} />
       </div>
 
       {llm && <LlmVerdict ioc={ioc} fmt={fmt} sev={sev} />}

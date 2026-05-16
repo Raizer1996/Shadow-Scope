@@ -786,23 +786,77 @@ function AlertTicker({ feed, setActiveIoc, setTab, fmt }) {
 
 // ─────────── Pivot panel: related IOCs ───────────
 
-function PivotPanel({ ioc, results, setActiveIocId }) {
-  // Find related IOCs across whatever is currently on the recent strip.
-  // A future iteration can back this with a /api/ui/pivot endpoint that
-  // queries the SQLite cache for matches across the whole workspace.
+function PivotPanel({ ioc, results, setResults, setActiveIocId }) {
+  // Find related IOCs. First pull whatever is already on the recent
+  // strip (instant render, free), then query /api/ui/pivot in the
+  // background to widen the corpus across the whole cache. Backend
+  // hits get merged in, dedup'd by id, and clicking one adds it to
+  // the strip so the score panels can render it.
   const corpus = (results || []).filter(r => r.id !== ioc.id);
-  const sameCase = ioc.case ? corpus.filter(r => r.case === ioc.case) : [];
   const family = Object.values(ioc.modules).find(m => m.data?.malware)?.data?.malware ||
                  Object.values(ioc.modules).find(m => m.data?.family)?.data?.family;
-  const sameFamily = family ? corpus.filter(r =>
+  const registrar = ioc.modules.WHOIS?.data?.registrar;
+  const stripCase       = ioc.case ? corpus.filter(r => r.case === ioc.case) : [];
+  const stripFamily     = family ? corpus.filter(r =>
     Object.values(r.modules).some(m => m.data?.malware === family || m.data?.family === family)
   ) : [];
-
-  // Same WHOIS registrar
-  const registrar = ioc.modules.WHOIS?.data?.registrar;
-  const sameRegistrar = registrar ? corpus.filter(r =>
+  const stripRegistrar  = registrar ? corpus.filter(r =>
     r.modules.WHOIS?.data?.registrar === registrar
   ) : [];
+
+  const [cacheFamily, setCacheFamily] = React.useState([]);
+  const [cacheRegistrar, setCacheRegistrar] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!window.shadowscopePivot) return;
+    const tasks = [];
+    if (family) {
+      tasks.push(window.shadowscopePivot("malware", family, { exclude: ioc.ioc, limit: 12 })
+        .then(rows => setCacheFamily(rows || []))
+        .catch(() => setCacheFamily([])));
+    } else {
+      setCacheFamily([]);
+    }
+    if (registrar) {
+      tasks.push(window.shadowscopePivot("registrar", registrar, { exclude: ioc.ioc, limit: 12 })
+        .then(rows => setCacheRegistrar(rows || []))
+        .catch(() => setCacheRegistrar([])));
+    } else {
+      setCacheRegistrar([]);
+    }
+    if (tasks.length) {
+      setLoading(true);
+      Promise.allSettled(tasks).finally(() => setLoading(false));
+    }
+  }, [ioc.id, family, registrar]);
+
+  // Dedup helper — backend hits take precedence over strip-only matches
+  // because they carry the full module shape from cache.
+  const mergeUnique = (a, b) => {
+    const seen = new Set();
+    const out = [];
+    for (const r of [...b, ...a]) {
+      if (seen.has(r.id) || r.id === ioc.id) continue;
+      seen.add(r.id);
+      out.push(r);
+    }
+    return out;
+  };
+
+  const sameCase      = stripCase;  // no cache-wide case lookup yet
+  const sameFamily    = mergeUnique(stripFamily, cacheFamily);
+  const sameRegistrar = mergeUnique(stripRegistrar, cacheRegistrar);
+
+  // Clicking a backend hit may target an IOC that isn't on the strip
+  // yet. Prepend it so the rest of the dashboard (score panels,
+  // sources, geo) has a record to render.
+  const navigate = (r) => {
+    if (setResults && !results.find(x => x.id === r.id)) {
+      setResults(prev => [r, ...prev.filter(x => x.id !== r.id)]);
+    }
+    setActiveIocId(r.id);
+  };
 
   const groups = [
     sameCase.length      && { title: "SAME CASE",      pivot: ioc.case || "—",        items: sameCase },
@@ -815,7 +869,7 @@ function PivotPanel({ ioc, results, setActiveIocId }) {
       <aside className="pivot-panel">
         <div className="sec-head">
           <span className="sec-title glitch" data-text="RELATED">RELATED</span>
-          <span className="sec-meta dim">no pivots</span>
+          <span className="sec-meta dim">{loading ? "scanning cache…" : "no pivots"}</span>
         </div>
         <div className="pivot-empty">// no related infrastructure found<br/>// in current intel corpus</div>
       </aside>
@@ -826,7 +880,10 @@ function PivotPanel({ ioc, results, setActiveIocId }) {
     <aside className="pivot-panel">
       <div className="sec-head">
         <span className="sec-title glitch" data-text="RELATED">RELATED</span>
-        <span className="sec-meta">{groups.reduce((n, g) => n + g.items.length, 0)} IOCs across {groups.length} pivots</span>
+        <span className="sec-meta">
+          {groups.reduce((n, g) => n + g.items.length, 0)} IOCs across {groups.length} pivots
+          {loading && <span className="dim"> · scanning…</span>}
+        </span>
       </div>
       {groups.map(g => (
         <div key={g.title} className="pivot-group">
@@ -837,7 +894,7 @@ function PivotPanel({ ioc, results, setActiveIocId }) {
           {g.items.map(r => {
             const s = sevOf(r.final_score);
             return (
-              <button key={r.id} className="pivot-row" onClick={() => setActiveIocId(r.id)}>
+              <button key={r.id} className="pivot-row" onClick={() => navigate(r)}>
                 <span className="pr-score" style={{color: s.fg, borderColor: s.fg}}>{r.final_score}</span>
                 <span className="pr-type">{r.type}</span>
                 <span className="pr-ioc">{r.ioc.length > 28 ? r.ioc.slice(0, 26) + "…" : r.ioc}</span>

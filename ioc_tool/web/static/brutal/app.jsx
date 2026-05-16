@@ -191,7 +191,7 @@ function App() {
       <InputBar onEnrich={onEnrich} defang={defang} setDefang={setDefang} llm={llm} setLlm={setLlm} enriching={enriching} />
 
       <main className="main">
-        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} />}
+        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} />}
         {tab === "batch"  && <BatchView results={results} setActiveIocId={setActiveIocId} setTab={setTab} fmt={fmt} />}
         {tab === "watch"  && <WatchView fmt={fmt} />}
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}

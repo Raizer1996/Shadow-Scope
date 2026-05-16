@@ -680,3 +680,144 @@ def test_ui_recent_rejects_out_of_range_limit(client, cache_db):
     """limit must be 1..50 — FastAPI enforces this at the route layer."""
     assert client.get("/api/ui/recent", params={"limit": 0}).status_code == 422
     assert client.get("/api/ui/recent", params={"limit": 999}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# /api/ui/pivot — cache-wide related-IOC lookup
+# ---------------------------------------------------------------------------
+
+
+def _seed_with_json(db, ioc_value, source, payload, age_days=1, score=0):
+    """Insert a row with arbitrary JSON payload. Returns ioc_id."""
+    import json as _json
+    from datetime import datetime, timedelta
+    ioc_id = db.add_or_update_ioc(ioc_value, "domain")
+    ts = (datetime.now() - timedelta(days=age_days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = db.get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO enrichments (ioc_id, source, data, timestamp, score) VALUES (?,?,?,?,?)",
+        (ioc_id, source, _json.dumps(payload), ts, score),
+    )
+    conn.commit()
+    conn.close()
+    return ioc_id
+
+
+def test_ui_pivot_rejects_bad_kind(client, cache_db):
+    r = client.get("/api/ui/pivot", params={"kind": "garbage", "value": "x"})
+    assert r.status_code == 400
+    assert "Allowed" in r.json()["detail"]
+
+
+def test_ui_pivot_missing_value_returns_422(client, cache_db):
+    """FastAPI validates ``value`` is required."""
+    assert client.get("/api/ui/pivot", params={"kind": "tag"}).status_code == 422
+
+
+def test_ui_pivot_finds_iocs_sharing_a_malware_family(client, cache_db):
+    _seed_with_json(cache_db, "evil.com", "threatfox",
+                    {"malware": "Cobalt Strike"}, score=80)
+    _seed_with_json(cache_db, "other.com", "threatfox",
+                    {"malware": "Cobalt Strike"}, score=70)
+    _seed_with_json(cache_db, "harmless.com", "threatfox",
+                    {"malware": "Emotet"}, score=50)
+    r = client.get("/api/ui/pivot",
+                   params={"kind": "malware", "value": "Cobalt Strike"})
+    assert r.status_code == 200
+    iocs = sorted([row["ioc"] for row in r.json()])
+    assert iocs == ["evil.com", "other.com"]
+
+
+def test_ui_pivot_quoted_match_avoids_substring_false_positive(client, cache_db):
+    """`emotet` shouldn't match `emotetable` because the JSON literal
+    is wrapped in quotes during the LIKE search."""
+    _seed_with_json(cache_db, "real.com", "threatfox",
+                    {"malware": "emotet"}, score=80)
+    _seed_with_json(cache_db, "fake.com", "threatfox",
+                    {"description": "this is emotetable text"}, score=10)
+    r = client.get("/api/ui/pivot",
+                   params={"kind": "malware", "value": "emotet"})
+    iocs = [row["ioc"] for row in r.json()]
+    assert iocs == ["real.com"]
+
+
+def test_ui_pivot_exclude_omits_the_active_ioc(client, cache_db):
+    """The active IOC shouldn't appear in its own RELATED list."""
+    _seed_with_json(cache_db, "active.com", "threatfox",
+                    {"malware": "Lockbit"}, score=85)
+    _seed_with_json(cache_db, "related.com", "threatfox",
+                    {"malware": "Lockbit"}, score=80)
+    r = client.get(
+        "/api/ui/pivot",
+        params={"kind": "malware", "value": "Lockbit", "exclude": "active.com"},
+    )
+    iocs = [row["ioc"] for row in r.json()]
+    assert iocs == ["related.com"]
+
+
+def test_ui_pivot_registrar_match(client, cache_db):
+    _seed_with_json(cache_db, "a.com", "whois",
+                    {"registrar": "Namecheap, Inc."}, score=0)
+    _seed_with_json(cache_db, "b.com", "whois",
+                    {"registrar": "Namecheap, Inc."}, score=0)
+    _seed_with_json(cache_db, "c.com", "whois",
+                    {"registrar": "GoDaddy.com, LLC"}, score=0)
+    r = client.get(
+        "/api/ui/pivot",
+        params={"kind": "registrar", "value": "Namecheap, Inc."},
+    )
+    iocs = sorted([row["ioc"] for row in r.json()])
+    assert iocs == ["a.com", "b.com"]
+
+
+def test_ui_pivot_ioc_kind_searches_value_column(client, cache_db):
+    """`kind=ioc` matches against ``iocs.value`` directly — useful for
+    partial domain pivots like clicking a base name to find subdomains.
+
+    Uses the canonical ``virustotal`` source key so the module-shape
+    reconstruction in the API layer surfaces the record (records with
+    no recognised sources are dropped because the UI panels need at
+    least one module to render)."""
+    _seed_with_json(cache_db, "evil.example.com", "virustotal",
+                    {"last_analysis_stats": {"malicious": 1}}, score=10)
+    _seed_with_json(cache_db, "ftp.example.com", "virustotal",
+                    {"last_analysis_stats": {"malicious": 0}}, score=0)
+    _seed_with_json(cache_db, "unrelated.org", "virustotal",
+                    {"last_analysis_stats": {"malicious": 0}}, score=0)
+    r = client.get("/api/ui/pivot", params={"kind": "ioc", "value": "example.com"})
+    iocs = sorted([row["ioc"] for row in r.json()])
+    assert iocs == ["evil.example.com", "ftp.example.com"]
+
+
+def test_ui_pivot_returns_empty_when_no_match(client, cache_db):
+    _seed_with_json(cache_db, "evil.com", "threatfox",
+                    {"malware": "Cobalt Strike"}, score=80)
+    r = client.get("/api/ui/pivot",
+                   params={"kind": "malware", "value": "NonExistent"})
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_ui_pivot_requires_token(client, cache_db, monkeypatch):
+    monkeypatch.setenv("SHADOWSCOPE_API_TOKEN", "secret")
+    r = client.get("/api/ui/pivot", params={"kind": "any", "value": "x"})
+    assert r.status_code == 401
+    h = {"Authorization": "Bearer secret"}
+    r = client.get(
+        "/api/ui/pivot",
+        params={"kind": "any", "value": "x"},
+        headers=h,
+    )
+    assert r.status_code == 200
+
+
+def test_ui_pivot_respects_limit(client, cache_db):
+    for i in range(5):
+        _seed_with_json(cache_db, f"d{i}.com", "threatfox",
+                        {"malware": "Lockbit"}, score=80)
+    r = client.get(
+        "/api/ui/pivot",
+        params={"kind": "malware", "value": "Lockbit", "limit": 2},
+    )
+    assert len(r.json()) == 2

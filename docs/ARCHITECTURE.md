@@ -212,6 +212,7 @@ All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. 
 | GET    | `/show?ioc=<value>[&defang=true]` | Return cached enrichment without refetching — 404 if not in cache |
 | GET    | `/sources` | Map of `source_name → bool` indicating whether the API key is set. **Never returns key values.** |
 | GET    | `/api/ui/recent?limit=N` | Newest cached IOCs (default 8, max 50) reshaped for the dashboard's recent strip. Reads `iocs` desc by `last_seen`, rebuilds modules from cache — no API spend. Empty list when the workspace has never been enriched. |
+| GET    | `/api/ui/pivot?kind=<kind>&value=<v>[&limit=N&exclude=<ioc>]` | Cache-wide related-IOC lookup. `kind`: `tag` / `malware` / `family` / `registrar` / `ioc` / `any`. Substring scan over persisted JSON; quoted-literal match for known string-field kinds avoids false positives (`"emotet"` won't match `emotetable`). Powers the dashboard's PivotPanel "RELATED" groups. |
 | GET    | `/ui` | Dashboard SPA shell (HTML). No auth — the data behind it is what's gated. |
 | GET    | `/static/*` | Dashboard CSS / JS assets. No auth. |
 
