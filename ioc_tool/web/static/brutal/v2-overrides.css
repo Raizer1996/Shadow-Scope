@@ -432,3 +432,66 @@
 .src-score-bar {
   margin-left: 8px;
 }
+
+/* ─────────── v1.1 max-surface additions ─────────── */
+
+/* Anonymization block (inside IpCorePanel) */
+.ipc-anon { margin-top: 10px; padding-top: 8px; border-top: 1px dotted var(--line); }
+.ipc-anon-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 6px; }
+.ipc-anon-title { font-size: 10.5px; letter-spacing: 0.18em; color: var(--accent); font-weight: 700; }
+.ipc-anon-meta { font-size: 10px; color: var(--ink-3); letter-spacing: 0.04em; }
+.ipc-anon-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.anon-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border: 1px solid var(--line); background: var(--bg-2);
+  font-size: 10.5px; letter-spacing: 0.04em;
+}
+.anon-chip .anon-k { font-weight: 800; letter-spacing: 0.08em; }
+.anon-chip .anon-v { color: var(--ink); }
+.anon-chip .anon-cnt { color: var(--ink-3); font-size: 9.5px; }
+.anon-tor { border-color: var(--bad); color: var(--bad); }
+.anon-vpn { border-color: var(--accent); color: var(--accent); }
+.anon-proxy, .anon-resproxy { border-color: var(--high); color: var(--high); }
+.anon-relay { border-color: var(--med); color: var(--med); }
+.anon-hosting { border-color: var(--ink-3); color: var(--ink-3); }
+.anon-mobile { border-color: var(--ink-2); color: var(--ink-2); }
+
+/* Hash Core panel */
+.hash-core-panel { margin-top: 14px; padding: 12px; border: 1px solid var(--line); background: var(--bg-2); }
+.hash-grid { display: grid; gap: 6px; margin-top: 8px; }
+.hash-row { display: grid; grid-template-columns: 120px 1fr; gap: 8px; font-size: 11.5px; }
+.hash-row .ws-k { color: var(--ink-3); letter-spacing: 0.08em; font-size: 10px; }
+.hash-row .hash-v { color: var(--ink); word-break: break-all; font-family: var(--mono, monospace); }
+.hash-row code { background: var(--bg); padding: 1px 4px; border: 1px solid var(--line); font-size: 11px; }
+.hash-detect, .hash-family, .hash-yara, .hash-pe, .hash-tags, .hash-c2, .hash-campaigns {
+  margin-top: 10px; padding-top: 8px; border-top: 1px dotted var(--line);
+  display: grid; grid-template-columns: 120px 1fr; gap: 8px; font-size: 11.5px;
+}
+.filename-chip { display: inline-block; margin: 1px 3px 1px 0; padding: 1px 4px; background: var(--bg); border: 1px solid var(--line); font-size: 10.5px; font-family: var(--mono, monospace); }
+.family-chip { display: inline-block; margin: 1px 3px 1px 0; padding: 2px 6px; background: var(--bad); color: var(--bg); font-weight: 700; font-size: 10.5px; letter-spacing: 0.04em; }
+.family-chip-sm { display: inline-block; margin: 1px 2px; padding: 1px 4px; background: var(--bad); color: var(--bg); font-size: 9.5px; font-weight: 600; }
+.ttp-chip { display: inline-block; margin: 1px 2px; padding: 1px 4px; background: var(--accent); color: var(--bg); font-size: 9.5px; font-weight: 700; font-family: var(--mono, monospace); }
+.yara-list, .campaigns-list, .dns-list, .payload-list { display: flex; flex-direction: column; gap: 4px; }
+.yara-row, .campaign-row, .payload-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 11px; }
+.yara-rule, .campaign-name { font-weight: 700; color: var(--ink); }
+.payload-sha { font-size: 10.5px; }
+
+/* Domain Core panel */
+.domain-core-panel { margin-top: 14px; padding: 12px; border: 1px solid var(--line); background: var(--bg-2); }
+.domain-row { display: grid; grid-template-columns: 150px 1fr; gap: 8px; margin-top: 8px; font-size: 11.5px; }
+.domain-row .ws-k { color: var(--ink-3); letter-spacing: 0.08em; font-size: 10px; }
+.domain-row .ws-v { color: var(--ink); word-break: break-word; }
+.cat-chip, .rank-chip, .det-chip { display: inline-block; margin: 1px 3px 1px 0; padding: 1px 5px; background: var(--bg); border: 1px solid var(--line); font-size: 10px; }
+.det-chip { font-weight: 700; }
+.det-vt { border-color: var(--high); color: var(--high); }
+.det-tf { border-color: var(--bad); color: var(--bad); }
+.det-us, .det-pd { border-color: var(--med); color: var(--med); }
+.dns-row { display: block; padding: 2px 4px; background: var(--bg); border: 1px solid var(--line); font-size: 10.5px; font-family: var(--mono, monospace); }
+.dns-type { color: var(--accent); font-weight: 700; margin-right: 4px; }
+
+/* CVE additions */
+.cve-kev-detail, .cve-affected { margin-top: 10px; padding: 8px; border: 1px solid var(--line); background: var(--bg); }
+.cve-kev-detail .ws-k, .cve-affected .ws-k { color: var(--ink-3); letter-spacing: 0.08em; font-size: 10px; display: block; margin-bottom: 4px; }
+.cve-kev-row { font-size: 11.5px; margin: 2px 0; }
+.cve-affected-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.cpe-chip { display: inline-block; padding: 1px 4px; background: var(--bg-2); border: 1px solid var(--line); font-size: 10px; font-family: var(--mono, monospace); color: var(--ink-2); }

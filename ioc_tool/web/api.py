@@ -47,6 +47,7 @@ from pydantic import BaseModel, Field
 from ..core import database, enrich, extractor, output, parser
 from ..core import defang as defang_mod
 from ..core import llm as llm_mod
+from . import _synthesis
 
 API_VERSION = "0.9.0"
 
@@ -389,7 +390,7 @@ def _synthesize_geo(modules_raw: dict[str, Any]) -> dict[str, Any] | None:
         "asn": shodan.get("asn") or ipinfo.get("org", "").split()[0] if ipinfo.get("org", "").startswith("AS") else shodan.get("asn") or "",
         "org": shodan.get("org") or shodan.get("isp") or ipinfo.get("org") or "",
         "hostnames": shodan.get("hostnames") or ([ipinfo.get("hostname")] if ipinfo.get("hostname") else []),
-        "ports": shodan.get("ports") or [],
+        "ports": _synthesis.synth_ports(modules_raw),
         "tags": shodan.get("tags") or [],
     }
 
@@ -425,6 +426,24 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
         geo = _synthesize_geo(modules_raw)
         if geo is not None:
             shaped["geo"] = geo
+        anon = _synthesis.synth_anon(modules_raw)
+        if anon is not None:
+            shaped["anon"] = anon
+        core = _synthesis.synth_core_ip(modules_raw)
+        if core is not None:
+            shaped["core"] = core
+    elif ioc_type == "domain":
+        core = _synthesis.synth_core_domain(modules_raw)
+        if core is not None:
+            shaped["core"] = core
+    elif ioc_type == "hash":
+        core = _synthesis.synth_core_hash(modules_raw)
+        if core is not None:
+            shaped["core"] = core
+    elif ioc_type == "cve":
+        core = _synthesis.synth_core_cve(modules_raw)
+        if core is not None:
+            shaped["core"] = core
     return shaped
 
 

@@ -266,18 +266,26 @@ function CveBlock({ ioc }) {
   const nvd = ioc.modules.NVD?.data || {};
   const epss = ioc.modules.EPSS?.data || {};
   const kev = ioc.modules.KEV?.data || {};
+  const core = ioc.core || null;
 
   const desc = ((nvd.descriptions || []).find(d => d.lang === "en") || {}).value || "";
   const cvssBlock = ((nvd.metrics || {}).cvssMetricV31 || [])[0] || {};
   const cvss = cvssBlock.cvssData || {};
-  const cwes = (nvd.weaknesses || []).flatMap(w => (w.description || []).map(d => d.value)).filter(v => v.startsWith("CWE-"));
+  const cwes = Array.from(new Set((nvd.weaknesses || []).flatMap(w => (w.description || []).map(d => d.value)).filter(v => v.startsWith("CWE-"))));
   const refs = (nvd.references || []).slice(0, 6);
 
   const epssProb = epss.epss != null ? Math.round(epss.epss * 10000) / 100 : null;
   const epssPct = epss.percentile != null ? Math.round(epss.percentile * 10000) / 100 : null;
+  const epssRank = core?.epss?.rank_text || (epssPct != null ? `${epssPct}% percentile` : "");
 
   const ransomware = kev.knownRansomwareCampaignUse === "Known";
   const inKev = Boolean(kev.cveID || kev.vulnerabilityName);
+  const kevDue = core?.kev?.due_date || kev.dueDate || "";
+  const kevAction = core?.kev?.required_action || kev.requiredAction || "";
+  const kevVendor = core?.kev?.vendor || kev.vendorProject || "";
+  const kevProduct = core?.kev?.product || kev.product || "";
+
+  const affected = core?.affected || [];
 
   if (!desc && !cvss.baseScore && !inKev && epssProb == null) return null;
 
@@ -302,14 +310,17 @@ function CveBlock({ ioc }) {
           <div className="cve-card">
             <div className="ws-k">EPSS</div>
             <div className="ws-v" style={{ color: epssProb >= 50 ? "var(--bad)" : epssProb >= 10 ? "var(--high)" : "var(--ink)" }}>{epssProb}%</div>
-            <div className="ws-sub dim">{epssPct}% percentile</div>
+            <div className="ws-sub dim">{epssRank}</div>
           </div>
         )}
         {inKev && (
           <div className="cve-card" style={{ borderColor: "var(--bad)" }}>
             <div className="ws-k">CISA KEV</div>
             <div className="ws-v" style={{ color: "var(--bad)" }}>LISTED</div>
-            <div className="ws-sub dim">{kev.dateAdded ? `added ${kev.dateAdded}` : ""}</div>
+            <div className="ws-sub dim">
+              {kev.dateAdded ? `added ${kev.dateAdded}` : ""}
+              {kevDue ? <><br/>patch by {kevDue}</> : null}
+            </div>
           </div>
         )}
         {ransomware && (
@@ -344,6 +355,35 @@ function CveBlock({ ioc }) {
         </div>
       )}
 
+      {inKev && (kevVendor || kevProduct || kevAction) && (
+        <div className="cve-kev-detail">
+          <span className="ws-k">CISA KEV DETAIL</span>
+          <div className="cve-kev-body">
+            {(kevVendor || kevProduct) && (
+              <div className="cve-kev-row"><b>Affected:</b> {kevVendor} {kevProduct}</div>
+            )}
+            {kevAction && <div className="cve-kev-row"><b>Required action:</b> {kevAction}</div>}
+            {core?.kev?.known_ransomware && (
+              <div className="cve-kev-row" style={{ color: "var(--crit)" }}>
+                <b>Known used in ransomware campaigns.</b>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {affected.length > 0 && (
+        <div className="cve-affected">
+          <span className="ws-k">AFFECTED PRODUCTS · {affected.length}</span>
+          <div className="cve-affected-list">
+            {affected.slice(0, 12).map((cpe, i) => (
+              <code key={i} className="cpe-chip" title={cpe}>{cpe}</code>
+            ))}
+            {affected.length > 12 && <span className="dim">… +{affected.length - 12} more</span>}
+          </div>
+        </div>
+      )}
+
       {refs.length > 0 && (
         <div className="cve-refs">
           <div className="ws-k">REFERENCES · {(nvd.references || []).length}</div>
@@ -357,6 +397,274 @@ function CveBlock({ ioc }) {
                 </a>
               );
             })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─────────── Hash Core — file identity, family, sandbox, campaign ───────────
+
+function HashCorePanel({ ioc }) {
+  if (ioc.type !== "hash") return null;
+  const c = ioc.core || {};
+  const id = c.identity || {};
+  const fm = c.file_meta || {};
+  const det = c.detections || {};
+  const vt = det.vt_stats || {};
+  const totalEngines = ["malicious", "suspicious", "undetected", "harmless"]
+    .reduce((s, k) => s + (vt[k] || 0), 0);
+  const mal = vt.malicious || 0;
+  if (!id.sha256 && !id.sha1 && !id.md5 && !c.families?.length && !c.campaigns?.length) return null;
+  const fmtSize = n => n == null ? "" :
+    n < 1024 ? `${n} B` :
+    n < 1048576 ? `${(n/1024).toFixed(1)} KB` :
+    `${(n/1048576).toFixed(2)} MB`;
+
+  return (
+    <section className="hash-core-panel">
+      <div className="sec-head">
+        <span className="sec-title glitch" data-text="HASH CORE">HASH CORE</span>
+        <span className="sec-meta">file identity · family · detection</span>
+      </div>
+
+      <div className="hash-grid">
+        {id.sha256 && <div className="hash-row"><span className="ws-k">SHA256</span><Copyable text={id.sha256}><code className="hash-v">{id.sha256}</code></Copyable></div>}
+        {id.sha1 && <div className="hash-row"><span className="ws-k">SHA1</span><Copyable text={id.sha1}><code className="hash-v">{id.sha1}</code></Copyable></div>}
+        {id.md5 && <div className="hash-row"><span className="ws-k">MD5</span><Copyable text={id.md5}><code className="hash-v">{id.md5}</code></Copyable></div>}
+        {id.tlsh && <div className="hash-row"><span className="ws-k">TLSH</span><code className="hash-v">{id.tlsh}</code></div>}
+        {id.ssdeep && <div className="hash-row"><span className="ws-k">SSDEEP</span><code className="hash-v">{id.ssdeep}</code></div>}
+        {id.authentihash && <div className="hash-row"><span className="ws-k">AUTHHASH</span><code className="hash-v">{id.authentihash}</code></div>}
+
+        {fm.magic && <div className="hash-row"><span className="ws-k">FILE TYPE</span><span className="hash-v">{fm.magic}</span></div>}
+        {fm.file_type && fm.file_type !== fm.magic && <div className="hash-row"><span className="ws-k">CATEGORY</span><span className="hash-v">{fm.file_type}{fm.magika ? <span className="dim"> · {fm.magika}</span> : null}</span></div>}
+        {fm.file_size != null && <div className="hash-row"><span className="ws-k">SIZE</span><span className="hash-v">{fmtSize(fm.file_size)}</span></div>}
+        {fm.meaningful_name && <div className="hash-row"><span className="ws-k">PRIMARY NAME</span><span className="hash-v">{fm.meaningful_name}</span></div>}
+        {fm.names?.length > 0 && (
+          <div className="hash-row">
+            <span className="ws-k">FILENAMES · {fm.names.length}</span>
+            <span className="hash-v">{fm.names.slice(0, 6).map((n, i) => <span key={i} className="filename-chip">{n}</span>)}
+              {fm.names.length > 6 && <span className="dim"> +{fm.names.length - 6}</span>}
+            </span>
+          </div>
+        )}
+        {(fm.first_submission || fm.last_submission) && (
+          <div className="hash-row">
+            <span className="ws-k">SEEN</span>
+            <span className="hash-v dim">
+              {fm.first_submission ? `first ${typeof fm.first_submission === 'number' ? new Date(fm.first_submission*1000).toISOString().slice(0,10) : fm.first_submission}` : ""}
+              {fm.last_submission ? ` · last ${typeof fm.last_submission === 'number' ? new Date(fm.last_submission*1000).toISOString().slice(0,10) : fm.last_submission}` : ""}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {totalEngines > 0 && (
+        <div className="hash-detect">
+          <span className="ws-k">VT VERDICT</span>
+          <span className="hash-v">
+            <span style={{ color: mal >= 10 ? "var(--bad)" : mal > 0 ? "var(--high)" : "var(--ink)" }}>
+              {mal} / {totalEngines} engines malicious
+            </span>
+            {det.threatfox_confidence != null && <span className="dim"> · ThreatFox conf {det.threatfox_confidence}</span>}
+            {det.mb_submissions != null && <span className="dim"> · MB submissions {det.mb_submissions}</span>}
+          </span>
+        </div>
+      )}
+
+      {(c.families?.length > 0) && (
+        <div className="hash-family">
+          <span className="ws-k">FAMILY</span>
+          <span className="hash-v">
+            {c.families.map(f => <span key={f} className="family-chip">{f}</span>)}
+            {c.family_sources && Object.keys(c.family_sources).length > 0 && (
+              <span className="dim"> · sources: {Object.keys(c.family_sources).join(", ")}</span>
+            )}
+          </span>
+        </div>
+      )}
+
+      {c.yara_hits?.length > 0 && (
+        <div className="hash-yara">
+          <span className="ws-k">YARA · {c.yara_hits.length}</span>
+          <div className="yara-list">
+            {c.yara_hits.map((y, i) => (
+              <div key={i} className="yara-row">
+                <span className="yara-rule">{y.rule}</span>
+                {y.author && <span className="dim"> by {y.author}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(c.pe?.imphash || c.pe?.sections > 0) && (
+        <div className="hash-pe">
+          <span className="ws-k">PE</span>
+          <span className="hash-v">
+            {c.pe.imphash && <code>imphash={c.pe.imphash}</code>}
+            {c.pe.sections > 0 && <span className="dim"> · {c.pe.sections} sections</span>}
+          </span>
+        </div>
+      )}
+
+      {c.tags?.length > 0 && (
+        <div className="hash-tags">
+          <span className="ws-k">TAGS</span>
+          <span className="hash-v">{c.tags.slice(0, 20).map(t => <span key={t} className="geo-tag">#{t}</span>)}</span>
+        </div>
+      )}
+
+      {c.c2_pivot && (
+        <div className="hash-c2">
+          <span className="ws-k">C2 PIVOT</span>
+          <span className="hash-v"><Copyable text={c.c2_pivot}><code>{c.c2_pivot}</code></Copyable> <span className="dim">(SSLBL)</span></span>
+        </div>
+      )}
+
+      {c.campaigns?.length > 0 && (
+        <div className="hash-campaigns">
+          <span className="ws-k">CAMPAIGNS · OTX · {c.campaigns.length}</span>
+          <div className="campaigns-list">
+            {c.campaigns.slice(0, 6).map((p, i) => (
+              <div key={i} className="campaign-row">
+                <span className="campaign-name">{p.name}</span>
+                {p.adversary && <span className="dim"> · {p.adversary}</span>}
+                {p.malware_families?.length > 0 && (
+                  <span className="campaign-fams">
+                    {p.malware_families.slice(0, 4).map(f => <span key={f} className="family-chip-sm">{f}</span>)}
+                  </span>
+                )}
+                {p.attack_ids?.length > 0 && (
+                  <span className="campaign-ttps">
+                    {p.attack_ids.slice(0, 4).map(a => <span key={a} className="ttp-chip">{a}</span>)}
+                  </span>
+                )}
+              </div>
+            ))}
+            {c.campaigns.length > 6 && <span className="dim">… +{c.campaigns.length - 6} more</span>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─────────── Domain Core — categories, popularity, TLS, payloads, campaigns ───────────
+
+function DomainCorePanel({ ioc }) {
+  if (ioc.type !== "domain") return null;
+  const c = ioc.core || {};
+  const det = c.detections || {};
+  const tls = c.tls || {};
+  const hasAny = (c.tls && (tls.subject_cn || tls.issuer_cn || tls.jarm))
+    || c.payloads?.length
+    || c.campaigns?.length
+    || Object.keys(c.categories || {}).length
+    || Object.keys(c.popularity || {}).length
+    || c.dns_records?.length
+    || (det.vt && Object.keys(det.vt).length)
+    || det.threatfox_family || det.urlscan_verdict || det.pulsedive_risk;
+  if (!hasAny) return null;
+
+  const cats = Object.entries(c.categories || {});
+  const popularity = Object.entries(c.popularity || {});
+
+  return (
+    <section className="domain-core-panel">
+      <div className="sec-head">
+        <span className="sec-title glitch" data-text="DOMAIN CORE">DOMAIN CORE</span>
+        <span className="sec-meta">classification · TLS · attribution</span>
+      </div>
+
+      {(tls.subject_cn || tls.issuer_cn || tls.jarm) && (
+        <div className="domain-row">
+          <span className="ws-k">TLS CERT</span>
+          <span className="ws-v">
+            {tls.subject_cn ? <>CN={tls.subject_cn}{" "}</> : null}
+            {tls.issuer_cn ? <span className="dim">issuer={tls.issuer_cn}{" "}</span> : null}
+            {tls.not_after ? <span className="dim">exp={tls.not_after}</span> : null}
+            {tls.jarm ? <div className="dim">JARM={tls.jarm}</div> : null}
+          </span>
+        </div>
+      )}
+
+      {cats.length > 0 && (
+        <div className="domain-row">
+          <span className="ws-k">CATEGORIES · {cats.length}</span>
+          <span className="ws-v">{cats.slice(0, 8).map(([src, cat]) => <span key={src} className="cat-chip" title={src}>{cat}</span>)}</span>
+        </div>
+      )}
+
+      {popularity.length > 0 && (
+        <div className="domain-row">
+          <span className="ws-k">POPULARITY</span>
+          <span className="ws-v">{popularity.map(([src, info]) => {
+            const rank = (info && info.rank != null) ? info.rank : info;
+            return <span key={src} className="rank-chip">{src}: #{rank}</span>;
+          })}</span>
+        </div>
+      )}
+
+      {(det.vt && Object.keys(det.vt).length > 0 || det.threatfox_family || det.urlscan_verdict || det.pulsedive_risk) && (
+        <div className="domain-row">
+          <span className="ws-k">DETECTIONS</span>
+          <span className="ws-v">
+            {det.vt?.malicious != null && (
+              <span className="det-chip det-vt">VT: {det.vt.malicious}/{(det.vt.malicious||0)+(det.vt.suspicious||0)+(det.vt.undetected||0)+(det.vt.harmless||0)}</span>
+            )}
+            {det.threatfox_family && <span className="det-chip det-tf">ThreatFox: {det.threatfox_family}</span>}
+            {det.urlscan_verdict && <span className="det-chip det-us">URLscan: {det.urlscan_verdict}</span>}
+            {det.pulsedive_risk && <span className="det-chip det-pd">Pulsedive: {det.pulsedive_risk}</span>}
+          </span>
+        </div>
+      )}
+
+      {c.dns_records?.length > 0 && (
+        <div className="domain-row">
+          <span className="ws-k">DNS · {c.dns_records.length}</span>
+          <div className="dns-list">
+            {c.dns_records.slice(0, 8).map((r, i) => (
+              <code key={i} className="dns-row">
+                <span className="dns-type">{r.type}</span> {r.value} {r.ttl ? <span className="dim">ttl={r.ttl}</span> : null}
+              </code>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {c.payloads?.length > 0 && (
+        <div className="domain-row">
+          <span className="ws-k">URLHAUS PAYLOADS · {c.payloads.length}</span>
+          <div className="payload-list">
+            {c.payloads.map((p, i) => (
+              <div key={i} className="payload-row">
+                <code className="payload-sha">{(p.sha256 || "").slice(0, 16)}…</code>
+                {p.signature && <span className="family-chip">{p.signature}</span>}
+                {p.filename && <span className="dim">{p.filename}</span>}
+                {p.filetype && <span className="dim">· {p.filetype}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {c.campaigns?.length > 0 && (
+        <div className="domain-row">
+          <span className="ws-k">CAMPAIGNS · OTX · {c.campaigns.length}</span>
+          <div className="campaigns-list">
+            {c.campaigns.slice(0, 6).map((p, i) => (
+              <div key={i} className="campaign-row">
+                <span className="campaign-name">{p.name}</span>
+                {p.adversary && <span className="dim"> · {p.adversary}</span>}
+                {p.malware_families?.length > 0 && (
+                  <span className="campaign-fams">
+                    {p.malware_families.slice(0, 4).map(f => <span key={f} className="family-chip-sm">{f}</span>)}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -846,6 +1154,12 @@ function IpCorePanel({ ioc, fmt }) {
   const g = _geoFor(ioc);
   if (!g) return null;
   const ports = g.ports || [];
+  const anon = ioc.anon || null;
+  const core = ioc.core || null;
+  const allHosts = Array.from(new Set([
+    ...((g.hostnames || []).filter(Boolean)),
+    ...((core?.hostnames_extra || []).filter(Boolean)),
+  ]));
 
   return (
     <div className="ip-core-panel">
@@ -881,13 +1195,105 @@ function IpCorePanel({ ioc, fmt }) {
             <span className="ipc-v">{g.org}</span>
           </div>
         )}
-        {g.hostnames && g.hostnames.length > 0 && (
+        {allHosts.length > 0 && (
           <div className="ipc-row">
             <span className="ipc-k">RDNS</span>
-            <span className="ipc-v">{g.hostnames.filter(Boolean).join(", ")}</span>
+            <span className="ipc-v">{allHosts.join(", ")}</span>
+          </div>
+        )}
+        {core?.rdap_cidr && (
+          <div className="ipc-row">
+            <span className="ipc-k">NETWORK</span>
+            <span className="ipc-v">{core.rdap_cidr}{core.network_rir ? " · " + core.network_rir : ""}</span>
+          </div>
+        )}
+        {core?.usage_type && (
+          <div className="ipc-row">
+            <span className="ipc-k">USAGE</span>
+            <span className="ipc-v">
+              {core.usage_type}
+              <span className="dim"> · {Object.keys(core.usage_sources || {}).join(", ")}</span>
+            </span>
+          </div>
+        )}
+        {core?.abuse_confidence != null && (
+          <div className="ipc-row">
+            <span className="ipc-k">ABUSE</span>
+            <span className="ipc-v" style={{ color: core.abuse_confidence >= 75 ? "var(--bad)" : core.abuse_confidence >= 25 ? "var(--med)" : "var(--ink)" }}>
+              {core.abuse_confidence}/100 (AbuseIPDB)
+              {core.fraud_score != null ? <span className="dim"> · IPQS fraud {core.fraud_score}</span> : null}
+            </span>
+          </div>
+        )}
+        {core?.abuse_contact && (
+          <div className="ipc-row">
+            <span className="ipc-k">ABUSE CONTACT</span>
+            <span className="ipc-v"><Copyable text={core.abuse_contact}>{core.abuse_contact}</Copyable></span>
+          </div>
+        )}
+        {(core?.ssl_cert || core?.jarm) && (
+          <div className="ipc-row">
+            <span className="ipc-k">TLS</span>
+            <span className="ipc-v">
+              {core.ssl_cert?.subject_cn ? <>CN={core.ssl_cert.subject_cn}{" "}</> : null}
+              {core.ssl_cert?.issuer_cn ? <span className="dim">issuer={core.ssl_cert.issuer_cn}{" "}</span> : null}
+              {core.ssl_cert?.expires ? <span className="dim">exp={core.ssl_cert.expires}</span> : null}
+              {core.jarm ? <div className="dim">JARM={core.jarm}</div> : null}
+            </span>
           </div>
         )}
       </div>
+
+      {anon && (
+        <div className="ipc-anon">
+          <div className="ipc-anon-head">
+            <span className="ipc-anon-title">ANONYMIZATION</span>
+            <span className="ipc-anon-meta">cross-source consensus</span>
+          </div>
+          <div className="ipc-anon-grid">
+            {anon.is_tor && (
+              <div className="anon-chip anon-tor" title={`Confirmed by: ${(anon.confidence_sources?.tor || []).join(", ")}`}>
+                <span className="anon-k">TOR</span>
+                <span className="anon-v">{anon.tor_hostname || "exit relay"}</span>
+                <span className="anon-cnt">{(anon.confidence_sources?.tor || []).length} src</span>
+              </div>
+            )}
+            {anon.is_vpn && (
+              <div className="anon-chip anon-vpn" title={`Confirmed by: ${(anon.confidence_sources?.vpn || []).join(", ")}`}>
+                <span className="anon-k">VPN</span>
+                <span className="anon-v">{anon.vpn_brand || "unknown brand"}</span>
+                <span className="anon-cnt">{(anon.confidence_sources?.vpn || []).length} src</span>
+              </div>
+            )}
+            {anon.is_proxy && (
+              <div className="anon-chip anon-proxy">
+                <span className="anon-k">PROXY</span>
+                <span className="anon-cnt">{(anon.confidence_sources?.proxy || []).length} src</span>
+              </div>
+            )}
+            {anon.is_residential_proxy && (
+              <div className="anon-chip anon-resproxy">
+                <span className="anon-k">RESIDENTIAL PROXY</span>
+              </div>
+            )}
+            {anon.is_relay && (
+              <div className="anon-chip anon-relay">
+                <span className="anon-k">RELAY</span>
+              </div>
+            )}
+            {anon.is_hosting && (
+              <div className="anon-chip anon-hosting">
+                <span className="anon-k">HOSTING</span>
+              </div>
+            )}
+            {anon.is_mobile && (
+              <div className="anon-chip anon-mobile">
+                <span className="anon-k">MOBILE</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {ports.length > 0 && (
         <div className="ipc-ports">

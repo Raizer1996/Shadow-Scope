@@ -59,3 +59,4 @@ windows_malware_test_sample.*
 
 # Stray
 IOC Analyzer
+audit/
