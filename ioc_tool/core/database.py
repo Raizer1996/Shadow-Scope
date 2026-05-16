@@ -387,6 +387,85 @@ def get_recent_iocs(limit: int = 8) -> list[dict]:
     return rows
 
 
+def find_iocs_by_field(
+    needle: str,
+    *,
+    kind: str = "any",
+    limit: int = 16,
+    exclude_value: str | None = None,
+) -> list[dict]:
+    """Find IOCs whose latest enrichments mention ``needle``.
+
+    Used by the pivot endpoint to surface related infrastructure across
+    the whole workspace, not just whatever happens to be on the recent
+    strip. The match is a case-insensitive substring scan over the JSON
+    text of each enrichment row, with kind-specific refinements:
+
+    * ``kind="tag"`` — needle wrapped in quotes so an array element
+      `"emotet"` matches but the substring "emotetable" doesn't.
+    * ``kind="malware"`` / ``kind="family"`` — same quoted exact match,
+      keyed on either the ``malware`` or ``family`` field shape.
+    * ``kind="registrar"`` — quoted match on the registrar key payload.
+    * ``kind="ioc"`` — search the ``iocs.value`` column directly (cheap
+      direct lookup, no JSON scan).
+    * ``kind="any"`` — bare substring, the most permissive form.
+
+    Returns the same row shape as ``get_recent_iocs`` so the API layer
+    can reuse ``_build_modules_from_cache`` + ``_to_ui_shape`` to ship
+    pivot results in the brutalist UI shape. Empty list when nothing
+    matches — never raises on a malformed needle.
+    """
+    needle = (needle or "").strip()
+    if not needle or limit <= 0:
+        return []
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    if kind == "ioc":
+        # Direct lookup on iocs.value — `LIKE` so the user can pivot on
+        # a partial domain too (e.g. clicking "evil.example" matches
+        # subdomains).
+        sql = (
+            "SELECT id, value, type, last_seen, last_score FROM iocs "
+            "WHERE LOWER(value) LIKE ? "
+        )
+        params: list = [f"%{needle.lower()}%"]
+        if exclude_value:
+            sql += "AND value != ? "
+            params.append(exclude_value)
+        sql += "ORDER BY last_seen DESC LIMIT ?"
+        params.append(int(limit))
+        cursor.execute(sql, params)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return rows
+
+    # JSON-payload scan. The exact-quoted form (`"<needle>"`) prevents
+    # substring false positives for kinds where we know the field is a
+    # string literal in the persisted JSON.
+    if kind in ("tag", "malware", "family", "registrar"):
+        pattern = f'%"{needle.lower()}"%'
+    else:
+        pattern = f"%{needle.lower()}%"
+
+    sql = (
+        "SELECT i.id, i.value, i.type, MAX(e.timestamp) AS last_seen, i.last_score "
+        "FROM iocs i "
+        "JOIN enrichments e ON e.ioc_id = i.id "
+        "WHERE LOWER(e.data) LIKE ? "
+    )
+    params = [pattern]
+    if exclude_value:
+        sql += "AND i.value != ? "
+        params.append(exclude_value)
+    sql += "GROUP BY i.id ORDER BY last_seen DESC LIMIT ?"
+    params.append(int(limit))
+    cursor.execute(sql, params)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Retention / cache maintenance
 # ---------------------------------------------------------------------------

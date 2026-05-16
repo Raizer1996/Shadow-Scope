@@ -222,3 +222,26 @@ window.shadowscopeRecent = async function (limit) {
   }
   return await r.json();
 };
+
+// Pivot lookup — find related IOCs across the whole SQLite cache by
+// tag / malware family / registrar / etc. Used by PivotPanel to widen
+// the "RELATED" view beyond whatever happens to be on the strip.
+// Returns an array of records (may be empty); errors bubble up so the
+// caller can fall back to in-memory results.
+window.shadowscopePivot = async function (kind, value, opts) {
+  opts = opts || {};
+  const params = new URLSearchParams({ kind: String(kind), value: String(value) });
+  if (opts.limit)   params.set("limit", String(opts.limit));
+  if (opts.exclude) params.set("exclude", String(opts.exclude));
+  const headers = {};
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const r = await fetch("/api/ui/pivot?" + params.toString(), { headers });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error("HTTP " + r.status + " " + body.slice(0, 200));
+  }
+  return await r.json();
+};
