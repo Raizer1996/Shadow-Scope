@@ -122,6 +122,7 @@ function App() {
           if (e2.key === "w") setTab("watch");
           if (e2.key === "c") setTab("cases");
           if (e2.key === "d") setTab("diff");
+          if (e2.key === "k") setTab("cache");
           if (e2.key === "s") setSourcesOpen(v => !v);
           window.removeEventListener("keydown", second);
         };
@@ -187,6 +188,7 @@ function App() {
         {tab === "watch"  && <WatchView fmt={fmt} />}
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "diff"   && <DiffView results={results} diffPair={diffPair} setDiffPair={setDiffPair} fmt={fmt} />}
+        {tab === "cache"  && <CacheView />}
       </main>
 
       <StatusBar results={results} />
@@ -337,6 +339,8 @@ function TopBar({ tab, setTab, setSourcesOpen, setHelpOpen }) {
       help: "Investigation cases — group IOCs by campaign (tag via `shadowscope tag <ioc> --case=name`). Empty until you tag IOCs." },
     { id: "diff",   label: "DIFF",   kbd: "g d",
       help: "Side-by-side compare two IOCs' per-source scores. Spots shared infrastructure across a campaign." },
+    { id: "cache",  label: "CACHE",  kbd: "g k",
+      help: "Inspect, prune, or wipe the SQLite enrichment cache. Mirrors `shadowscope cache stats|prune|clear`." },
   ];
   return (
     <header className="topbar">
