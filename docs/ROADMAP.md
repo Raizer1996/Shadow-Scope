@@ -152,6 +152,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [ ] **Celery / RQ task queue** for distributed enrichment. **[issue]**
 - [ ] **Plugin loader** — auto-discover `ioc_tool/modules/*.py` via `importlib`; no edits to `enrich.py` needed. **[issue]**
 - [ ] **Per-source rate-limit handler** — token bucket; back off on 429. **[issue]**
+- [x] **Pivot index** — denormalised `enrichment_fields` side table populated on insert + one-shot backfill at init. Pivot lookups for `kind in (tag, malware, family, registrar)` switch from full-scan LIKE on `enrichments.data` to indexed `(kind, value)` join. New `shadowscope cache reindex` subcommand for manual rebuild. (Future enhancement #3 from session_state.md)
 - [ ] **Provider failover / fallback** — if VT 429s, fall back to AlienVault OTX. **[issue]**
 
 ---

@@ -1291,9 +1291,17 @@ def handle_cache(args: argparse.Namespace) -> None:
         console.print(f"[green]Cleared[/green] {removed} row(s)")
         return
 
+    if action == 'reindex':
+        # Pure side-table rebuild — does not touch enrichments. Safe to
+        # run any time the extractor logic changes or the index gets out
+        # of sync with the source rows.
+        written = database.rebuild_field_index()
+        console.print(f"[green]Indexed[/green] {written} field row(s)")
+        return
+
     # No action → show help.
     console.print(
-        "[yellow]cache: pick a subcommand — stats | prune | clear[/yellow]"
+        "[yellow]cache: pick a subcommand — stats | prune | clear | reindex[/yellow]"
     )
 
 
@@ -1718,6 +1726,11 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         default=False,
         help='Skip the confirmation prompt',
+    )
+
+    cache_sub.add_parser(
+        'reindex',
+        help='Rebuild the enrichment_fields pivot index from the enrichments table',
     )
 
     # cases — list cases or list IOCs for a case

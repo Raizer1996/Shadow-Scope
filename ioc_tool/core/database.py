@@ -119,8 +119,150 @@ def init_db():
         )
     ''')
 
+    # Table: enrichment_fields — denormalised lookup index over the
+    # structured fields stored inside `enrichments.data`. Pivot queries
+    # that previously did `LOWER(data) LIKE '%"needle"%'` (a full table
+    # scan) now hit an indexed (kind, value) lookup. Populated by
+    # `add_enrichment` whenever a row is inserted, plus a one-shot
+    # backfill below for pre-existing caches.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS enrichment_fields (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            enrichment_id INTEGER NOT NULL,
+            ioc_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            value TEXT NOT NULL,
+            FOREIGN KEY (enrichment_id) REFERENCES enrichments (id),
+            FOREIGN KEY (ioc_id) REFERENCES iocs (id)
+        )
+    ''')
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_efields_kind_value '
+        'ON enrichment_fields(kind, value COLLATE NOCASE)'
+    )
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_efields_ioc ON enrichment_fields(ioc_id)'
+    )
+
+    # One-shot backfill: empty index + non-empty enrichments → reindex.
+    # Cheap on small caches, also makes the migration invisible to users.
+    cursor.execute("SELECT COUNT(*) AS n FROM enrichment_fields")
+    if int(cursor.fetchone()["n"]) == 0:
+        cursor.execute("SELECT COUNT(*) AS n FROM enrichments")
+        if int(cursor.fetchone()["n"]) > 0:
+            _backfill_enrichment_fields(cursor)
+
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# enrichment_fields — pivot index
+# ---------------------------------------------------------------------------
+#
+# We index four field kinds chosen to mirror the existing pivot API:
+#   tag       — string elements of any "tag" / "tags" array in the payload
+#   malware   — value of any "malware" field (threatfox + family aliases)
+#   family    — value of any "family" or "signature" field (malwarebazaar)
+#   registrar — value of the WHOIS "registrar" field
+#
+# A small recursive walker yields ``(kind, value)`` pairs for each match.
+# Anything else falls through to the LIKE fallback in
+# ``find_iocs_by_field``.
+
+_FIELD_KEY_TO_KIND: dict[str, str] = {
+    "tag": "tag",
+    "tags": "tag",
+    "malware": "malware",
+    "family": "family",
+    "signature": "family",
+    "registrar": "registrar",
+}
+
+
+def _iter_indexable_fields(payload):  # type: ignore[no-untyped-def]
+    """Yield ``(kind, value)`` pairs found anywhere in a JSON payload.
+
+    Strings → one pair. Lists of strings under an indexable key → one
+    pair per element. Non-string scalars are skipped (numbers, bools, etc).
+    Recurses into nested dicts and lists.
+    """
+    if isinstance(payload, dict):
+        for key, val in payload.items():
+            kind = _FIELD_KEY_TO_KIND.get(key)
+            if kind and isinstance(val, str) and val:
+                yield (kind, val)
+            elif kind and isinstance(val, list):
+                for item in val:
+                    if isinstance(item, str) and item:
+                        yield (kind, item)
+            # Always recurse — nested structures can also carry these keys.
+            yield from _iter_indexable_fields(val)
+    elif isinstance(payload, list):
+        for item in payload:
+            yield from _iter_indexable_fields(item)
+
+
+def _insert_enrichment_fields(cursor, enrichment_id: int, ioc_id: int, data) -> None:
+    """Persist every (kind, value) pair extracted from ``data`` for this row."""
+    seen: set[tuple[str, str]] = set()
+    for kind, value in _iter_indexable_fields(data):
+        key = (kind, value.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        cursor.execute(
+            'INSERT INTO enrichment_fields (enrichment_id, ioc_id, kind, value) '
+            'VALUES (?, ?, ?, ?)',
+            (enrichment_id, ioc_id, kind, value),
+        )
+
+
+def _backfill_enrichment_fields(cursor) -> int:
+    """Replay every enrichment row through the field extractor.
+
+    Run automatically by ``init_db`` when the index table is empty but
+    enrichments already exist. Safe to call repeatedly — TRUNCATEs the
+    target before refilling so dup runs stay idempotent. Returns the
+    total number of indexed rows written.
+    """
+    cursor.execute('DELETE FROM enrichment_fields')
+    cursor.execute('SELECT id, ioc_id, data FROM enrichments')
+    written = 0
+    for row in cursor.fetchall():
+        try:
+            data = json.loads(row["data"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        before = written
+        for kind, value in _iter_indexable_fields(data):
+            cursor.execute(
+                'INSERT INTO enrichment_fields '
+                '(enrichment_id, ioc_id, kind, value) VALUES (?, ?, ?, ?)',
+                (row["id"], row["ioc_id"], kind, value),
+            )
+            written += 1
+        # No-op iteration is fine — many sources just have no indexable
+        # fields. We still record `written` once at the end of each row.
+        _ = before
+    return written
+
+
+def rebuild_field_index() -> int:
+    """Public re-entry to force a full backfill (e.g. after schema change).
+
+    Returns the number of rows written. Callable from CLI or manually
+    via ``python -m ioc_tool.core.database``-style scripts. Does NOT touch
+    enrichments — only the side index.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        written = _backfill_enrichment_fields(cursor)
+        conn.commit()
+        return written
+    finally:
+        conn.close()
 
 
 def tag_ioc(ioc_id: int, tag: str | None = None, case: str | None = None, note: str | None = None) -> int:
@@ -398,6 +540,9 @@ def add_enrichment(ioc_id, source, data, score):
         INSERT INTO enrichments (ioc_id, source, data, timestamp, score)
         VALUES (?, ?, ?, ?, ?)
     ''', (ioc_id, source, json.dumps(data), now, score))
+    enrichment_id = cursor.lastrowid or 0
+    if enrichment_id:
+        _insert_enrichment_fields(cursor, enrichment_id, ioc_id, data)
 
     conn.commit()
     conn.close()
@@ -523,13 +668,34 @@ def find_iocs_by_field(
         conn.close()
         return rows
 
-    # JSON-payload scan. The exact-quoted form (`"<needle>"`) prevents
-    # substring false positives for kinds where we know the field is a
-    # string literal in the persisted JSON.
+    # Indexable kinds hit the `enrichment_fields` side table (built by
+    # ``_insert_enrichment_fields`` at write time). The (kind, value)
+    # index makes this O(log n) lookup instead of the full-scan LIKE on
+    # `enrichments.data` we used to do.
     if kind in ("tag", "malware", "family", "registrar"):
-        pattern = f'%"{needle.lower()}"%'
-    else:
-        pattern = f"%{needle.lower()}%"
+        sql = (
+            "SELECT i.id, i.value, i.type, MAX(e.timestamp) AS last_seen, "
+            "       i.last_score "
+            "FROM enrichment_fields f "
+            "JOIN iocs i ON i.id = f.ioc_id "
+            "JOIN enrichments e ON e.ioc_id = i.id "
+            "WHERE f.kind = ? AND f.value = ? COLLATE NOCASE "
+        )
+        params = [kind, needle]
+        if exclude_value:
+            sql += "AND i.value != ? "
+            params.append(exclude_value)
+        sql += "GROUP BY i.id ORDER BY last_seen DESC LIMIT ?"
+        params.append(int(limit))
+        cursor.execute(sql, params)
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return rows
+
+    # Fallback: `kind="any"` still uses the substring LIKE. Cheaper than
+    # extending the index to "every string anywhere", which would balloon
+    # the side table for marginal value.
+    pattern = f"%{needle.lower()}%"
 
     sql = (
         "SELECT i.id, i.value, i.type, MAX(e.timestamp) AS last_seen, i.last_score "
