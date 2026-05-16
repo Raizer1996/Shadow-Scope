@@ -265,3 +265,60 @@ def test_idn_decoding_failure_still_flags():
     result = heuristics.idn_check("xn--zzz.com")
     assert result is not None
     assert result["score"] == 70
+
+
+# ---------------------------------------------------------------------------
+# TLD reputation
+# ---------------------------------------------------------------------------
+
+
+def test_tld_high_tier_scores_60():
+    result = heuristics.tld_check("freebitcoin.zip")
+    assert result is not None
+    assert result["score"] == 60
+    assert result["tier"] == "high"
+    assert result["tld"] == "zip"
+
+
+def test_tld_medium_tier_scores_30():
+    result = heuristics.tld_check("example.info")
+    assert result is not None
+    assert result["score"] == 30
+    assert result["tier"] == "medium"
+
+
+def test_tld_neutral_returns_none():
+    assert heuristics.tld_check("anthropic.com") is None
+    assert heuristics.tld_check("kernel.org") is None
+    assert heuristics.tld_check("bbc.co.uk") is None
+
+
+def test_tld_case_insensitive():
+    result = heuristics.tld_check("Phish.XYZ")
+    assert result is not None
+    assert result["tld"] == "xyz"
+
+
+def test_tld_trailing_dot_stripped():
+    result = heuristics.tld_check("evil.top.")
+    assert result is not None
+    assert result["tld"] == "top"
+
+
+def test_tld_subdomain_uses_rightmost():
+    result = heuristics.tld_check("login.paypal.support.click")
+    assert result is not None
+    assert result["tld"] == "click"
+    assert result["score"] == 60
+
+
+def test_tld_empty_input_returns_none():
+    assert heuristics.tld_check("") is None
+    assert heuristics.tld_check(".") is None
+
+
+def test_tld_freenom_ccTLDs_flagged():
+    for tld in ("tk", "ml", "ga", "cf", "gq"):
+        result = heuristics.tld_check(f"campaign.{tld}")
+        assert result is not None, tld
+        assert result["tier"] == "high"

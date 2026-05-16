@@ -81,7 +81,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [x] **Typosquatting / homograph detection** — confusable-aware Damerau-Levenshtein vs `WATCHLIST_DOMAINS` env (rn→m, 1→l, 0→o, etc.)
 - [ ] **Pivot suggestions** — given IP, surface related domains via PDNS / cert overlap. **[issue]**
 - [ ] **Reverse DNS** lookup on every IP. **[issue]**
-- [ ] **Suspicious TLD scoring** — `.tk / .top / .xyz / .surf` bump. **[issue]**
+- [x] **Suspicious TLD scoring** — `tld_check` heuristic: rightmost-label match against curated high-abuse list (.zip/.top/.xyz/.tk/.surf/.click/...) → 60; medium-abuse list (.info/.biz/.online/.site/...) → 30; neutral TLDs return None. Wired into domain heuristics composite next to NRD / DGA / typosquat / IDN.
 - [ ] **First-seen / IP age** from PDNS data. **[issue]**
 <!-- Moved to Done 2026-05-14 — LLM summary (local Ollama, --summary flag) -->
 

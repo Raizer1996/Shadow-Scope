@@ -450,6 +450,66 @@ def _watchlist() -> list[str]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# TLD reputation — bump score when the domain sits on an abuse-heavy TLD
+# ---------------------------------------------------------------------------
+#
+# Buckets derived from public abuse-rate reports (Spamhaus "Most Abused TLDs",
+# Interisle Phishing Landscape, abuse.ch URLhaus stats). The "high" tier is
+# TLDs that show abuse rates above the ~30% threshold across multiple feeds;
+# the "medium" tier is consistently above background but mixed with legit
+# usage. Anything not listed scores None — neutral.
+#
+# Score is intentionally a soft signal: 60 / 30 / None — strong enough to
+# bump the composite but not enough to flip a clean IOC to malicious on its
+# own. Pairs well with NRD + DGA — a fresh .xyz with random label is a
+# near-certain campaign domain.
+
+_SUSPICIOUS_TLDS_HIGH = frozenset({
+    # 2023 ICANN gTLDs widely abused for phishing / malware
+    "zip", "mov", "top", "xyz", "surf", "click", "link", "quest",
+    "country", "stream", "cyou", "sbs", "cfd", "lol", "icu", "gdn",
+    # Cheap / free ccTLDs (Freenom-era + survivors)
+    "pw", "tk", "ml", "ga", "cf", "gq",
+    # Spamhaus chronic offenders
+    "work", "review", "date", "men", "download", "loan", "racing",
+    "live", "party", "trade", "webcam", "accountant", "faith",
+    "science", "cricket",
+})
+_SUSPICIOUS_TLDS_MED = frozenset({
+    "info", "biz", "online", "site", "website", "space", "fun",
+    "rest", "uno", "store", "tech", "cam", "monster", "bar", "buzz",
+})
+
+
+def _extract_tld(domain: str) -> str:
+    cleaned = domain.strip().lower().rstrip(".")
+    parts = [p for p in cleaned.split(".") if p]
+    if not parts:
+        return ""
+    return parts[-1]
+
+
+def tld_check(domain: str) -> dict | None:
+    """Score the domain by its TLD's historical abuse rate.
+
+    Returns ``None`` when the TLD is not in either suspicious bucket
+    (the common case — most domains live on neutral TLDs).
+
+    Score mapping:
+        high   → 60   (.zip / .top / .xyz / .tk / .surf / etc.)
+        medium → 30   (.info / .biz / .online / .site / etc.)
+    """
+    tld = _extract_tld(domain)
+    if not tld:
+        return None
+    if tld in _SUSPICIOUS_TLDS_HIGH:
+        return {"score": 60, "tld": tld, "tier": "high"}
+    if tld in _SUSPICIOUS_TLDS_MED:
+        return {"score": 30, "tld": tld, "tier": "medium"}
+    return None
+
+
 def typosquat_check(domain: str, watchlist: list[str] | None = None) -> dict | None:
     """Flag the domain when its label is close to any watchlist brand.
 
