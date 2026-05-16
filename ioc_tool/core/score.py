@@ -1,6 +1,5 @@
 from datetime import datetime
 
-
 # Per-source trust weights for the composite final risk.
 #
 # Tiering rationale:

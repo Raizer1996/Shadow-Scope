@@ -41,8 +41,8 @@ from typing import Any
 from ..modules import (
     abstract_api,
     abuseipdb,
-    crtsh,
     censys,
+    crtsh,
     epss,
     feodo,
     greynoise,

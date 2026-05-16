@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # helpers — every test uses a tmp_path-backed SQLite so we never touch the
 # analyst's real ioc.db. Pattern matches tests/test_cache.py.
