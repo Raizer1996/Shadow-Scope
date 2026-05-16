@@ -177,6 +177,8 @@ function EnrichView({ ioc, fmt, llm, results, setActiveIocId, disabledSources, s
 
       <NamedThreatStrip ioc={ioc} />
       <CveBlock ioc={ioc} />
+      <HashCorePanel ioc={ioc} />
+      <DomainCorePanel ioc={ioc} />
       <MitreStrip ioc={ioc} onPivot={onPivot} />
       <WhoisTimeline ioc={ioc} fmt={fmt} />
       <CrtshBlock ioc={ioc} fmt={fmt} />
