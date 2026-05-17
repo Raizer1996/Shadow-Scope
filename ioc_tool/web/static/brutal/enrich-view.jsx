@@ -1472,6 +1472,9 @@ function LlmVerdict({ ioc, fmt, sev }) {
 function ScoreHistorySparkline({ ioc }) {
   const [data, setData] = React.useState(null);     // null = loading
   const [err, setErr] = React.useState(null);
+  // hoverIdx = index of the snapped data point under the cursor (null = no hover).
+  const [hoverIdx, setHoverIdx] = React.useState(null);
+  const wrapRef = React.useRef(null);
 
   React.useEffect(() => {
     setData(null);
@@ -1487,17 +1490,48 @@ function ScoreHistorySparkline({ ioc }) {
   const points = (data && data.points) || [];
   const W = 600, H = 80, PAD_X = 8, PAD_Y = 6;
 
-  // TODO(v2): per-point hover tooltip surfacing score + ISO ts.
-  const path = React.useMemo(() => {
-    if (points.length === 0) return "";
+  // Pre-compute pixel coords once so both the path and the hover marker
+  // agree on point positions (viewBox coords, not screen pixels).
+  const coords = React.useMemo(() => {
+    if (points.length === 0) return [];
     const maxScore = Math.max(100, ...points.map(p => p.score || 0));
     const n = points.length;
     return points.map((p, i) => {
       const x = n === 1 ? W / 2 : PAD_X + ((W - 2 * PAD_X) * i) / (n - 1);
       const y = H - PAD_Y - ((H - 2 * PAD_Y) * (p.score || 0)) / maxScore;
-      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(" ");
+      return { x, y };
+    });
   }, [points]);
+
+  const path = React.useMemo(() => coords.map(
+    (c, i) => `${i === 0 ? "M" : "L"}${c.x.toFixed(1)},${c.y.toFixed(1)}`
+  ).join(" "), [coords]);
+
+  // Map cursor X (screen) → nearest data point index. Snap-to-point is
+  // simpler than tracking continuous X and matches how analysts read
+  // discrete daily snapshots.
+  const onMove = React.useCallback((e) => {
+    if (!wrapRef.current || coords.length === 0) return;
+    const rect = wrapRef.current.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const localX = e.clientX - rect.left;
+    const vbX = (localX / rect.width) * W;          // map screen → viewBox
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < coords.length; i++) {
+      const d = Math.abs(coords[i].x - vbX);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    setHoverIdx(best);
+  }, [coords]);
+
+  const onLeave = React.useCallback(() => setHoverIdx(null), []);
+
+  const hovered = hoverIdx !== null ? points[hoverIdx] : null;
+  const hoveredCoord = hoverIdx !== null ? coords[hoverIdx] : null;
+  // Position the floating div using viewBox→percent so it tracks the
+  // marker even as the SVG scales responsively.
+  const tipLeftPct = hoveredCoord ? (hoveredCoord.x / W) * 100 : 0;
+  const tipTopPct = hoveredCoord ? (hoveredCoord.y / H) * 100 : 0;
 
   return (
     <section className="score-history-block" style={{ padding: "8px 12px", borderTop: "1px solid var(--line)" }}>
@@ -1511,11 +1545,44 @@ function ScoreHistorySparkline({ ioc }) {
         <div className="dim small" style={{ padding: "8px 0" }}>// No score history</div>
       )}
       {points.length > 0 && (
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
-             style={{ width: "100%", height: H, display: "block",
-                      background: "var(--bg-2)", border: "1px solid var(--line)" }}>
-          <path d={path} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
-        </svg>
+        <div ref={wrapRef}
+             className="score-history-wrap"
+             style={{ position: "relative" }}
+             onMouseMove={onMove}
+             onMouseLeave={onLeave}>
+          <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+               style={{ width: "100%", height: H, display: "block",
+                        background: "var(--bg-2)", border: "1px solid var(--line)" }}>
+            <path d={path} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
+            {hoveredCoord && (
+              <circle cx={hoveredCoord.x} cy={hoveredCoord.y} r="2.5"
+                      fill="var(--accent)" stroke="var(--ink)" strokeWidth="0.5"
+                      vectorEffect="non-scaling-stroke" />
+            )}
+          </svg>
+          {hovered && (
+            <div className="score-history-tooltip"
+                 style={{
+                   position: "absolute",
+                   left: `${tipLeftPct}%`,
+                   top: `${tipTopPct}%`,
+                   transform: tipLeftPct > 70
+                     ? "translate(-100%, -100%) translate(-6px, -6px)"
+                     : "translate(0, -100%) translate(6px, -6px)",
+                   background: "var(--bg-2)",
+                   border: "1px solid var(--line-2)",
+                   color: "var(--ink)",
+                   font: "11px/1.3 ui-monospace, Menlo, monospace",
+                   padding: "3px 6px",
+                   pointerEvents: "none",
+                   whiteSpace: "nowrap",
+                   zIndex: 4,
+                 }}>
+              <div>Score: <span style={{ color: "var(--accent)" }}>{hovered.score}</span></div>
+              <div className="dim small">{hovered.recorded_at}</div>
+            </div>
+          )}
+        </div>
       )}
     </section>
   );
