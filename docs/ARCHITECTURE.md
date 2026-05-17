@@ -231,9 +231,13 @@ Bearer token via the `SHADOWSCOPE_API_TOKEN` env var.
 * **Unset** — auth disabled. Suitable for localhost-only homelab use.
 * **Set** — every endpoint except `/health` requires `Authorization: Bearer <token>`. Missing/malformed header → `401`. Wrong token → `403`. Error messages are deliberately generic and never reveal whether the token is configured.
 
+`/api/ui/events` (the SSE stream consumed by the dashboard) accepts the token via the `?token=<v>` query param instead of `Authorization:` — `EventSource` can't set request headers. Same env var, same comparison. The dashboard's `shadowscopeSubscribeEvents` helper appends it from `sessionStorage.ss_api_token` automatically.
+
+`SHADOWSCOPE_SSE_HEARTBEAT_S` (default `25.0`) controls how often `/api/ui/events` emits a `: heartbeat` comment line when the bus is idle. Lower it in tests; raise it if a proxy in front of ShadowScope tolerates longer idles.
+
 ### CORS
 
-Configured via `SHADOWSCOPE_CORS_ORIGINS` (comma-separated origins). Default `*` — permissive on the assumption the homelab network is private. Override to lock to the dashboard origin in production-style deployments, e.g. `SHADOWSCOPE_CORS_ORIGINS=https://secops.lan`.
+Configured via `SHADOWSCOPE_CORS_ORIGINS` (comma-separated origins). Defaults: `*` (open) when `SHADOWSCOPE_API_TOKEN` is unset; `http://localhost:8765,http://127.0.0.1:8765` (loopback only) when the token is set so a stolen token can't be replayed cross-origin. Override explicitly to lock to a non-loopback dashboard origin in production-style deployments, e.g. `SHADOWSCOPE_CORS_ORIGINS=https://secops.lan`.
 
 ### Integration with homelab consumers
 

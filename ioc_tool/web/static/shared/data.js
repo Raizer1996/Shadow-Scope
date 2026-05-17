@@ -296,17 +296,26 @@ window.shadowscopeScoreHistory = async function (value, limit) {
 // doesn't hammer the server. The `onScore` callback receives every
 // `score` event payload as `{ioc, score, ...}`; `onHello` fires once
 // per fresh connection. Auth: EventSource can't set headers, so the
-// token is appended as a `?token=` query string when present —
-// /api/ui/events deliberately has no auth dependency, so this is a
-// no-op for the current backend; kept for forward compat.
+// token is appended as a `?token=` query string. When the backend has
+// `SHADOWSCOPE_API_TOKEN` configured the stream is gated; without a
+// matching ?token= it returns 401 and the EventSource onerror path
+// triggers the backoff reconnect (which is a quiet no-op until the
+// user provides a token via the auth banner / sessionStorage).
 window.shadowscopeSubscribeEvents = function (onScore, onHello, onError) {
   let es = null;
   let backoff = 1000;
   let closed = false;
   let timer = null;
 
-  const url = "/api/ui/events";
+  const buildUrl = () => {
+    let tok = null;
+    try { tok = sessionStorage.getItem("ss_api_token"); } catch (e) {}
+    return tok
+      ? "/api/ui/events?token=" + encodeURIComponent(tok)
+      : "/api/ui/events";
+  };
   const connect = () => {
+    const url = buildUrl();
     if (closed) return;
     try {
       es = new EventSource(url);
