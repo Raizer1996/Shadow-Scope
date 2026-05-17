@@ -117,15 +117,18 @@ function BatchView({ results, setActiveIocId, setTab, fmt }) {
 // ─────────── Watch (live stream) ───────────
 
 function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
-  // Cache-wide history — every IOC ever enriched, newest first. Backed
-  // by /api/ui/recent (limit bumped to 500 server-side for this view).
-  // Polls every 8s for fresh enrichments. Pause halts the poll but
-  // keeps the rendered list. Filter "big" surfaces only |Δ| ≥ 20.
+  // Cache-wide history — every IOC ever enriched, newest first. Seeded
+  // from /api/ui/recent (limit bumped to 500 server-side for this view)
+  // then kept fresh via the /api/ui/events SSE stream. A slow 60 s
+  // fallback poll covers proxies that strip SSE (chunked transfer
+  // disabled). Pause halts re-enrichment refreshes; filter "big"
+  // surfaces only |Δ| ≥ 20.
   const [feed, setFeed] = React.useState([]);
   const [paused, setPaused] = React.useState(false);
   const [filter, setFilter] = React.useState("all");
   const [err, setErr] = React.useState(null);
   const [loadedAt, setLoadedAt] = React.useState(null);
+  const [sseConnected, setSseConnected] = React.useState(false);
 
   const reload = React.useCallback(() => {
     if (!window.shadowscopeRecent) return;
@@ -140,9 +143,33 @@ function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
 
   React.useEffect(() => { reload(); }, [reload]);
 
+  // SSE wiring — push-based updates replace the 8 s poll. On each
+  // `score` event we re-pull /api/ui/recent so the row payload
+  // (modules, agreement, geo) is the same shape the rest of the UI
+  // expects. Cheap: the cache hit returns instantly. Closed on
+  // unmount; the helper handles auto-reconnect with exponential
+  // backoff capped at 30 s.
   React.useEffect(() => {
     if (paused) return;
-    const t = setInterval(reload, 8000);
+    if (!window.shadowscopeSubscribeEvents) return;
+    const handle = window.shadowscopeSubscribeEvents(
+      (_score) => { reload(); },
+      (_hello) => {
+        setSseConnected(true);
+        // eslint-disable-next-line no-console
+        console.log("[shadowscope] SSE connected:", _hello);
+      },
+      (_err) => { setSseConnected(false); },
+    );
+    return () => { try { handle && handle.close(); } catch (e) {} };
+  }, [paused, reload]);
+
+  // Safety-net poll — slow (60 s) so we hardly ever hit it under
+  // healthy SSE, but covers the case where a reverse proxy buffers
+  // event-stream responses or kills the connection silently.
+  React.useEffect(() => {
+    if (paused) return;
+    const t = setInterval(reload, 60000);
     return () => clearInterval(t);
   }, [paused, reload]);
 
@@ -187,7 +214,7 @@ function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
           <button className="pill" onClick={reload}>refresh</button>
         </div>
         <span className="dim small">
-          {feed.length} cached IOC{feed.length !== 1 ? "s" : ""} · sourced /api/ui/recent
+          {feed.length} cached IOC{feed.length !== 1 ? "s" : ""} · {sseConnected ? "SSE" : "poll"}
           {loadedAt && ` · ${loadedAt.toTimeString().slice(0, 8)}`}
         </span>
       </div>
