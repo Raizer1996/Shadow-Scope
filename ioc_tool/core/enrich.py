@@ -66,7 +66,7 @@ from ..modules import (
 from ..modules import (
     asn as asn_mod,
 )
-from . import allowlist, database, heuristics, parser, score
+from . import allowlist, database, heuristics, http, parser, score
 
 # Per-call ``--no-cache`` toggle — propagates from enrich_ioc{,_async}
 # into _run_source via a ContextVar so we don't have to thread the flag
@@ -109,6 +109,31 @@ def _cache_ttl_hours() -> float:
 _DEFAULT_RETENTION_DAYS = 90.0
 _AUTO_PRUNE_INTERVAL_HOURS = 24.0
 _auto_prune_done: set[str] = set()  # workspaces already checked this process
+
+
+# ---------------------------------------------------------------------------
+# Provider failover (VT → OTX on 429)
+# ---------------------------------------------------------------------------
+#
+# VirusTotal's free tier (4 req/min) is the tightest in the fan-out; OTX
+# (10 req/min default) covers the same IP/domain/hash territory with
+# overlapping coverage. When the rate-limit ledger flags VT as throttled
+# during this fan-out, we add OTX synchronously (if it wasn't already in
+# the planned task list) and stamp a ``fallback_used`` annotation on the
+# VT entry so the analyst can see we substituted.
+#
+# The decision is purely additive — it never modifies the composite score
+# formula. Opt out via ``SHADOWSCOPE_FAILOVER_DISABLE=1``.
+
+# Subset of IOC types that overlap between VT and OTX. URL is excluded
+# deliberately: the task spec scopes failover to IP/domain/hash.
+_OTX_FAILOVER_TYPES = frozenset({"ip", "domain", "hash"})
+
+
+def _failover_enabled() -> bool:
+    """Default-on. ``SHADOWSCOPE_FAILOVER_DISABLE=1`` skips the fallback path."""
+    raw = os.getenv("SHADOWSCOPE_FAILOVER_DISABLE", "").strip().lower()
+    return raw not in {"1", "true", "yes", "on"}
 
 
 def _retention_days() -> float:
@@ -338,6 +363,79 @@ def _tor_check(value: str) -> _SourceResult | None:
 
 
 # ---------------------------------------------------------------------------
+# VT → OTX failover helper
+# ---------------------------------------------------------------------------
+
+
+def _apply_vt_otx_failover(
+    value: str,
+    ioc_type: str,
+    ioc_id: int,
+    results: dict[str, Any],
+    scores: list[tuple[str, int]],
+    planned_sources: set[str],
+) -> None:
+    """Patch the per-IOC result dict with the VT→OTX failover annotation.
+
+    Called only when ``core.http`` has flagged ``virustotal`` as rate-
+    limited during the just-completed fan-out, failover is enabled, and
+    the IOC type overlaps with OTX coverage.
+
+    Behaviour:
+
+    * If OTX wasn't in the planned task list, run it synchronously now
+      and stuff the result into ``results`` / ``scores`` as if it had
+      been there all along (so the rest of the composite formula sees a
+      uniform shape).
+    * Stamp a ``fallback_used`` field on the ``VirusTotal`` entry — even
+      when VT had no entry (its fetcher returned ``None``), so the
+      analyst can see that we *tried* and substituted. In that case we
+      synthesise a minimal placeholder entry under the ``VirusTotal``
+      key whose ``data`` is just the annotation.
+
+    The function is deliberately silent on failure: any exception from
+    the synchronous OTX call collapses to a no-op so the orchestrator's
+    never-crash contract holds.
+    """
+    # 1) Make sure OTX ran. If not, run it inline now.
+    if 'otx' not in planned_sources:
+        try:
+            otx_result = _run_source(
+                ioc_id, 'otx', 'OTX',
+                lambda: otx.enrich(value, ioc_type),
+                score.calculate_otx_score,
+            )
+        except Exception:
+            otx_result = None
+        if otx_result is not None:
+            display_name, data, src_score, contributes = otx_result
+            results[display_name] = {'score': src_score, 'data': data}
+            if contributes:
+                scores.append((display_name, src_score))
+        planned_sources.add('otx')
+
+    # 2) Annotate the VT entry. If VT silently dropped (no row in
+    #    results), create a placeholder so the annotation is visible.
+    vt_entry = results.get('VirusTotal')
+    if vt_entry is None:
+        results['VirusTotal'] = {
+            'score': 0,
+            'data': {'rate_limited': True, 'fallback_used': 'otx'},
+        }
+    else:
+        existing_data = vt_entry.get('data')
+        if isinstance(existing_data, dict):
+            existing_data['fallback_used'] = 'otx'
+        else:
+            # Defensive: shouldn't happen for VT, but if `data` is non-dict
+            # we attach the annotation alongside it without clobbering.
+            vt_entry['data'] = {
+                'value': existing_data,
+                'fallback_used': 'otx',
+            }
+
+
+# ---------------------------------------------------------------------------
 # Async orchestrator
 # ---------------------------------------------------------------------------
 
@@ -363,12 +461,17 @@ async def enrich_ioc_async(
     # workspace per day. Silent on failure so this can't break enrichment.
     maybe_auto_prune()
 
-    token = no_cache_ctx.set(no_cache) if no_cache else None
+    no_cache_token = no_cache_ctx.set(no_cache) if no_cache else None
+    # Fresh rate-limit ledger for this fan-out. Any module hitting a 429
+    # via core.http will record its source key here; the failover hook
+    # in _enrich_ioc_inner reads the ledger after gather.
+    ledger_token = http.rate_limited_ctx.set(set())
     try:
         return await _enrich_ioc_inner(value, ioc_type)
     finally:
-        if token is not None:
-            no_cache_ctx.reset(token)
+        http.rate_limited_ctx.reset(ledger_token)
+        if no_cache_token is not None:
+            no_cache_ctx.reset(no_cache_token)
 
 
 async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
@@ -393,12 +496,17 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     ioc_id = database.add_or_update_ioc(value, ioc_type)
     tasks: list = []
+    # Track which source keys are already in the planned fan-out so the
+    # post-gather failover hook can tell "OTX already ran normally" from
+    # "OTX needs to be added because VT 429'd and OTX wasn't planned".
+    planned_sources: set[str] = set()
 
     # --- VirusTotal — all IOC types ---
     tasks.append(asyncio.to_thread(
         _run_source, ioc_id, 'virustotal', 'VirusTotal',
         _vt_fetcher(value, ioc_type), _vt_scorer,
     ))
+    planned_sources.add('virustotal')
 
     # --- AbuseIPDB — IP only ---
     if ioc_type == 'ip':
@@ -497,6 +605,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             lambda: otx.enrich(value, ioc_type),
             score.calculate_otx_score,
         ))
+        planned_sources.add('otx')
 
     # --- URLscan.io — IP / domain / URL ---
     if ioc_type in ('ip', 'domain', 'url'):
@@ -600,6 +709,21 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         results[display_name] = {'score': src_score, 'data': data}
         if contributes:
             scores.append((display_name, src_score))
+
+    # ---------------------------------------------------------------------
+    # Provider failover hook — VT 429 → OTX
+    # ---------------------------------------------------------------------
+    # If VT got throttled (recorded in the rate-limit ledger by core.http)
+    # AND failover is enabled AND the IOC type is one OTX covers, run OTX
+    # synchronously now (if it wasn't already planned) and annotate the VT
+    # result dict with the fallback source.  Purely additive: does NOT
+    # touch the score that feeds calculate_final_risk.
+    if (
+        _failover_enabled()
+        and ioc_type in _OTX_FAILOVER_TYPES
+        and http.was_rate_limited('virustotal')
+    ):
+        _apply_vt_otx_failover(value, ioc_type, ioc_id, results, scores, planned_sources)
 
     # ---------------------------------------------------------------------
     # Local heuristics — pure functions on data we already have.

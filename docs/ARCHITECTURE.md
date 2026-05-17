@@ -54,6 +54,8 @@ The modules stay sync (`requests`-based) on purpose. Switching to `aiohttp` woul
 
 Per-source exceptions are caught at the gather layer (`return_exceptions=True`) and silently dropped, matching the existing "API failures return `None` — never crash the CLI" contract.
 
+**Provider failover (VT → OTX).** `core/http.py` keeps a per-task `rate_limited_ctx` ContextVar; when an upstream returns a 429 we can't escape via retry (or our own token bucket refuses), the helper records the source key in that ledger. After the fan-out completes, `core/enrich._apply_vt_otx_failover` checks the ledger — if `virustotal` is flagged and the IOC type is IP/domain/hash, the VT result entry is stamped with `fallback_used: 'otx'` (synthesising a placeholder if VT returned `None`), and OTX is invoked synchronously when it wasn't already in the planned task list. The annotation is transparency-only and does not feed into `calculate_final_risk`. Set `SHADOWSCOPE_FAILOVER_DISABLE=1` to disable.
+
 ## Module map
 
 | Path | Purpose |
