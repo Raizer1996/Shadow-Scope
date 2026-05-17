@@ -54,7 +54,9 @@ The modules stay sync (`requests`-based) on purpose. Switching to `aiohttp` woul
 
 Per-source exceptions are caught at the gather layer (`return_exceptions=True`) and silently dropped, matching the existing "API failures return `None` — never crash the CLI" contract.
 
-**Provider failover (VT → OTX).** `core/http.py` keeps a per-task `rate_limited_ctx` ContextVar; when an upstream returns a 429 we can't escape via retry (or our own token bucket refuses), the helper records the source key in that ledger. After the fan-out completes, `core/enrich._apply_vt_otx_failover` checks the ledger — if `virustotal` is flagged and the IOC type is IP/domain/hash, the VT result entry is stamped with `fallback_used: 'otx'` (synthesising a placeholder if VT returned `None`), and OTX is invoked synchronously when it wasn't already in the planned task list. The annotation is transparency-only and does not feed into `calculate_final_risk`. Set `SHADOWSCOPE_FAILOVER_DISABLE=1` to disable.
+**Provider failover (VT → OTX).** `core/http.py` keeps a per-task `rate_limited_ctx` ContextVar; when an upstream returns a 429 we can't escape via retry (or our own token bucket refuses), the helper records the source key in that ledger. After the fan-out completes, `core/enrich._apply_vt_otx_failover` checks the ledger — if `virustotal` is flagged and the IOC type is one of the **URL-coverage-limited** set defined by `_OTX_FAILOVER_TYPES` (currently `{"ip", "domain", "hash"}` — URL is deliberately excluded because OTX's URL coverage is significantly thinner than VT's), the VT result entry is stamped with `fallback_used: 'otx'` (synthesising a placeholder if VT returned `None`), and OTX is invoked synchronously when it wasn't already in the planned task list. The annotation is transparency-only and does not feed into `calculate_final_risk`. Set `SHADOWSCOPE_FAILOVER_DISABLE=1` to disable.
+
+**HTTP layer unification.** As of #61 + #65 every enrichment module — all 24 of them — issues outbound requests through `ioc_tool/core/http.py` rather than calling `requests.get` / `requests.post` directly. The helper centralises: per-source token-bucket rate limiting (see `core/ratelimit._DEFAULT_BUCKETS`), the 429 ledger that drives the VT→OTX failover above, request-time logging, and uniform timeout / retry semantics. Any new module **must** route through `core.http`; direct `requests` usage is now a review smell.
 
 ## Module map
 
@@ -175,6 +177,21 @@ The feature is purely additive — disable it by omitting the flag/query param, 
 
 All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. See [`API_KEYS.md`](API_KEYS.md) for provider details.
 
+### Behavioural env vars (no key required)
+
+| Variable | Purpose |
+|----------|---------|
+| `SHADOWSCOPE_WEBHOOK_URL` | Default outbound webhook for `shadowscope enrich --webhook ...`. Resolved at handler time so wrapping scripts can set it after import; `--webhook` on the command line wins when both are present. |
+| `SHADOWSCOPE_WEBHOOK_ALLOW_PRIVATE` | (Coordinated with CORE agent's SSRF hardening — may not be merged yet.) When `1`, the webhook helper will permit outbound POSTs to private/loopback IP ranges. Default unset = block to mitigate SSRF abuse via user-supplied URLs. Refer to the matching CORE PR for the authoritative semantics. |
+| `RATELIMIT_WEBHOOK` | Override the outbound `webhook` token-bucket. Format `CAPACITY/PERIOD_SECONDS`, e.g. `RATELIMIT_WEBHOOK=20/1` for 20/s. Default `10/1`. |
+| `RATELIMIT_WEBHOOK_DISABLE` | `1` disables the `webhook` bucket entirely — useful for tests / one-shot deliveries that already gate concurrency upstream. |
+| `RATELIMIT_<SOURCE>` / `RATELIMIT_<SOURCE>_DISABLE` | Per-source overrides for any bucket in `_DEFAULT_BUCKETS` (vt, otx, pdns, …). Format mirrors `RATELIMIT_WEBHOOK`. |
+| `SHADOWSCOPE_FAILOVER_DISABLE` | `1` disables the VT→OTX failover described above. |
+| `CACHE_TTL_HOURS` | Refetch threshold (default 24 h, float ok). |
+| `RETENTION_DAYS` | Per-(ioc, source) row age cap before the in-process janitor prunes (default 90 d). |
+| `AUTO_PRUNE` | `0` disables the in-process janitor entirely. |
+| `WATCHLIST_DOMAINS`, `ALLOWLIST_CIDRS`, `ALLOWLIST_DOMAINS` | Heuristics / pre-enrichment filters; see comments in `.env.example`. |
+
 ## Conventions
 
 - **Language**: Python 3.10+ (developed on 3.13)
@@ -219,6 +236,8 @@ All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. 
 | GET    | `/api/ui/cases` | List every case in the workspace with member IOC values, count, derived severity (max member `last_score`), and earliest tag creation as `opened`. Backs the Cases tab. |
 | PATCH  | `/api/ui/iocs/{value}/case` | Body `{"case": "<name>" \| null}` — assign or detach. Refangs the path value. 404 when the IOC isn't in the cache (enrich first). An IOC can belong to at most one case at a time; reassigning replaces the prior tag row. |
 | DELETE | `/api/ui/cases/{case}` | Detach every IOC from a case. The underlying IOCs + their enrichments are preserved; only the case relationship is removed. Idempotent: unknown case returns `removed: 0`. |
+| GET    | `/api/ui/score_history?ioc=<v>[&limit=N]` | Per-IOC score timeline from the `score_history` table (#58). Powers the dashboard sparkline. Each row is `{captured_at, score}`; newest first; `limit` defaults to 50, max 500. |
+| GET    | `/api/ui/events` | Server-Sent Events stream of dashboard-relevant deltas (#59 + #62). Event types: `enrichment` (new IOC finished), `score_delta` (cached IOC re-enriched with a different score), `case` (case mutation). In-process broadcaster only — late subscribers see events from connect time onward, not history. |
 | GET    | `/ui` | Dashboard SPA shell (HTML). No auth — the data behind it is what's gated. |
 | GET    | `/static/*` | Dashboard CSS / JS assets. No auth. |
 
