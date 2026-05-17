@@ -25,10 +25,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import requests
+from ..core import http
 
 BASE_URL = "https://api.platform.censys.io/v3"
-_TIMEOUT = 10
+_TIMEOUT = 10  # tuned override
+
+# Per-source bucket key — registry default caps Censys at 10 req/min;
+# Platform free tier is 500 queries/month.
+_SOURCE = "censys"
 
 
 def host_lookup(ip: str) -> dict[str, Any]:
@@ -37,14 +41,14 @@ def host_lookup(ip: str) -> dict[str, Any]:
     if not token:
         return {}
 
-    try:
-        resp = requests.get(
-            f"{BASE_URL}/global/asset/host/{ip}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            timeout=_TIMEOUT,
-        )
-    except requests.RequestException as exc:
-        return {"error": f"request failed: {exc}"}
+    resp = http.get(
+        _SOURCE,
+        f"{BASE_URL}/global/asset/host/{ip}",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        timeout=_TIMEOUT,
+    )
+    if resp is None:
+        return {"error": "request failed"}
 
     if resp.status_code == 401:
         return {"error": "Censys: 401 unauthorized — check CENSYS_API_KEY"}

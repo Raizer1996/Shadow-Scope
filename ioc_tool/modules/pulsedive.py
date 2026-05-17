@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import os
 
-import requests
+from ..core import http
 
 BASE_URL = "https://pulsedive.com/api/info.php"
-TIMEOUT = 10
+TIMEOUT = 10  # tuned override — Pulsedive responds quickly
+
+# Per-source bucket key — registry default caps Pulsedive at 10 req/min.
+_SOURCE = "pulsedive"
 
 
 def enrich(value: str, ioc_type: str) -> dict | None:
@@ -39,9 +42,8 @@ def enrich(value: str, ioc_type: str) -> dict | None:
     if api_key:
         params["key"] = api_key
 
-    try:
-        response = requests.get(BASE_URL, params=params, timeout=TIMEOUT)
-    except requests.exceptions.RequestException:
+    response = http.get(_SOURCE, BASE_URL, params=params, timeout=TIMEOUT)
+    if response is None:
         return None
     if response.status_code != 200:
         return None
