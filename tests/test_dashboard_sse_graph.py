@@ -112,6 +112,35 @@ def test_enrich_view_renders_sparkline_component(client):
     assert "shadowscopeScoreHistory" in body
 
 
+def test_sparkline_has_hover_tooltip_markup(client):
+    """``ScoreHistorySparkline`` must surface a per-point hover tooltip.
+
+    The component renders an absolutely-positioned div near the snapped
+    data point showing ``Score: <n>`` plus the ISO timestamp
+    (``recorded_at`` field on each point). We pin a handful of stable
+    markers so an accidental revert to the old no-tooltip render is
+    caught at the static-asset layer, since the project has no JS
+    runtime in CI.
+    """
+    r = client.get("/static/brutal/enrich-view.jsx")
+    assert r.status_code == 200
+    body = r.text
+    # Hover state + mouse handlers wired on the wrapper.
+    assert "score-history-tooltip" in body
+    assert "score-history-wrap" in body
+    assert "onMouseMove" in body
+    assert "onMouseLeave" in body
+    # The two pieces of data the tooltip surfaces.
+    assert "Score:" in body
+    assert "hovered.recorded_at" in body
+    # Snap-to-nearest-point marker (small circle highlighting the
+    # selected point so analysts can see what the tooltip refers to).
+    assert "<circle" in body
+    # The deferred-work marker from PR #62 must be gone — its presence
+    # would mean the feature was reverted but the comment left behind.
+    assert "TODO(v2)" not in body
+
+
 def test_score_history_endpoint_empty_for_unknown_ioc(client):
     """``/api/ui/score_history/{value}`` returns 404 for IOCs not in cache.
 
