@@ -1,8 +1,11 @@
 import os
 
-import requests
+from ..core import http
 
 BASE_URL = "https://www.filescan.io/api"
+
+# Per-source bucket — community tier, polite cap.
+_SOURCE = 'filescan_io'
 
 def get_headers():
     return {
@@ -19,7 +22,9 @@ def submit_file(file_path):
         with open(file_path, 'rb') as f:
             files = {'file': f}
             # FileScan.IO often requires minimal params, or just the file
-            response = requests.post(url, headers=get_headers(), files=files)
+            response = http.post(_SOURCE, url, headers=get_headers(), files=files)
+            if response is None:
+                return {"error": "request failed"}
 
             if response.status_code == 200:
                 data = response.json()
@@ -45,7 +50,9 @@ def submit_url(target_url):
     data = {'url': target_url}
 
     try:
-        response = requests.post(url, headers=get_headers(), data=data)
+        response = http.post(_SOURCE, url, headers=get_headers(), data=data)
+        if response is None:
+            return {"error": "request failed"}
         if response.status_code == 200:
             data = response.json()
             flow_id = data.get('flow_id')

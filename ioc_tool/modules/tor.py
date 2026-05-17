@@ -19,12 +19,16 @@ want a tighter (or looser) refresh cadence.
 import os
 import time
 
-import requests
+from ..core import http
 
 TOR_EXIT_LIST_URL = "https://check.torproject.org/torbulkexitlist"
 CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'tor_nodes.txt')
 
 _DEFAULT_TTL_HOURS = 24.0
+
+# Per-source bucket — exit list is refreshed on a 24h TTL, so a
+# low-and-slow rate (4/hour) is plenty.
+_SOURCE = "tor"
 
 
 def _ttl_seconds() -> float:
@@ -54,8 +58,10 @@ def _cache_is_stale() -> bool:
 
 def update_tor_list() -> bool:
     """Fetch the latest exit-node list. Returns True on success."""
+    response = http.get(_SOURCE, TOR_EXIT_LIST_URL, timeout=5)
+    if response is None:
+        return False
     try:
-        response = requests.get(TOR_EXIT_LIST_URL, timeout=5)
         if response.status_code == 200:
             os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
             with open(CACHE_FILE, 'w') as f:

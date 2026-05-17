@@ -21,11 +21,14 @@ from __future__ import annotations
 
 from typing import Any
 
-import requests
+from ..core import http
 
 BASE_URL = "https://crt.sh/"
-TIMEOUT = 20  # seconds — crt.sh can be slow under load
+TIMEOUT = 20  # seconds — crt.sh can be slow under load (preserve tuned override)
 MAX_RESULTS_KEPT = 50  # keep the diff compact when caching
+
+# Per-source bucket — public CT search; cap politely since it's slow.
+_SOURCE = "crtsh"
 
 
 def enrich_domain(value: str) -> dict | None:
@@ -36,13 +39,13 @@ def enrich_domain(value: str) -> dict | None:
     most-recent certificate, and a sample of issuers — enough to drive
     risk scoring without bloating the cache.
     """
-    try:
-        response = requests.get(
-            BASE_URL,
-            params={"q": f"%.{value}", "output": "json"},
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.get(
+        _SOURCE,
+        BASE_URL,
+        params={"q": f"%.{value}", "output": "json"},
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
     if response.status_code != 200:
         return None

@@ -26,10 +26,13 @@ never raise.
 
 from __future__ import annotations
 
-import requests
+from ..core import http
 
 BASE_URL = "https://api.first.org/data/v1/epss"
-TIMEOUT = 10  # seconds
+TIMEOUT = 10  # seconds — preserve original tuned override
+
+# Per-source bucket — FIRST.org is generous, polite cap.
+_SOURCE = "epss"
 
 
 def enrich_cve(value: str) -> dict | None:
@@ -39,13 +42,13 @@ def enrich_cve(value: str) -> dict | None:
     ``cve``, ``epss``, ``percentile``, ``date`` keys) or ``None`` on
     no-hit / network error / non-200 status / malformed payload.
     """
-    try:
-        response = requests.get(
-            BASE_URL,
-            params={"cve": value},
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.get(
+        _SOURCE,
+        BASE_URL,
+        params={"cve": value},
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
 
     if response.status_code != 200:

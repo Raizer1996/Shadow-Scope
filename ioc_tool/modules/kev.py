@@ -32,7 +32,7 @@ import json
 import os
 import time
 
-import requests
+from ..core import http
 
 CATALOG_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/"
@@ -42,7 +42,10 @@ CACHE_FILE = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "data", "cisa_kev.json"
 )
 REFRESH_SECONDS = 24 * 60 * 60  # 24 hours
-TIMEOUT = 10  # seconds
+TIMEOUT = 10  # seconds — preserve the original tuned override
+
+# Per-source bucket — catalog is fetched on a 24h TTL, low-and-slow.
+_SOURCE = "kev"
 
 
 def _cache_is_stale() -> bool:
@@ -63,9 +66,8 @@ def _download_catalog() -> dict | None:
     The cache file is only written when the parse succeeds — we never
     overwrite a previously-good cache with garbage.
     """
-    try:
-        response = requests.get(CATALOG_URL, timeout=TIMEOUT)
-    except requests.exceptions.RequestException:
+    response = http.get(_SOURCE, CATALOG_URL, timeout=TIMEOUT)
+    if response is None:
         return None
 
     if response.status_code != 200:

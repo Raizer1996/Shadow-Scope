@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import re
 
-import requests
+from ..core import http
 
 BASE_URL = "https://stat.ripe.net/data"
 TIMEOUT = 15
+
+# Per-source bucket — RIPE Stat is generous, polite cap.
+_SOURCE = "asn"
 
 
 def _normalize_asn(value: str) -> str | None:
@@ -32,9 +35,8 @@ def _normalize_asn(value: str) -> str | None:
 
 
 def _fetch(path: str, params: dict) -> dict | None:
-    try:
-        response = requests.get(f"{BASE_URL}/{path}", params=params, timeout=TIMEOUT)
-    except requests.exceptions.RequestException:
+    response = http.get(_SOURCE, f"{BASE_URL}/{path}", params=params, timeout=TIMEOUT)
+    if response is None:
         return None
     if response.status_code != 200:
         return None

@@ -25,7 +25,7 @@ import os
 import time
 from typing import Any
 
-import requests
+from ..core import http
 
 FEED_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.json"
 CACHE_FILE = os.path.join(
@@ -34,7 +34,10 @@ CACHE_FILE = os.path.join(
     "feodo_blocklist.json",
 )
 _DEFAULT_TTL_HOURS = 24.0
-_TIMEOUT = 10  # seconds
+_TIMEOUT = 10  # seconds — preserve original tuned override
+
+# Per-source bucket — blocklist refreshed on 24h TTL, low-and-slow.
+_SOURCE = "feodo"
 
 
 def _ttl_seconds() -> float:
@@ -61,9 +64,8 @@ def _cache_is_stale() -> bool:
 
 def refresh_blocklist() -> bool:
     """Fetch the Feodo Tracker JSON blocklist to local cache. True on success."""
-    try:
-        response = requests.get(FEED_URL, timeout=_TIMEOUT)
-    except requests.exceptions.RequestException:
+    response = http.get(_SOURCE, FEED_URL, timeout=_TIMEOUT)
+    if response is None:
         return False
     if response.status_code != 200:
         return False

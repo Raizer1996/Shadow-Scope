@@ -21,10 +21,13 @@ consistent with the other enrichment modules.
 
 from __future__ import annotations
 
-import requests
+from ..core import http
 
 BASE_URL = "https://threatfox-api.abuse.ch/api/v1/"
-TIMEOUT = 10  # seconds
+TIMEOUT = 10  # seconds — preserve original tuned override
+
+# Per-source bucket — abuse.ch is generous; per-IOC lookups are cheap.
+_SOURCE = "threatfox"
 
 
 def enrich(value: str) -> dict | None:
@@ -34,13 +37,13 @@ def enrich(value: str) -> dict | None:
     (``query_status == "ok"``), or ``None`` on no-hit / network
     error / non-200 status / malformed payload.
     """
-    try:
-        response = requests.post(
-            BASE_URL,
-            json={"query": "search_ioc", "search_term": value},
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.post(
+        _SOURCE,
+        BASE_URL,
+        json={"query": "search_ioc", "search_term": value},
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
 
     if response.status_code != 200:

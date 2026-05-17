@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import os
 
-import requests
+from ..core import http
 
 BASE_URL = "https://ipinfo.io"
-TIMEOUT = 10
+TIMEOUT = 10  # preserve original tuned override
+
+# Per-source bucket — free tier ~50k / month, polite cap.
+_SOURCE = "ipinfo"
 
 
 def _api_key() -> str:
@@ -40,14 +43,14 @@ def enrich_ip(ip: str) -> dict | None:
     api_key = _api_key()
     params = {"token": api_key} if api_key else None
     headers = {"Accept": "application/json"}
-    try:
-        response = requests.get(
-            f"{BASE_URL}/{ip}",
-            params=params,
-            timeout=TIMEOUT,
-            headers=headers,
-        )
-    except requests.exceptions.RequestException:
+    response = http.get(
+        _SOURCE,
+        f"{BASE_URL}/{ip}",
+        params=params,
+        timeout=TIMEOUT,
+        headers=headers,
+    )
+    if response is None:
         return None
     if response.status_code != 200:
         return None
@@ -62,18 +65,19 @@ def enrich_ip(ip: str) -> dict | None:
     # proxy / tor / relay / hosting flags. Silently no-op if the token tier
     # doesn't include it (403/404/empty).
     if api_key and not isinstance(payload.get("privacy"), dict):
-        try:
-            priv = requests.get(
-                f"{BASE_URL}/{ip}/privacy",
-                params=params,
-                timeout=TIMEOUT,
-                headers=headers,
-            )
-            if priv.status_code == 200:
+        priv = http.get(
+            _SOURCE,
+            f"{BASE_URL}/{ip}/privacy",
+            params=params,
+            timeout=TIMEOUT,
+            headers=headers,
+        )
+        if priv is not None and priv.status_code == 200:
+            try:
                 pdata = priv.json()
                 if isinstance(pdata, dict):
                     payload["privacy"] = pdata
-        except (requests.exceptions.RequestException, ValueError):
-            pass
+            except ValueError:
+                pass
 
     return payload
