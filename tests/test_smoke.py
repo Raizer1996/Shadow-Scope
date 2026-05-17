@@ -703,8 +703,13 @@ def test_enrich_ioc_async_can_be_awaited(monkeypatch, tmp_path):
     assert "final_score" in result
     assert result["ioc"] == "8.8.8.8"
     assert result["type"] == "ip"
-    # All sources stubbed → no module entries, no scores → composite 0.
-    assert result["modules"] == {}
+    # All sources stubbed → no SCORING module entries, no scores → composite 0.
+    # PDNS deliberately surfaces ``{}`` as an info-only soft-fail (and the
+    # cache layer persists it via the dedicated ``_pdns_filter`` so a
+    # quiet IP doesn't refetch on every call); strip it out before the
+    # shape assertion so we still verify "no scoring sources fired".
+    modules_for_shape = {k: v for k, v in result["modules"].items() if k != "PDNS"}
+    assert modules_for_shape == {}
     assert result["final_score"] == 0
 
 

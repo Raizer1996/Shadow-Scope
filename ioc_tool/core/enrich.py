@@ -317,6 +317,31 @@ def _shodan_filter(data: dict) -> dict | None:
     return data
 
 
+def _pdns_filter(data: dict) -> dict | None:
+    """Persist PDNS soft-fails (``{}``) but reject hard errors.
+
+    PDNS (``modules/pdns.py``) is documented to return ``{}`` on a
+    soft-fail — empty PDNS record, rate-bucket starvation, malformed
+    upstream JSON. The orchestrator deliberately caches that empty
+    dict so we don't refetch the same dead IP every call; the cache
+    short-circuit pattern checks for "row exists", not "row has keys".
+
+    Previously PDNS shared :func:`_shodan_filter`, which discards any
+    falsy / error dict. That defeated the soft-fail caching: a quiet
+    IP would refetch on every enrichment, burning the (very tight)
+    free-tier quota. Use this dedicated filter instead — it keeps
+    ``{}`` but rejects ``{"error": ...}`` payloads so an explicit
+    error from the upstream doesn't pollute the cache.
+    """
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if 'error' in data:
+        return None
+    return data
+
+
 def _ipqs_scorer(data: dict) -> int:
     return data.get('fraud_score', 0) if isinstance(data, dict) else 0
 
@@ -388,21 +413,29 @@ def _apply_vt_otx_failover(
       and stuff the result into ``results`` / ``scores`` as if it had
       been there all along (so the rest of the composite formula sees a
       uniform shape).
-    * Stamp a ``fallback_used`` field on the ``VirusTotal`` entry — even
-      when VT had no entry (its fetcher returned ``None``), so the
-      analyst can see that we *tried* and substituted. In that case we
-      synthesise a minimal placeholder entry under the ``VirusTotal``
-      key whose ``data`` is just the annotation.
+    * Stamp a ``fallback_used`` field on the ``VirusTotal`` **outer
+      entry** (the dict that wraps ``data``), not on ``data`` itself.
+      The ``data`` payload may be a reference shared with the SQLite
+      cache (via ``json.loads`` on a cache hit) or with sibling
+      enrichment fan-outs — mutating it in place would either be lost
+      on the next cache hit (re-decoded fresh from JSON) or
+      cross-contaminate other consumers of the same dict. Hanging the
+      annotation off the outer entry keeps the cached payload pristine
+      while still surfacing the failover in the result the analyst
+      sees. When VT had no entry (its fetcher returned ``None``) we
+      synthesise a placeholder so the annotation is visible.
 
     The function is deliberately silent on failure: any exception from
     the synchronous OTX call collapses to a no-op so the orchestrator's
     never-crash contract holds.
     """
-    # 1) Make sure OTX ran. If not, run it inline now.
-    if 'otx' not in planned_sources:
+    # 1) Make sure OTX ran. If not, run it inline now. Source key comes
+    #    from the module constant so renames stay coherent across the
+    #    failover, ratelimit, and ledger layers.
+    if otx._SOURCE not in planned_sources:
         try:
             otx_result = _run_source(
-                ioc_id, 'otx', 'OTX',
+                ioc_id, otx._SOURCE, 'OTX',
                 lambda: otx.enrich(value, ioc_type),
                 score.calculate_otx_score,
             )
@@ -413,27 +446,23 @@ def _apply_vt_otx_failover(
             results[display_name] = {'score': src_score, 'data': data}
             if contributes:
                 scores.append((display_name, src_score))
-        planned_sources.add('otx')
+        planned_sources.add(otx._SOURCE)
 
-    # 2) Annotate the VT entry. If VT silently dropped (no row in
-    #    results), create a placeholder so the annotation is visible.
+    # 2) Annotate the VT entry on the outer wrapper. If VT silently
+    #    dropped (no row in results), create a placeholder so the
+    #    annotation is visible.
     vt_entry = results.get('VirusTotal')
     if vt_entry is None:
         results['VirusTotal'] = {
             'score': 0,
-            'data': {'rate_limited': True, 'fallback_used': 'otx'},
+            'data': {'rate_limited': True},
+            'fallback_used': otx._SOURCE,
         }
     else:
-        existing_data = vt_entry.get('data')
-        if isinstance(existing_data, dict):
-            existing_data['fallback_used'] = 'otx'
-        else:
-            # Defensive: shouldn't happen for VT, but if `data` is non-dict
-            # we attach the annotation alongside it without clobbering.
-            vt_entry['data'] = {
-                'value': existing_data,
-                'fallback_used': 'otx',
-            }
+        # Annotate the wrapper, NOT the cached ``data`` dict. This keeps
+        # the next cache hit clean and avoids leaking a per-run flag
+        # back into long-lived storage.
+        vt_entry['fallback_used'] = otx._SOURCE
 
 
 # ---------------------------------------------------------------------------
@@ -503,11 +532,14 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     planned_sources: set[str] = set()
 
     # --- VirusTotal — all IOC types ---
+    # Source key comes from the module constant so a rename in
+    # ``modules/vt.py`` propagates here without a silent miss in the
+    # failover ledger check below.
     tasks.append(asyncio.to_thread(
-        _run_source, ioc_id, 'virustotal', 'VirusTotal',
+        _run_source, ioc_id, vt._SOURCE, 'VirusTotal',
         _vt_fetcher(value, ioc_type), _vt_scorer,
     ))
-    planned_sources.add('virustotal')
+    planned_sources.add(vt._SOURCE)
 
     # --- AbuseIPDB — IP only ---
     if ioc_type == 'ip':
@@ -558,15 +590,17 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         ))
 
     # --- Passive DNS first-seen / IP age — IP only (info-only, Mnemonic free) ---
-    # ``pdns.enrich_ip`` returns ``{}`` on soft-fail; treat that as no-data
-    # so we don't persist a blank row that re-triggers a fetch each call.
+    # ``pdns.enrich_ip`` returns ``{}`` on soft-fail. Persist that empty
+    # row via :func:`_pdns_filter` so the cache short-circuits the next
+    # call — the previous ``_shodan_filter`` wiring discarded ``{}`` and
+    # forced a fresh upstream hit every time, burning the free-tier quota.
     if ioc_type == 'ip':
         tasks.append(asyncio.to_thread(
             _run_source, ioc_id, 'pdns', 'PDNS',
             lambda: pdns.enrich_ip(value),
             score.calculate_pdns_score,
             info_only=True,
-            cache_filter=_shodan_filter,
+            cache_filter=_pdns_filter,
         ))
 
     # --- Censys Hosts v2 — IP only (info-only; deeper banners, JARM, cert chain, OS) ---
@@ -614,11 +648,11 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     # --- AlienVault OTX — IP / domain / URL / hash ---
     if ioc_type in ('ip', 'domain', 'url', 'hash'):
         tasks.append(asyncio.to_thread(
-            _run_source, ioc_id, 'otx', 'OTX',
+            _run_source, ioc_id, otx._SOURCE, 'OTX',
             lambda: otx.enrich(value, ioc_type),
             score.calculate_otx_score,
         ))
-        planned_sources.add('otx')
+        planned_sources.add(otx._SOURCE)
 
     # --- URLscan.io — IP / domain / URL ---
     if ioc_type in ('ip', 'domain', 'url'):
@@ -731,10 +765,14 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     # synchronously now (if it wasn't already planned) and annotate the VT
     # result dict with the fallback source.  Purely additive: does NOT
     # touch the score that feeds calculate_final_risk.
+    # Source key comes from the module constant rather than a hardcoded
+    # string so the failover check, the bucket config in ratelimit.py,
+    # and the ledger marker all stay in lock-step — a rename in vt.py
+    # propagates here without a silent miss.
     if (
         _failover_enabled()
         and ioc_type in _OTX_FAILOVER_TYPES
-        and http.was_rate_limited('virustotal')
+        and http.was_rate_limited(vt._SOURCE)
     ):
         _apply_vt_otx_failover(value, ioc_type, ioc_id, results, scores, planned_sources)
 

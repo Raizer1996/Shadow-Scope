@@ -47,6 +47,90 @@ def test_update_last_score_appends_history(db):
     assert [row["score"] for row in history] == [42, 80]
 
 
+# ---------------------------------------------------------------------------
+# Dedup: identical scores written inside the window collapse to one row
+# ---------------------------------------------------------------------------
+
+
+def test_update_last_score_dedups_identical_score_inside_window(db, monkeypatch):
+    """5 calls in rapid succession with the same score → 1 history row.
+
+    Hitting the same IOC 50× in a minute (e.g. during a bulk re-enrich of
+    an existing watchlist) previously wrote 50 identical points; the
+    Watch-tab graph showed a flat-line plateau with stacked dots.
+    The dedup window collapses identical-score writes inside 60 s.
+    """
+    ioc_id = _insert_ioc(db)
+    for _ in range(5):
+        db.update_last_score(ioc_id, 50)
+
+    history = db.get_score_history(ioc_id)
+    assert len(history) == 1, f"expected 1 row, got {len(history)}: {history}"
+    assert history[0]["score"] == 50
+
+
+def test_update_last_score_writes_again_after_window(db, monkeypatch):
+    """Past the dedup window → a fresh row even for the same score.
+
+    We don't actually sleep 60 s — instead we shrink the window so the
+    test runs sub-second. The contract under test is: "if the gap >=
+    window, write the row". The actual window value is a tuning
+    parameter, not part of the contract being verified here.
+    """
+    from ioc_tool.core import database as _db
+
+    # Shrink the dedup window to a tiny value so we can prove the
+    # post-window write path without slowing the test suite.
+    monkeypatch.setattr(_db, "_SCORE_HISTORY_DEDUP_WINDOW_S", 0.05)
+
+    ioc_id = _insert_ioc(db)
+    db.update_last_score(ioc_id, 50)
+    # Wait past the (shrunken) dedup window.
+    import time
+    time.sleep(0.08)
+    db.update_last_score(ioc_id, 50)
+
+    history = db.get_score_history(ioc_id)
+    assert len(history) == 2, f"expected 2 rows, got {len(history)}: {history}"
+
+
+def test_update_last_score_change_writes_immediately(db):
+    """A score *change* always inserts, even within the dedup window.
+
+    Identical-score dedup is about flat-line noise; a real inflection
+    point must surface regardless of timing.
+    """
+    ioc_id = _insert_ioc(db)
+    db.update_last_score(ioc_id, 50)
+    db.update_last_score(ioc_id, 50)  # dedup'd
+    db.update_last_score(ioc_id, 70)  # change → must insert
+    db.update_last_score(ioc_id, 70)  # dedup'd vs. previous 70
+    db.update_last_score(ioc_id, 50)  # change → must insert
+
+    history = db.get_score_history(ioc_id)
+    scores = [row["score"] for row in history]
+    assert scores == [50, 70, 50]
+
+
+def test_update_last_score_iocs_row_always_updated(db):
+    """Dedup MUST NOT skip the ``iocs.last_score`` UPDATE — the row's
+    mirror is used by watch-mode delta queries, so it has to track
+    every call even when no history row is written.
+    """
+    ioc_id = _insert_ioc(db)
+    db.update_last_score(ioc_id, 50)
+    db.update_last_score(ioc_id, 50)  # dedup'd from history
+
+    conn = db.get_db_connection()
+    try:
+        row = conn.execute(
+            "SELECT last_score FROM iocs WHERE id = ?", (ioc_id,)
+        ).fetchone()
+        assert row["last_score"] == 50
+    finally:
+        conn.close()
+
+
 def test_get_score_history_chronological(db):
     ioc_id = _insert_ioc(db)
     db.update_last_score(ioc_id, 10)
