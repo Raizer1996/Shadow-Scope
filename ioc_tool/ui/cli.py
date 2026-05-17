@@ -892,8 +892,9 @@ def _dispatch_webhooks(
     Output order on stdout is already locked in (the caller emitted the
     payload before us); POST order is intentionally parallel.
     """
-    from ..core import http as _http
     from concurrent.futures import ThreadPoolExecutor
+
+    from ..core import http as _http
 
     def _post_one(res: dict[str, Any]) -> tuple[bool, str | None]:
         try:
