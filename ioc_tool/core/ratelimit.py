@@ -112,6 +112,10 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     "malwarebazaar": (10, 60),     # abuse.ch — generous
     "filescan_io":  (5, 60),       # community tier
     "joe_sandbox":  (4, 60),       # Joe Cloud free is very tight
+    # Outbound webhook receivers (SIEM / ticketing / IR platforms). Most are
+    # idempotent so a comfortable 10/sec ceiling keeps bursts polite while
+    # still letting bulk enrichments fan out.
+    "webhook":      (10, 1),
 }
 
 _buckets: dict[str, Bucket] = {}

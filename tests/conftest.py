@@ -23,6 +23,7 @@ def _disable_rate_limits():
     keys = (
         "VIRUSTOTAL", "ABUSEIPDB", "IPQS", "SHODAN", "OTX",
         "URLSCAN", "PULSEDIVE", "GREYNOISE", "ABSTRACT", "CENSYS",
+        "WEBHOOK",
     )
     saved: dict[str, str | None] = {}
     for key in keys:
