@@ -222,11 +222,35 @@ async def _enrich_one(ioc: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# Loopback origins used as the safe default when SHADOWSCOPE_API_TOKEN is
+# set but no explicit SHADOWSCOPE_CORS_ORIGINS was provided. Mirrors the
+# default port ``shadowscope serve`` binds to (8765).
+_DEFAULT_LOOPBACK_ORIGINS: tuple[str, ...] = (
+    "http://localhost:8765",
+    "http://127.0.0.1:8765",
+)
+
+
 def _cors_origins() -> list[str]:
-    """Parse ``SHADOWSCOPE_CORS_ORIGINS`` (comma-separated) → list. Default: ``["*"]``."""
-    raw = os.getenv("SHADOWSCOPE_CORS_ORIGINS", "*")
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    return parts or ["*"]
+    """Resolve allowed CORS origins.
+
+    Behaviour:
+    * ``SHADOWSCOPE_CORS_ORIGINS`` set → use it verbatim (comma-separated).
+    * Token configured (``SHADOWSCOPE_API_TOKEN`` set) and no origins
+      override → default to loopback only (``http://localhost:8765``,
+      ``http://127.0.0.1:8765``). Tightens the permissive ``*`` legacy
+      default when auth is on so a stolen token can't be replayed
+      cross-origin from arbitrary pages.
+    * No token and no override → ``["*"]`` (open dev install).
+    """
+    raw = os.getenv("SHADOWSCOPE_CORS_ORIGINS")
+    if raw is not None:
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        if parts:
+            return parts
+    if os.getenv("SHADOWSCOPE_API_TOKEN"):
+        return list(_DEFAULT_LOOPBACK_ORIGINS)
+    return ["*"]
 
 
 app = FastAPI(
@@ -824,41 +848,89 @@ def ui_pivot(
     return out
 
 
-@app.get("/api/ui/events")
-async def ui_events() -> StreamingResponse:
-    """Server-Sent Events stream of enrichment-pipeline activity.
+# Heartbeat cadence for ``/api/ui/events``. Exposed as a module-level
+# constant + env override so tests can shorten it without monkeypatching
+# private state. EventSource clients and most reverse proxies idle a
+# connection out around 30–60 s, so 25 s is comfortably inside that.
+_SSE_HEARTBEAT_S: float = float(os.getenv("SHADOWSCOPE_SSE_HEARTBEAT_S", "25.0"))
 
-    Replaces the dashboard's 8 s ``/api/ui/recent`` poll for the Watch
-    tab + AlertTicker. Each enrichment writes a ``score`` event with
-    ``{"ioc": str, "score": int}`` payload. Heartbeats every 25 s keep
-    proxies from idling the connection out.
 
-    Auth deliberately omitted on this route (matches the existing
-    \\``/static`` mount). The events carry no secrets — just IOC values
-    and integer scores already exposed by ``/api/ui/recent``.
+async def _events_stream(heartbeat_s: float | None = None):
+    """Async generator yielding SSE frames for ``/api/ui/events``.
+
+    Extracted so unit tests can drive the loop directly without going
+    through FastAPI's TestClient — httpx's ASGI transport buffers
+    streaming bodies, which would make a heartbeat assertion impossible
+    end-to-end.
+
+    Yields the greeting frame, then either a real event (whenever one
+    lands on the per-subscriber queue) or a ``: heartbeat`` SSE comment
+    line whenever the bus stays silent for longer than ``heartbeat_s``
+    (defaults to ``_SSE_HEARTBEAT_S``). Cancellation is propagated; the
+    ``finally`` ensures the subscriber is released on every exit path.
     """
     import json as _json
 
-    async def _stream():
+    timeout = _SSE_HEARTBEAT_S if heartbeat_s is None else heartbeat_s
+    # Register *before* yielding the greeting so any event published
+    # immediately after a client connects can't slip in unobserved
+    # while we're between frames. The greeting counts ourselves in
+    # ``subs``.
+    queue, release = eventbus.open_subscription()
+    try:
         # Greeting frame so the client knows it's connected before the
         # first real event arrives.
         yield (
             f": shadowscope-events v1\n"
             f"event: hello\ndata: {_json.dumps({'subs': eventbus.subscriber_count()})}\n\n"
         )
-        # Heartbeat coroutine: emit a comment line every 25 s so reverse
-        # proxies (and the browser's EventSource) don't close an idle
-        # stream.
-        last_beat = asyncio.get_running_loop().time()
-        async for event in eventbus.subscribe():
-            yield f"event: {event['type']}\ndata: {_json.dumps(event)}\n\n"
-            now = asyncio.get_running_loop().time()
-            if now - last_beat > 25:
+        # Drive the subscription loop directly so we can emit a comment
+        # keepalive whenever the bus is idle for longer than the heartbeat
+        # interval. The previous implementation only checked the elapsed-
+        # time gate *after* receiving an event, so a fully silent bus
+        # produced zero heartbeats and proxies eventually closed the
+        # connection.
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=timeout)
+            except asyncio.TimeoutError:
+                # SSE comment line — keepalive without a real event.
                 yield ": heartbeat\n\n"
-                last_beat = now
+                continue
+            yield f"event: {event['type']}\ndata: {_json.dumps(event)}\n\n"
+    except asyncio.CancelledError:
+        # Client disconnected — let the cancellation propagate after
+        # cleanup so Starlette tears the response down cleanly.
+        raise
+    finally:
+        release()
+
+
+@app.get("/api/ui/events")
+async def ui_events(token: str | None = Query(None)) -> StreamingResponse:
+    """Server-Sent Events stream of enrichment-pipeline activity.
+
+    Replaces the dashboard's 8 s ``/api/ui/recent`` poll for the Watch
+    tab + AlertTicker. Each enrichment writes a ``score`` event with
+    ``{"ioc": str, "score": int}`` payload. Heartbeats every 25 s
+    (``SHADOWSCOPE_SSE_HEARTBEAT_S`` override) keep proxies from idling
+    the connection out.
+
+    Auth: EventSource can't set custom headers, so the bearer token is
+    accepted via the ``?token=`` query param. When
+    ``SHADOWSCOPE_API_TOKEN`` is set and the query token is missing or
+    wrong → ``401``. When the env var is unset, the route is open
+    (matches the "homelab localhost convenience" mode of
+    :func:`require_token`). The events carry no secrets, but gating the
+    stream prevents an anonymous consumer from observing enrichment
+    activity timing / IOC values in real time.
+    """
+    expected = os.getenv("SHADOWSCOPE_API_TOKEN")
+    if expected and token != expected:
+        raise HTTPException(status_code=401, detail="Missing or invalid token")
 
     return StreamingResponse(
-        _stream(),
+        _events_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
