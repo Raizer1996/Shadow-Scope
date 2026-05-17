@@ -263,6 +263,138 @@ window.shadowscopeDeleteCase = async function (caseName) {
   return await r.json();
 };
 
+// Score history — chronological score snapshots for one IOC. Backs the
+// inline sparkline on the IOC detail view. Returns `{ioc, count, points}`
+// where points is an array of `{score, recorded_at}` ordered oldest →
+// newest. 404 (IOC not in cache) is normalised to an empty result so
+// the caller can render an empty state without try/catching.
+window.shadowscopeScoreHistory = async function (value, limit) {
+  const n = Number.isFinite(limit) ? limit : 50;
+  const headers = {};
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const url = `/api/ui/score_history/${encodeURIComponent(value)}?limit=${n}`;
+  const r = await fetch(url, { headers });
+  if (r.status === 404) {
+    return { ioc: value, count: 0, points: [] };
+  }
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error("HTTP " + r.status + " " + body.slice(0, 200));
+  }
+  return await r.json();
+};
+
+// Server-Sent Events stream — replaces the legacy 8s /api/ui/recent
+// poll for live activity. Returns a `{close}` handle so callers can
+// tear down cleanly on unmount.
+//
+// Auto-reconnect: native EventSource already retries, but we layer
+// exponential backoff (capped at 30s) on top so a flapping proxy
+// doesn't hammer the server. The `onScore` callback receives every
+// `score` event payload as `{ioc, score, ...}`; `onHello` fires once
+// per fresh connection. Auth: EventSource can't set headers, so the
+// token is appended as a `?token=` query string when present —
+// /api/ui/events deliberately has no auth dependency, so this is a
+// no-op for the current backend; kept for forward compat.
+window.shadowscopeSubscribeEvents = function (onScore, onHello, onError) {
+  let es = null;
+  let backoff = 1000;
+  let closed = false;
+  let timer = null;
+
+  const url = "/api/ui/events";
+  const connect = () => {
+    if (closed) return;
+    try {
+      es = new EventSource(url);
+    } catch (e) {
+      if (typeof onError === "function") onError(e);
+      scheduleReconnect();
+      return;
+    }
+    es.addEventListener("hello", (ev) => {
+      backoff = 1000; // reset on confirmed connection
+      try {
+        if (typeof onHello === "function") onHello(JSON.parse(ev.data || "{}"));
+      } catch (_) { /* malformed hello — ignore */ }
+    });
+    es.addEventListener("score", (ev) => {
+      backoff = 1000;
+      try {
+        const payload = JSON.parse(ev.data || "{}");
+        if (typeof onScore === "function") onScore(payload);
+      } catch (_) { /* bad JSON — drop */ }
+    });
+    es.onerror = (err) => {
+      if (typeof onError === "function") onError(err);
+      try { es && es.close(); } catch (_) {}
+      es = null;
+      scheduleReconnect();
+    };
+  };
+
+  const scheduleReconnect = () => {
+    if (closed) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      backoff = Math.min(backoff * 2, 30000);
+      connect();
+    }, backoff);
+  };
+
+  connect();
+
+  return {
+    close: () => {
+      closed = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      try { es && es.close(); } catch (_) {}
+      es = null;
+    },
+  };
+};
+
+// Recently-used cases — localStorage-backed MRU list used by
+// CaseAssignBar to hoist common cases to the top of its <datalist>.
+// Capped at 5, deduped (case-insensitive), newest first. Storage
+// failures (private mode, quota) degrade silently to an empty list.
+window.SHADOWSCOPE_RECENT_CASES_KEY = "shadowscope.recentCases";
+window.SHADOWSCOPE_RECENT_CASES_MAX = 5;
+
+window.shadowscopeGetRecentCases = function () {
+  try {
+    const raw = localStorage.getItem(window.SHADOWSCOPE_RECENT_CASES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((s) => typeof s === "string" && s.trim());
+  } catch (_) {
+    return [];
+  }
+};
+
+window.shadowscopePushRecentCase = function (name) {
+  if (!name || typeof name !== "string") return [];
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+  const lower = trimmed.toLowerCase();
+  let list;
+  try {
+    list = window.shadowscopeGetRecentCases();
+    // Remove any prior occurrence (case-insensitive) so MRU wins.
+    list = list.filter((s) => s.toLowerCase() !== lower);
+    list.unshift(trimmed);
+    list = list.slice(0, window.SHADOWSCOPE_RECENT_CASES_MAX);
+    localStorage.setItem(window.SHADOWSCOPE_RECENT_CASES_KEY, JSON.stringify(list));
+  } catch (_) {
+    return [];
+  }
+  return list;
+};
+
 // Pivot lookup — find related IOCs across the whole SQLite cache by
 // tag / malware family / registrar / etc. Used by PivotPanel to widen
 // the "RELATED" view beyond whatever happens to be on the strip.
