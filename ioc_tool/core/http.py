@@ -133,3 +133,46 @@ def get(source_key: str, url: str, **kwargs: Any) -> requests.Response | None:
 
 def post(source_key: str, url: str, **kwargs: Any) -> requests.Response | None:
     return request(source_key, "POST", url, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Shared outbound-webhook helper
+# ---------------------------------------------------------------------------
+#
+# Both ``shadowscope enrich --webhook=URL`` and ``shadowscope watch
+# --webhook=URL`` POST a JSON payload to an arbitrary external endpoint
+# (SIEM intake, ticketing webhook, IR pager, etc.). They share the same
+# "fire-and-forget, soft-fail" contract:
+#
+#   * never raise — the CLI must keep emitting IOC output even when the
+#     receiver is down
+#   * default to a short timeout (5 s) so a hanging endpoint can't stall
+#     the enrichment fan-out
+#   * route through the rate-limited :func:`post` so a noisy receiver
+#     can't get hammered by a 10k-IOC bulk run
+#
+# ``post_webhook`` returns ``True`` on a 2xx response, ``False``
+# otherwise; callers can use the return value to emit a single stderr
+# warning per failure.
+_WEBHOOK_TIMEOUT_S = 5.0
+
+
+def post_webhook(
+    url: str,
+    payload: Any,
+    *,
+    timeout: float = _WEBHOOK_TIMEOUT_S,
+    source_key: str = "webhook",
+) -> bool:
+    """POST ``payload`` as JSON to ``url``. Returns ``True`` on 2xx.
+
+    Soft-fails on any error (timeout, connection refused, non-2xx,
+    rate-limiter starvation) and returns ``False`` — never raises.
+    """
+    try:
+        response = post(source_key, url, json=payload, timeout=timeout)
+    except Exception:
+        return False
+    if response is None:
+        return False
+    return 200 <= response.status_code < 300

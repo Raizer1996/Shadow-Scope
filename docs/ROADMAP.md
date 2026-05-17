@@ -113,7 +113,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 ### SIEM / log pipelines
 - [ ] **Splunk HEC** forwarder. **[issue]**
 - [ ] **Elastic / Logstash** output. **[issue]**
-- [ ] **Generic webhook** — JSON POST to any URL. **[issue]**
+<!-- Moved to Done 2026-05-17 — Generic webhook (`shadowscope enrich --webhook=URL`, env fallback `SHADOWSCOPE_WEBHOOK_URL`) -->
 
 ### Chat / notification
 - [ ] **Telegram bot** — alert on Critical (hooks into existing homelab Telegram). **[issue]**
@@ -186,6 +186,7 @@ If pursuing one milestone at a time, these give the biggest SOC bang-per-buck:
 
 ## Done
 
+- [x] **Generic webhook** — `shadowscope enrich --webhook=URL` POSTs each enrichment dict as JSON to an external receiver (SIEM intake / ticketing / IR pager). Falls back to `$SHADOWSCOPE_WEBHOOK_URL`; soft-fails on transport / non-2xx errors (stderr warning, exit code stays 0); rate-limited via the shared `webhook` bucket (10/sec); 5 s timeout; reused by `shadowscope watch --webhook` through the shared `core.http.post_webhook` helper (2026-05-17)
 - [x] Repo hygiene — gitignore binaries / cache / debug scripts (2026-05-14)
 - [x] `.env.example` ↔ README sync (2026-05-14)
 - [x] GitHub-ready docs scaffold — CLAUDE.md, docs/, LICENSE, CONTRIBUTING, CI workflow, smoke tests (2026-05-14)

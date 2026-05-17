@@ -704,6 +704,21 @@ def handle_enrich(args: argparse.Namespace) -> None:
     if not results:
         return
 
+    # --- Optional outbound webhook ---------------------------------------
+    # POST one payload per IOC (same shape as JSON / STIX outputs) to an
+    # external receiver — SIEM intake, ticketing webhook, IR pager. Soft-
+    # fails on every error so a misbehaving receiver can't crash the CLI
+    # or mangle the IOC output piped to stdout.
+    webhook_url = getattr(args, 'webhook', None)
+    if webhook_url:
+        from ..core import http as _http
+        for res in results:
+            ok = _http.post_webhook(webhook_url, res)
+            if not ok:
+                err_console.print(
+                    f"[yellow]webhook post failed for {res.get('ioc')}[/yellow]"
+                )
+
     want_summary = bool(getattr(args, 'summary', False))
     summaries: dict[int, str | None] = {}
     if want_summary:
@@ -1352,10 +1367,8 @@ def handle_watch(args: argparse.Namespace) -> None:
         }
         deltas.append(event)
         if webhook:
-            try:
-                import requests as _requests
-                _requests.post(webhook, json=event, timeout=10)
-            except Exception:
+            from ..core import http as _http
+            if not _http.post_webhook(webhook, event):
                 err_console.print(f"[yellow]webhook post failed for {value}[/yellow]")
         if args.json:
             print(json.dumps(event))
@@ -1607,6 +1620,15 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         default=argparse.SUPPRESS,
         help='Bypass the SQLite enrichment cache — every source refetches fresh data',
+    )
+    p_enrich.add_argument(
+        '--webhook',
+        default=os.getenv('SHADOWSCOPE_WEBHOOK_URL') or None,
+        help=(
+            'POST each enrichment result as JSON to this URL '
+            '(falls back to $SHADOWSCOPE_WEBHOOK_URL). '
+            'Failures are logged to stderr but never block CLI output.'
+        ),
     )
 
     # analyze
