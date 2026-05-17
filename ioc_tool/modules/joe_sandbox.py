@@ -1,9 +1,12 @@
 import os
 
-import requests
+from ..core import http
 
 API_KEY = os.getenv('JOE_SANDBOX_CLOUD_API_KEY')
 BASE_URL = "https://jbxcloud.joesecurity.org/api"
+
+# Per-source bucket — Joe Cloud free tier is very tight.
+_SOURCE = 'joe_sandbox'
 
 def submit_file(file_path):
     key = os.getenv('JOE_SANDBOX_CLOUD_API_KEY')
@@ -23,7 +26,9 @@ def submit_file(file_path):
             files = {'file': f}
             data = {'acceptTOS': 1}
 
-            response = requests.post(url, headers=headers, files=files, data=data)
+            response = http.post(_SOURCE, url, headers=headers, files=files, data=data)
+            if response is None:
+                return {"error": "request failed"}
             if response.status_code == 200:
                 return response.json()
             return {"error": f"Status {response.status_code}: {response.text}"}
@@ -48,7 +53,9 @@ def submit_url(target_url):
     }
 
     try:
-        response = requests.post(url, headers=headers, data=data)
+        response = http.post(_SOURCE, url, headers=headers, data=data)
+        if response is None:
+            return {"error": "request failed"}
         if response.status_code == 200:
             return response.json()
         return {"error": f"Status {response.status_code}: {response.text}"}

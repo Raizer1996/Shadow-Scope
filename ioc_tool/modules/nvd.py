@@ -33,10 +33,13 @@ never raise.
 
 from __future__ import annotations
 
-import requests
+from ..core import http
 
 BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-TIMEOUT = 10  # seconds
+TIMEOUT = 10  # seconds — preserve original tuned override
+
+# Per-source bucket — NVD: 5 / 30s unauthenticated.
+_SOURCE = "nvd"
 
 
 def enrich_cve(value: str) -> dict | None:
@@ -45,18 +48,18 @@ def enrich_cve(value: str) -> dict | None:
     Returns the first ``vulnerabilities[0]["cve"]`` dict on a hit, or
     ``None`` when:
 
-    - the HTTP request raises ``requests.exceptions.RequestException``
+    - the HTTP request fails or the bucket refuses a token
     - the response status code is not 200
     - the response body is not valid JSON
     - ``vulnerabilities`` is missing / empty
     """
-    try:
-        response = requests.get(
-            BASE_URL,
-            params={"cveId": value},
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.get(
+        _SOURCE,
+        BASE_URL,
+        params={"cveId": value},
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
 
     if response.status_code != 200:

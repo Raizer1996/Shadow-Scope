@@ -319,7 +319,9 @@ def test_ipinfo_enrich_ip_without_key_attempts_anonymous(
     def _boom(*a, **kw):
         raise _requests.exceptions.ConnectionError("offline test")
 
-    monkeypatch.setattr(_requests, "get", _boom)
+    # The module now routes through ``http.request`` which calls
+    # ``requests.request`` under the hood — patch that.
+    monkeypatch.setattr(_requests, "request", _boom)
     assert ipinfo_mod.enrich_ip("1.2.3.4") is None
 
 
@@ -330,7 +332,7 @@ def test_ipinfo_reads_new_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict = {}
     import requests as _requests
 
-    def _capture(url, params=None, **kw):
+    def _capture(method, url, params=None, **kw):
         captured["url"] = url
         captured["params"] = params
 
@@ -342,7 +344,9 @@ def test_ipinfo_reads_new_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return _Resp()
 
-    monkeypatch.setattr(_requests, "get", _capture)
+    # The module now routes through ``http.request`` which calls
+    # ``requests.request`` under the hood — patch that.
+    monkeypatch.setattr(_requests, "request", _capture)
     ipinfo_mod.enrich_ip("1.2.3.4")
     assert captured["params"]["token"] == "legacy-token"
 

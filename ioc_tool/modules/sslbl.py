@@ -21,7 +21,7 @@ import os
 import time
 from typing import Any
 
-import requests
+from ..core import http
 
 FEED_URL = "https://sslbl.abuse.ch/blacklist/sslblacklist.json"
 CACHE_FILE = os.path.join(
@@ -30,7 +30,10 @@ CACHE_FILE = os.path.join(
     "sslbl_blacklist.json",
 )
 _DEFAULT_TTL_HOURS = 24.0
-_TIMEOUT = 10
+_TIMEOUT = 10  # preserve original tuned override
+
+# Per-source bucket — blocklist refreshed on 24h TTL, low-and-slow.
+_SOURCE = "sslbl"
 
 
 def _ttl_seconds() -> float:
@@ -56,9 +59,8 @@ def _cache_is_stale() -> bool:
 
 
 def refresh_blocklist() -> bool:
-    try:
-        response = requests.get(FEED_URL, timeout=_TIMEOUT)
-    except requests.exceptions.RequestException:
+    response = http.get(_SOURCE, FEED_URL, timeout=_TIMEOUT)
+    if response is None:
         return False
     if response.status_code != 200:
         return False

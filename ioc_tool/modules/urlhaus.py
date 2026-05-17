@@ -16,10 +16,13 @@ and never raise. A successful HTTP 200 with ``query_status != "ok"``
 
 from __future__ import annotations
 
-import requests
+from ..core import http
 
 BASE_URL = "https://urlhaus-api.abuse.ch/v1"
-TIMEOUT = 10  # seconds
+TIMEOUT = 10  # seconds — preserve original tuned override
+
+# Per-source bucket — abuse.ch is generous; per-IOC lookups are cheap.
+_SOURCE = "urlhaus"
 
 
 def enrich_url(value: str) -> dict | None:
@@ -28,13 +31,13 @@ def enrich_url(value: str) -> dict | None:
     Returns the parsed response dict on a hit (``query_status == "ok"``),
     or ``None`` on no-hit / network error / non-200 status.
     """
-    try:
-        response = requests.post(
-            f"{BASE_URL}/url/",
-            data={"url": value},
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.post(
+        _SOURCE,
+        f"{BASE_URL}/url/",
+        data={"url": value},
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
 
     if response.status_code != 200:
@@ -58,13 +61,13 @@ def enrich_host(value: str) -> dict | None:
     ``urls`` array of historical malicious URLs) on a hit, or ``None``
     on no-hit / error.
     """
-    try:
-        response = requests.post(
-            f"{BASE_URL}/host/",
-            data={"host": value},
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.post(
+        _SOURCE,
+        f"{BASE_URL}/host/",
+        data={"host": value},
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
 
     if response.status_code != 200:

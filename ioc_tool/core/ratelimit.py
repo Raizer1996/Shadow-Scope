@@ -93,6 +93,25 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     "greynoise":    (10, 60),
     "abstract":     (10, 60),
     "censys":       (10, 60),
+    # Blocklist / catalog fetches — large files refreshed on a long TTL
+    # (24 h) not per-IOC, so a low-and-slow rate is appropriate.
+    "tor":          (4, 3600),     # 4 / hour — exit list is daily
+    "kev":          (4, 3600),     # 4 / hour — CISA catalog is daily
+    "feodo":        (4, 3600),     # 4 / hour — abuse.ch blocklist
+    "sslbl":        (4, 3600),     # 4 / hour — abuse.ch blocklist
+    "urlhaus":      (4, 3600),     # 4 / hour — abuse.ch blocklist
+    "threatfox":    (4, 3600),     # 4 / hour — abuse.ch blocklist
+    # Per-IOC enrichment APIs — public, no-auth, no published quota.
+    "epss":         (30, 60),      # FIRST.org — generous
+    "asn":          (10, 60),      # RIPE Stat — generous, polite cap
+    "ipinfo":       (20, 60),      # free tier ~50k / month
+    "crtsh":        (4, 60),       # public CT search, can be slow
+    "nvd":          (5, 30),       # NVD: 5 / 30 s unauthenticated
+    # Sandbox / submission APIs — caps per their published free tiers.
+    "hybrid_analysis": (5, 60),    # public-key tier ~200 / hour
+    "malwarebazaar": (10, 60),     # abuse.ch — generous
+    "filescan_io":  (5, 60),       # community tier
+    "joe_sandbox":  (4, 60),       # Joe Cloud free is very tight
 }
 
 _buckets: dict[str, Bucket] = {}

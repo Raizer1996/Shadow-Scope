@@ -1,9 +1,12 @@
 import os
 
-import requests
+from ..core import http
 
 API_KEY = os.getenv('HYBRID_ANALYSIS_API_KEY')
 BASE_URL = "https://www.hybrid-analysis.com/api/v2"
+
+# Per-source bucket — Falcon Sandbox public-key tier is ~200/hour.
+_SOURCE = 'hybrid_analysis'
 
 def get_headers():
     return {
@@ -25,7 +28,9 @@ def submit_file(file_path):
             # 'scan_type' might not be needed or should be 'all'
             data = {'environment_id': '120'}
 
-            response = requests.post(url, headers=get_headers(), files=files, data=data)
+            response = http.post(_SOURCE, url, headers=get_headers(), files=files, data=data)
+            if response is None:
+                return {"error": "request failed"}
             if response.status_code in [200, 201]:
                 return response.json()
             return {"error": f"Status {response.status_code} at {url}: {response.text}"}
@@ -44,7 +49,9 @@ def submit_url(target_url):
     }
 
     try:
-        response = requests.post(url, headers=get_headers(), data=data)
+        response = http.post(_SOURCE, url, headers=get_headers(), data=data)
+        if response is None:
+            return {"error": "request failed"}
         if response.status_code in [200, 201]:
             return response.json()
         return {"error": f"Status {response.status_code} at {url}: {response.text}"}
