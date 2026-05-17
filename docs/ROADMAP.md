@@ -155,7 +155,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [x] **Pivot index** — denormalised `enrichment_fields` side table populated on insert + one-shot backfill at init. Pivot lookups for `kind in (tag, malware, family, registrar)` switch from full-scan LIKE on `enrichments.data` to indexed `(kind, value)` join. New `shadowscope cache reindex` subcommand for manual rebuild. (Future enhancement #3 from session_state.md)
 - [x] **True delta history** — `score_history(ioc_id, score, recorded_at)` snapshot table populated by `update_last_score` on every enrich. New `GET /api/ui/score_history/{value}?limit=N` endpoint returns chronological points for the Watch tab's score-over-time graph. (Future enhancement #1 from session_state.md)
 - [x] **SSE event stream** — new in-process `eventbus` (sync `publish` + async `subscribe` with drop-oldest backpressure). `update_last_score` publishes `score` events; new `GET /api/ui/events` streams them as `text/event-stream` with 25s heartbeat. Replaces the 8s Watch-tab poll. (Future enhancement #2 from session_state.md)
-- [ ] **Provider failover / fallback** — if VT 429s, fall back to AlienVault OTX. **[issue]**
+- [x] **Provider failover / fallback** — VT → OTX on 429. `core/http.py` records throttled sources in a per-task `rate_limited_ctx` ContextVar; `core/enrich.py` post-fan-out hook (`_apply_vt_otx_failover`) stamps `fallback_used: 'otx'` on the VT entry and (defensively) runs OTX inline if it wasn't a planned source. Composite score formula untouched — annotation is transparency-only. Env opt-out: `SHADOWSCOPE_FAILOVER_DISABLE=1`. (2026-05-17)
 
 ---
 

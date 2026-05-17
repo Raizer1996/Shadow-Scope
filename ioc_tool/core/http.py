@@ -19,6 +19,7 @@ Modules opt in incrementally: replace ``requests.get(...)`` with
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any
 
 import requests
@@ -27,6 +28,38 @@ from . import ratelimit
 
 _DEFAULT_TIMEOUT_S = 15.0
 _MAX_RETRY_AFTER_S = 30.0
+
+
+# Per-task rate-limit ledger. The orchestrator (``core.enrich``) sets a
+# fresh dict in this context before fanning out sources; each ``request()``
+# call records ``source_key`` into the dict when the upstream rejects it
+# with a 429 we couldn't escape via retry, OR when our own token bucket
+# refused to hand out a token within ``rate_timeout``.
+#
+# Why a ContextVar rather than a module-global set: a ContextVar is
+# preserved across ``asyncio.to_thread`` boundaries (the orchestrator
+# already relies on this for ``no_cache_ctx``) yet is isolated per task,
+# so concurrent ``enrich_many_async`` invocations don't cross-contaminate.
+#
+# Default ``None`` means "no ledger active" — the helper records nothing,
+# preserving the historical zero-bookkeeping fast path for callers outside
+# the orchestrator (ad-hoc scripts, tests of unrelated modules, etc.).
+rate_limited_ctx: ContextVar[set[str] | None] = ContextVar(
+    "rate_limited_ctx", default=None
+)
+
+
+def _mark_rate_limited(source_key: str) -> None:
+    """Record that ``source_key`` was rate-limited in the active ledger."""
+    ledger = rate_limited_ctx.get()
+    if ledger is not None:
+        ledger.add(source_key)
+
+
+def was_rate_limited(source_key: str) -> bool:
+    """Return ``True`` iff the active ledger has flagged ``source_key``."""
+    ledger = rate_limited_ctx.get()
+    return ledger is not None and source_key in ledger
 
 
 def _parse_retry_after(value: str | None) -> float | None:
@@ -60,6 +93,10 @@ def request(
     giving up.
     """
     if not ratelimit.acquire(source_key, timeout=rate_timeout):
+        # Local bucket said no — observationally equivalent to a 429 from
+        # the upstream, so record it in the ledger for the orchestrator's
+        # failover hook.
+        _mark_rate_limited(source_key)
         return None
     if timeout is None:
         timeout = _DEFAULT_TIMEOUT_S
@@ -77,11 +114,17 @@ def request(
     # Acquire again — we already consumed a token, but the upstream
     # disagrees, so wait for a fresh token before the retry.
     if not ratelimit.acquire(source_key, timeout=rate_timeout):
+        _mark_rate_limited(source_key)
         return response  # return the 429 so the caller can short-circuit
     try:
-        return requests.request(method, url, timeout=timeout, **kwargs)
+        retry_response = requests.request(method, url, timeout=timeout, **kwargs)
     except requests.RequestException:
         return None
+    if retry_response.status_code == 429:
+        # Even the retry got throttled — flag the source so the
+        # orchestrator can transparently fall back to a sibling provider.
+        _mark_rate_limited(source_key)
+    return retry_response
 
 
 def get(source_key: str, url: str, **kwargs: Any) -> requests.Response | None:
