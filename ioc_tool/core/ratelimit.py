@@ -107,6 +107,7 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     "ipinfo":       (20, 60),      # free tier ~50k / month
     "crtsh":        (4, 60),       # public CT search, can be slow
     "nvd":          (5, 30),       # NVD: 5 / 30 s unauthenticated
+    "pdns":         (5, 60),       # Mnemonic free tier — be polite
     # Sandbox / submission APIs — caps per their published free tiers.
     "hybrid_analysis": (5, 60),    # public-key tier ~200 / hour
     "malwarebazaar": (10, 60),     # abuse.ch — generous

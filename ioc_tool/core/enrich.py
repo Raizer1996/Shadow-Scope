@@ -52,6 +52,7 @@ from ..modules import (
     malwarebazaar,
     nvd,
     otx,
+    pdns,
     pulsedive,
     rdns,
     shodan_mod,
@@ -554,6 +555,18 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             lambda: rdns.enrich_ip(value),
             None,
             info_only=True,
+        ))
+
+    # --- Passive DNS first-seen / IP age — IP only (info-only, Mnemonic free) ---
+    # ``pdns.enrich_ip`` returns ``{}`` on soft-fail; treat that as no-data
+    # so we don't persist a blank row that re-triggers a fetch each call.
+    if ioc_type == 'ip':
+        tasks.append(asyncio.to_thread(
+            _run_source, ioc_id, 'pdns', 'PDNS',
+            lambda: pdns.enrich_ip(value),
+            score.calculate_pdns_score,
+            info_only=True,
+            cache_filter=_shodan_filter,
         ))
 
     # --- Censys Hosts v2 — IP only (info-only; deeper banners, JARM, cert chain, OS) ---

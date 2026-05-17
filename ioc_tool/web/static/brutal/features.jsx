@@ -1217,6 +1217,12 @@ function IpCorePanel({ ioc, fmt }) {
     ...((g.hostnames || []).filter(Boolean)),
     ...((core?.hostnames_extra || []).filter(Boolean)),
   ]));
+  // Passive-DNS first-seen / last-seen — info-only single-line row.
+  const pdns = ioc.modules?.PDNS?.data || null;
+  const pdnsFirst = pdns?.first_seen ? String(pdns.first_seen).slice(0, 10) : null;
+  const pdnsLast  = pdns?.last_seen  ? String(pdns.last_seen).slice(0, 10)  : null;
+  const pdnsAge   = (pdns && typeof pdns.age_days === "number") ? pdns.age_days : null;
+  const pdnsRecs  = pdns?.record_count || 0;
 
   return (
     <div className="ip-core-panel">
@@ -1256,6 +1262,18 @@ function IpCorePanel({ ioc, fmt }) {
           <div className="ipc-row">
             <span className="ipc-k">RDNS</span>
             <span className="ipc-v">{allHosts.join(", ")}</span>
+          </div>
+        )}
+        {(pdnsFirst || pdnsLast) && (
+          <div className="ipc-row">
+            <span className="ipc-k">PDNS</span>
+            <span className="ipc-v">
+              {pdnsFirst ? <>first <b>{pdnsFirst}</b></> : null}
+              {pdnsLast ? <span className="dim">{" · "}last {pdnsLast}</span> : null}
+              {pdnsAge != null ? <span className="dim">{" · "}{pdnsAge}d</span> : null}
+              {pdnsRecs > 0 ? <span className="dim">{" · "}{pdnsRecs} records</span> : null}
+              <span className="dim">{" · Mnemonic"}</span>
+            </span>
           </div>
         )}
         {core?.rdap_cidr && (
