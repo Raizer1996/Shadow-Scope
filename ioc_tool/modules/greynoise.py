@@ -47,10 +47,14 @@ from __future__ import annotations
 
 import os
 
-import requests
+from ..core import http
 
 BASE_URL = "https://api.greynoise.io/v3/community"
-TIMEOUT = 10  # seconds
+TIMEOUT = 10  # tuned override — Community endpoint is fast
+
+# Per-source bucket key — registry default caps GreyNoise at 10 req/min;
+# the free Community tier is 50 lookups/day.
+_SOURCE = "greynoise"
 
 
 def enrich_ip(value: str) -> dict | None:
@@ -75,13 +79,13 @@ def enrich_ip(value: str) -> dict | None:
         "Accept": "application/json",
     }
 
-    try:
-        response = requests.get(
-            f"{BASE_URL}/{value}",
-            headers=headers,
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.get(
+        _SOURCE,
+        f"{BASE_URL}/{value}",
+        headers=headers,
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
 
     if response.status_code != 200:

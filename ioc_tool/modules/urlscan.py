@@ -42,10 +42,14 @@ from __future__ import annotations
 
 import os
 
-import requests
+from ..core import http
 
 BASE_URL = "https://urlscan.io/api/v1/search/"
-TIMEOUT = 10  # seconds
+TIMEOUT = 10  # seconds — tuned override for the search API
+
+# Per-source bucket key — registry default caps urlscan at 2 req/min to
+# stay under the strict free-tier ceiling.
+_SOURCE = "urlscan"
 
 # Map ShadowScope's internal IOC type names onto URLscan Lucene query fields.
 _QUERY_FIELD = {
@@ -91,14 +95,14 @@ def enrich(value: str, ioc_type: str) -> dict | None:
 
     params = {"q": f'{field}:"{value}"'}
 
-    try:
-        response = requests.get(
-            BASE_URL,
-            headers=headers,
-            params=params,
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.get(
+        _SOURCE,
+        BASE_URL,
+        headers=headers,
+        params=params,
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
 
     if response.status_code != 200:

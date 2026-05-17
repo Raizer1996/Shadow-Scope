@@ -23,10 +23,14 @@ from __future__ import annotations
 
 import os
 
-import requests
+from ..core import http
 
 BASE_URL = "https://ip-intelligence.abstractapi.com/v1/"
-TIMEOUT = 10
+TIMEOUT = 10  # tuned override — endpoint is fast
+
+# Per-source bucket key — uses the existing ``abstract`` registry entry
+# (default 10 req/min) which matches AbstractAPI's free-tier ceiling.
+_SOURCE = "abstract"
 
 
 def _api_key() -> str:
@@ -42,14 +46,14 @@ def enrich_ip(ip: str) -> dict | None:
     api_key = _api_key()
     if not api_key:
         return None
-    try:
-        response = requests.get(
-            BASE_URL,
-            params={"api_key": api_key, "ip_address": ip},
-            timeout=TIMEOUT,
-            headers={"Accept": "application/json"},
-        )
-    except requests.exceptions.RequestException:
+    response = http.get(
+        _SOURCE,
+        BASE_URL,
+        params={"api_key": api_key, "ip_address": ip},
+        timeout=TIMEOUT,
+        headers={"Accept": "application/json"},
+    )
+    if response is None:
         return None
     if response.status_code != 200:
         return None

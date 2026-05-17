@@ -31,10 +31,13 @@ from __future__ import annotations
 
 import os
 
-import requests
+from ..core import http
 
 BASE_URL = "https://otx.alienvault.com/api/v1/indicators"
-TIMEOUT = 10  # seconds
+TIMEOUT = 10  # seconds — kept as a tuned override; OTX can be slow on cold pulses
+
+# Per-source bucket key — registry default caps OTX at 10 req/min.
+_SOURCE = "otx"
 
 # Map ShadowScope's internal IOC type names onto OTX's path segments.
 _TYPE_PATH = {
@@ -77,13 +80,13 @@ def enrich(value: str, ioc_type: str) -> dict | None:
         "Accept": "application/json",
     }
 
-    try:
-        response = requests.get(
-            f"{BASE_URL}/{path_type}/{value}/general",
-            headers=headers,
-            timeout=TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
+    response = http.get(
+        _SOURCE,
+        f"{BASE_URL}/{path_type}/{value}/general",
+        headers=headers,
+        timeout=TIMEOUT,
+    )
+    if response is None:
         return None
 
     if response.status_code != 200:
