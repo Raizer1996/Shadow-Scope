@@ -76,12 +76,37 @@ pytest -q
 
 ## Adding a new enrichment source
 
-See the dedicated section in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#adding-a-new-enrichment-source). TL;DR: one file in `ioc_tool/modules/`, scoring helper in `core/score.py`, wire into `core/enrich.py`, env var into `.env.example` + `docs/API_KEYS.md`, smoke test in `tests/`.
+See the dedicated section in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#adding-a-new-enrichment-source). TL;DR:
+
+1. One file in `ioc_tool/modules/<source>.py` exposing `enrich_ip()` / `enrich_domain()` / `enrich_hash()` / `enrich_cve()` as appropriate.
+2. **Always issue HTTP through `core.http`**, never `requests.*` directly. The helper centralises rate limiting, the 429 ledger that drives VT→OTX failover, and uniform timeouts.
+
+   ```python
+   from ioc_tool.core import http
+
+   _SOURCE = "mysource"
+   _BASE   = "https://api.example.com"
+   _TIMEOUT_S = 10.0
+
+   def enrich_ip(ip: str) -> dict | None:
+       resp = http.get(_SOURCE, f"{_BASE}/lookup/{ip}", timeout=_TIMEOUT_S)
+       if resp is None or resp.status_code != 200:
+           return None  # soft-fail contract
+       return resp.json()
+   ```
+
+3. **Register a rate-limit bucket** for the new source in `ioc_tool/core/ratelimit.py::_DEFAULT_BUCKETS` — even a generous one. The bucket key MUST match the `_SOURCE` string used in `http.get(...)`. Format: `"mysource": (CAPACITY, PERIOD_SECONDS)`. Skipping this step means the source runs unrestricted and risks burning the upstream's free-tier quota in a bulk fan-out.
+4. Scoring helper in `core/score.py` if it produces a score; info-only sources should NOT push the composite (see PDNS for the pattern).
+5. Wire into `core/enrich.py` next to existing source blocks (preserve the `should_refresh()` cache pattern).
+6. Env var (if any) into `ioc_tool/.env.example` and `docs/API_KEYS.md`.
+7. Smoke test in `tests/` — mock `core.http.get` with a stub that returns a `_FakeResponse` (see `tests/test_pdns.py` for the pattern).
 
 ## Don'ts
 
 - **Don't** commit `.env`, `ioc.db`, malware samples (`*.exe`, `*.dll`), or large cache files — `.gitignore` covers these
 - **Don't** display API keys in chat, logs, or error messages
-- **Don't** call external APIs in tests — mock with `responses` or `pytest-mock`
+- **Don't** call external APIs in tests — mock with `responses`, `pytest-mock`, or monkeypatched `core.http.get`
 - **Don't** introduce new top-level dirs without updating `docs/ARCHITECTURE.md`
 - **Don't** push directly to `main` once the repo is public — use feature branches + PRs
+- **Don't** use `requests.get` / `requests.post` directly in new modules — route through `ioc_tool.core.http` so the rate-limiter, 429 ledger, and timeouts apply uniformly
+- **Don't** accept webhook URLs (or any user-supplied URL pointed at outbound HTTP) without scheme + IP-range validation — treat user-supplied URLs as SSRF surface. The webhook helper in `core.http` is the single point of validation; new outbound paths should reuse it

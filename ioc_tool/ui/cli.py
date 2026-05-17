@@ -758,20 +758,15 @@ def handle_enrich(args: argparse.Namespace) -> None:
     if not results:
         return
 
-    # --- Optional outbound webhook ---------------------------------------
-    # POST one payload per IOC (same shape as JSON / STIX outputs) to an
-    # external receiver — SIEM intake, ticketing webhook, IR pager. Soft-
-    # fails on every error so a misbehaving receiver can't crash the CLI
-    # or mangle the IOC output piped to stdout.
-    webhook_url = getattr(args, 'webhook', None)
-    if webhook_url:
-        from ..core import http as _http
-        for res in results:
-            ok = _http.post_webhook(webhook_url, res)
-            if not ok:
-                err_console.print(
-                    f"[yellow]webhook post failed for {res.get('ioc')}[/yellow]"
-                )
+    # --- Optional outbound webhook (resolved at handler time) ------------
+    # The argparse default is intentionally ``None`` so the env var is read
+    # here, NOT at module import. This matters for tests / wrapping scripts
+    # that mutate ``SHADOWSCOPE_WEBHOOK_URL`` after the CLI module was
+    # imported — the old "default=os.getenv(...)" snapshot lost those
+    # late-binding changes silently.
+    webhook_url = getattr(args, 'webhook', None) or os.getenv(
+        'SHADOWSCOPE_WEBHOOK_URL'
+    ) or None
 
     want_summary = bool(getattr(args, 'summary', False))
     summaries: dict[int, str | None] = {}
@@ -782,6 +777,11 @@ def handle_enrich(args: argparse.Namespace) -> None:
         for idx, res in enumerate(results):
             summaries[idx] = llm_mod.summarize(res)
 
+    # ----- Emit stdout / table FIRST --------------------------------------
+    # Order matters: a webhook receiver under back-pressure must NOT delay
+    # the JSON / CSV / STIX payload that downstream pipelines are waiting
+    # for. We render the user-visible output here, then fan out webhook
+    # POSTs in parallel after the local pipeline has been satisfied.
     if want_json:
         if want_summary:
             payload: list[dict[str, Any]] = []
@@ -792,8 +792,7 @@ def handle_enrich(args: argparse.Namespace) -> None:
             print(output_mod.to_json(payload))
         else:
             print(output_mod.to_json(results))
-        return
-    if want_csv:
+    elif want_csv:
         # Use sys.stdout.write to preserve the trailing newline structure
         # exactly as csv.writer emits it; print() would append an extra \n.
         csv_text = output_mod.to_csv(results)
@@ -818,32 +817,128 @@ def handle_enrich(args: argparse.Namespace) -> None:
                     lines[i] = lines[i] + "," + buf.getvalue()
             csv_text = "\n".join(lines) + ("\n" if trailing_blank else "")
         sys.stdout.write(csv_text)
-        return
-    if want_stix:
+    elif want_stix:
         print(output_mod.to_stix(results))
-        return
-    if want_md:
+    elif want_md:
         print(output_mod.to_markdown(results, include_summaries=summaries if want_summary else None))
-        return
-
-    print_aggregated_table(results, should_defang=getattr(args, 'defang', False))
-    if want_summary:
-        for idx, res in enumerate(results):
-            verdict = summaries.get(idx)
-            if verdict:
-                console.print(
-                    Panel(
-                        verdict,
-                        title=f"LLM Verdict — {res.get('ioc')}",
-                        border_style="cyan",
-                        expand=False,
+    else:
+        print_aggregated_table(results, should_defang=getattr(args, 'defang', False))
+        if want_summary:
+            for idx, res in enumerate(results):
+                verdict = summaries.get(idx)
+                if verdict:
+                    console.print(
+                        Panel(
+                            verdict,
+                            title=f"LLM Verdict — {res.get('ioc')}",
+                            border_style="cyan",
+                            expand=False,
+                        )
                     )
-                )
+                else:
+                    console.print(
+                        f"[dim]LLM summary unavailable for {res.get('ioc')} "
+                        "(Ollama not reachable)[/dim]"
+                    )
+
+    # Flush stdout so downstream readers see the payload BEFORE we begin
+    # the webhook fan-out; otherwise a slow receiver under back-pressure
+    # can hold the parent process while the OS buffer still has bytes.
+    sys.stdout.flush()
+
+    # ----- Webhook fan-out (after stdout) ---------------------------------
+    if webhook_url and results:
+        _dispatch_webhooks(
+            webhook_url,
+            results,
+            concurrency=_resolve_webhook_concurrency(args, len(results)),
+        )
+
+
+def _resolve_webhook_concurrency(args: argparse.Namespace, n_results: int) -> int:
+    """Clamp ``--webhook-concurrent`` into [1, min(32, n_results)].
+
+    Default is 8. A user may pass ``1`` for serial behaviour (debugging,
+    ordering-sensitive receivers, or test isolation). Values outside
+    1-32 are clamped to keep memory predictable — the underlying
+    rate-limiter is the true governor anyway.
+    """
+    raw = getattr(args, 'webhook_concurrent', None) or 8
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = 8
+    n = max(1, min(32, n))
+    # Cap at the number of results — no point spinning idle workers.
+    return min(n, max(1, n_results))
+
+
+def _dispatch_webhooks(
+    webhook_url: str,
+    results: list[dict[str, Any]],
+    *,
+    concurrency: int,
+) -> None:
+    """POST every result to ``webhook_url`` in parallel; emit a summary line.
+
+    Soft-fail semantics: an individual POST failure (network error,
+    non-2xx, rate-limiter starvation) NEVER aborts the loop, never
+    affects the CLI exit code, and never mutates stdout (only stderr).
+    The 10/s ``webhook`` token bucket in ``core/ratelimit`` is shared
+    across workers, so the only effect of raising concurrency is that
+    bursts up to the bucket capacity drain in a single tick instead of
+    queuing serially behind ``acquire()``.
+
+    Output order on stdout is already locked in (the caller emitted the
+    payload before us); POST order is intentionally parallel.
+    """
+    from ..core import http as _http
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _post_one(res: dict[str, Any]) -> tuple[bool, str | None]:
+        try:
+            ok = _http.post_webhook(webhook_url, res)
+        except Exception:
+            # post_webhook already swallows exceptions, but belt-and-
+            # braces: a future SDK swap shouldn't leak into the worker.
+            ok = False
+        return ok, res.get('ioc') if isinstance(res, dict) else None
+
+    posted = 0
+    failed = 0
+    if concurrency <= 1:
+        # Serial path — preserves call order (a stable property analysts
+        # sometimes lean on when staring at receiver logs) and skips the
+        # executor setup cost for one-IOC enrichments.
+        for res in results:
+            ok, ioc_value = _post_one(res)
+            if ok:
+                posted += 1
             else:
-                console.print(
-                    f"[dim]LLM summary unavailable for {res.get('ioc')} "
-                    "(Ollama not reachable)[/dim]"
+                failed += 1
+                err_console.print(
+                    f"[yellow]webhook post failed for {ioc_value}[/yellow]"
                 )
+    else:
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {pool.submit(_post_one, res): res for res in results}
+            for fut in futures:
+                try:
+                    ok, ioc_value = fut.result()
+                except Exception:
+                    ok, ioc_value = False, None
+                if ok:
+                    posted += 1
+                else:
+                    failed += 1
+                    err_console.print(
+                        f"[yellow]webhook post failed for {ioc_value}[/yellow]"
+                    )
+
+    # One summary line so a bulk run with 1k IOCs doesn't drown stderr.
+    err_console.print(
+        f"[dim]webhook: {posted} posted, {failed} failed[/dim]"
+    )
 
 
 def handle_show(args: argparse.Namespace) -> None:
@@ -1677,11 +1772,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_enrich.add_argument(
         '--webhook',
-        default=os.getenv('SHADOWSCOPE_WEBHOOK_URL') or None,
+        default=None,
         help=(
             'POST each enrichment result as JSON to this URL '
-            '(falls back to $SHADOWSCOPE_WEBHOOK_URL). '
+            '(falls back to $SHADOWSCOPE_WEBHOOK_URL, resolved at run '
+            'time so wrapping scripts can set it after import). '
             'Failures are logged to stderr but never block CLI output.'
+        ),
+    )
+    p_enrich.add_argument(
+        '--webhook-concurrent',
+        dest='webhook_concurrent',
+        type=int,
+        default=8,
+        metavar='N',
+        help=(
+            'Parallel webhook workers (1-32, default 8). 1 = serial '
+            'behaviour. The shared per-source rate-limiter remains the '
+            'true governor — concurrency only controls how fast tokens '
+            'can be drained from the bucket.'
         ),
     )
 

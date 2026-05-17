@@ -45,13 +45,19 @@ def test_cli_parser_accepts_enrich_webhook_flag():
     assert args.webhook == 'https://example.test/hook'
 
 
-def test_cli_parser_enrich_webhook_defaults_to_env(monkeypatch):
+def test_cli_parser_enrich_webhook_default_is_none(monkeypatch):
+    """Parser default is ``None`` — env resolution moved to handler time.
+
+    Previously the parser snapshotted ``SHADOWSCOPE_WEBHOOK_URL`` at
+    module-import time, which silently lost late-binding env changes.
+    The new contract: parser leaves ``args.webhook`` as ``None`` when
+    the flag is not passed; ``handle_enrich`` reads the env when it
+    runs. See ``test_webhook_bulk`` for the handler-level coverage.
+    """
     monkeypatch.setenv('SHADOWSCOPE_WEBHOOK_URL', 'https://from-env.test/hook')
-    # The default is evaluated at parser-construction time, so build a
-    # fresh parser after the env mutation.
     parser = cli.build_parser()
     args = parser.parse_args(['enrich', '8.8.8.8'])
-    assert args.webhook == 'https://from-env.test/hook'
+    assert args.webhook is None
 
 
 def test_cli_parser_enrich_webhook_none_when_unset(monkeypatch):
@@ -77,6 +83,7 @@ def _make_enrich_ns(**overrides) -> argparse.Namespace:
         stix=False,
         md=False,
         webhook=None,
+        webhook_concurrent=1,  # serial in tests → deterministic ordering
         defang=False,
     )
     base.update(overrides)

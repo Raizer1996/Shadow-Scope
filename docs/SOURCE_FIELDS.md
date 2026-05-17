@@ -127,6 +127,28 @@ Status legend: ✅ surfaced, ❌ not surfaced, ⚠️ partially / fallback only.
 - **Pulsedive**: `risk`, `threats[]`, `feeds[]`, `comments[]`. Surface `risk` chip and threats list.
 - **URLscan**: `results[]` with `page.{url, domain, ip, asn}`, `verdicts.{urlscan, engines}`, `task.screenshotURL`. Surface verdict count and link to most recent scan.
 
+### Passive DNS (PDNS)
+Primary provider: **Mnemonic PassiveDNS** free tier (anonymous, low rate). IP IOCs only — domains and hashes are out of scope for v1.
+
+**Returns** (Module output schema):
+
+| Field          | Type                | Notes |
+|----------------|---------------------|-------|
+| `first_seen`   | str (ISO-8601 UTC)  | Earliest observed resolution of this IP for any rrname |
+| `last_seen`    | str (ISO-8601 UTC)  | Most recent observed resolution |
+| `age_days`     | int                 | Whole days between `first_seen` and now — convenience field for "fresh infra" heuristics |
+| `record_count` | int                 | Total PDNS records summed across rrnames |
+| `top_rrnames`  | list[str], ≤5       | Distinct rrnames that have pointed at this IP, capped to the noisiest 5 |
+| `source`       | str (`"mnemonic"`)  | Provenance — future expansion may add `"circl"` |
+
+**Soft-fail**: `{}` (an EMPTY dict, NOT `None`). The cache layer treats `None` as "no row" and would refetch on every cache miss; an empty dict still lets the cache short-circuit until the TTL expires.
+
+**Rate-limit bucket**: `pdns: (5, 60)` — 5 requests per 60 seconds. Tune via `RATELIMIT_PDNS=<capacity>/<period>` or disable with `RATELIMIT_PDNS_DISABLE=1`.
+
+**Scoring**: PDNS is **info-only**. It never feeds into `calculate_final_risk` / the composite score — `first_seen` on a 6-month-old IP is just context, not a verdict. Render as chips on the IP Core panel.
+
+**CIRCL Passive DNS** is reserved as a secondary path. `CIRCL_USERNAME` / `CIRCL_PASSWORD` env vars ship commented out in `ioc_tool/.env.example`; the v1 module only implements the Mnemonic path.
+
 ---
 
 ## Domain sources
@@ -254,3 +276,14 @@ For domain-shaped email IOCs (e.g. `01.rocketemail.biz`), use Domain Core direct
 | **Hash Core**   | filenames, file type (magic/magika), first/last seen, family (union of sources), PE/ELF block, YARA hits, OTX campaigns, MalwareBazaar/ThreatFox tags |
 | **CVE Core**    | full NVD description, parsed CVSS vector chips, CWE chips, affected products list, KEV patch-by alert, EPSS percentile, references |
 | **Email Core**  | deferred (route to Domain Core for now) |
+
+---
+
+## Score-history snapshots & live dashboard events
+
+Not strictly an enrichment "source", but consumers of `SOURCE_FIELDS` need
+to know what historical signals are available to render:
+
+- **`score_history` SQLite table** (added in #58). Every completed enrichment writes one row keyed on `(ioc_id, captured_at, score)`. Powers the per-IOC sparkline in the dashboard and is exposed read-only via `GET /api/ui/score_history?ioc=<v>[&limit=N]`.
+- **SSE event stream** `GET /api/ui/events` (added in #59). Server-Sent Events feed of dashboard-relevant deltas: new enrichments, score changes, case mutations. Consumers subscribe with `EventSource`; events have `type` (`enrichment` / `score_delta` / `case`) and a JSON `data` payload. Backed by an in-process broadcaster in `ioc_tool/web/eventbus.py`. No persistent log — late subscribers see only events emitted after they connected.
+
