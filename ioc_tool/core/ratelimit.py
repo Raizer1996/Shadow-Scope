@@ -35,48 +35,86 @@ from dataclasses import dataclass
 
 @dataclass
 class Bucket:
-    """A single token bucket. ``capacity`` is also the burst size."""
+    """A single token bucket. ``capacity`` is also the burst size.
+
+    Concurrency model: a single :class:`threading.Condition` guards both
+    the ``tokens`` state and the wakeups. ``acquire`` enters the
+    condition, refills, and either consumes a token immediately or
+    ``wait()``s on the condition for a bounded interval (using
+    ``Condition.wait(timeout=...)`` so it's interrupted both by the
+    deadline and by a sibling thread's notify). On wakeup it refills
+    again and retries.
+
+    Why a Condition rather than the prior ``with lock: ... lock.release()
+    + time.sleep() + lock.acquire()`` dance: the manual release-inside-
+    ``with`` pattern raises ``RuntimeError: release unlocked lock`` if
+    a sibling thread also tries to refill / release in the same window
+    — the context manager then tries to release a lock the manual call
+    already gave back. ``Condition`` makes the lifetime explicit: the
+    ``with self._cond:`` block owns the lock for the duration; sleeping
+    happens via ``wait()`` which atomically drops the lock and reclaims
+    it on wakeup.
+    """
 
     capacity: float
     refill_per_sec: float
     tokens: float = 0.0
     last_refill: float = 0.0
-    lock: threading.Lock = None  # type: ignore[assignment]
+    # ``Condition`` wraps a re-entrant ``RLock`` by default; we use it
+    # purely as the lock + wait/notify pair. ``init=False`` so the
+    # dataclass doesn't insist on a positional argument at construction.
+    _cond: threading.Condition = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
-        if self.lock is None:
-            self.lock = threading.Lock()
+        if self._cond is None:
+            self._cond = threading.Condition()
         self.tokens = self.capacity
         self.last_refill = time.monotonic()
 
     def _refill_locked(self, now: float) -> None:
+        """Top up tokens based on elapsed monotonic time.
+
+        Caller must hold ``self._cond``. If any tokens were added, notify
+        waiters — they may now have enough to proceed.
+        """
         elapsed = now - self.last_refill
         if elapsed <= 0:
             return
+        before = self.tokens
         self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_per_sec)
         self.last_refill = now
+        if self.tokens > before:
+            # Some token quantum was added — wake any waiter that might
+            # now be able to proceed. notify_all is cheap for our small
+            # contended pools and avoids the "wrong waiter woken" edge.
+            self._cond.notify_all()
 
     def acquire(self, timeout: float = 30.0) -> bool:
-        """Consume one token. Returns ``False`` if ``timeout`` elapses first."""
+        """Consume one token. Returns ``False`` if ``timeout`` elapses first.
+
+        Every code path exits with the condition lock released cleanly
+        (handled by the ``with`` block); waiters are woken either by
+        ``_refill_locked`` topping the bucket up, or by another thread
+        releasing the lock at the end of its own ``acquire``.
+        """
         deadline = time.monotonic() + timeout
-        with self.lock:
+        with self._cond:
             while True:
                 now = time.monotonic()
                 self._refill_locked(now)
                 if self.tokens >= 1.0:
                     self.tokens -= 1.0
                     return True
-                # Tokens needed = 1 - tokens (positive fractional).
-                wait = (1.0 - self.tokens) / self.refill_per_sec
-                if now + wait > deadline:
+                remaining = deadline - now
+                if remaining <= 0:
                     return False
-                # Release the lock while sleeping so other threads can
-                # acquire if a token regenerates concurrently.
-                self.lock.release()
-                try:
-                    time.sleep(min(wait, deadline - now))
-                finally:
-                    self.lock.acquire()
+                # How long until we *could* have a fresh token?  Sleep
+                # up to that interval (capped by the overall deadline).
+                # ``Condition.wait`` atomically releases the lock and
+                # reclaims it before returning, so no manual
+                # release/acquire dance is needed.
+                wait = (1.0 - self.tokens) / self.refill_per_sec
+                self._cond.wait(timeout=min(wait, remaining))
 
 
 # Public free-tier defaults. Tuned conservatively — easy to bump per

@@ -19,8 +19,12 @@ Modules opt in incrementally: replace ``requests.get(...)`` with
 
 from __future__ import annotations
 
+import ipaddress
+import os
+import sys
 from contextvars import ContextVar
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -28,6 +32,11 @@ from . import ratelimit
 
 _DEFAULT_TIMEOUT_S = 15.0
 _MAX_RETRY_AFTER_S = 30.0
+# Re-acquire timeout for the 429 retry path. Kept deliberately short so a
+# starved bucket can't pin a worker re-waiting for a token that won't come
+# in time — better to soft-fail and let the orchestrator's failover hook
+# substitute a sibling provider.
+_RETRY_RATE_TIMEOUT_S = 5.0
 
 
 # Per-task rate-limit ledger. The orchestrator (``core.enrich``) sets a
@@ -108,14 +117,30 @@ def request(
         return response
 
     # One retry after honouring Retry-After.
+    #
+    # The upstream's 429 means our local bucket guessed wrong — the
+    # token we already consumed didn't translate into a successful
+    # call. Before re-issuing we MUST acquire a fresh token from the
+    # local bucket so the retry doesn't double-spend (one upstream
+    # attempt per local token, otherwise we burn the analyst's free-
+    # tier quota twice per "logical request").
+    #
+    # Use a deliberately short re-acquire timeout (``_RETRY_RATE_TIMEOUT_S``)
+    # so a starved bucket short-circuits the retry instead of busy-
+    # waiting — the failover hook in ``core.enrich`` can then substitute
+    # a sibling provider transparently.
     wait = _parse_retry_after(response.headers.get("Retry-After")) or 1.0
     import time as _time
     _time.sleep(wait)
-    # Acquire again — we already consumed a token, but the upstream
-    # disagrees, so wait for a fresh token before the retry.
-    if not ratelimit.acquire(source_key, timeout=rate_timeout):
+    if not ratelimit.acquire(source_key, timeout=_RETRY_RATE_TIMEOUT_S):
+        # Bucket refused — give up gracefully. We flag the source for
+        # the orchestrator's failover hook and return ``None`` (NOT the
+        # 429 response) so the caller treats this as no-data, identical
+        # to a regular bucket starvation. Returning the 429 here would
+        # leak the upstream's error body downstream and break the
+        # "soft-fail to None" contract callers rely on.
         _mark_rate_limited(source_key)
-        return response  # return the 429 so the caller can short-circuit
+        return None
     try:
         retry_response = requests.request(method, url, timeout=timeout, **kwargs)
     except requests.RequestException:
@@ -154,7 +179,68 @@ def post(source_key: str, url: str, **kwargs: Any) -> requests.Response | None:
 # ``post_webhook`` returns ``True`` on a 2xx response, ``False``
 # otherwise; callers can use the return value to emit a single stderr
 # warning per failure.
+#
+# SSRF defence — the helper rejects URLs that would let an attacker (or a
+# misconfigured config file) pivot off the ShadowScope host into private
+# / cloud-metadata / loopback space:
+#
+#   * scheme must be http or https (no file://, gopher://, etc.)
+#   * if the host parses as a literal IPv4/IPv6, it must NOT be in any
+#     private, loopback, or link-local range
+#
+# Hostnames are accepted as-is in v1 — a future TOCTOU-safe revision can
+# resolve them at request time and re-check. The env-var escape hatch
+# ``SHADOWSCOPE_WEBHOOK_ALLOW_PRIVATE=1`` skips the private-IP gate for
+# internal SIEM / on-prem ticketing endpoints that legitimately live in
+# RFC1918 space.
 _WEBHOOK_TIMEOUT_S = 5.0
+_WEBHOOK_ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
+def _webhook_allow_private() -> bool:
+    """Return True iff the operator opted in to private-IP webhook targets."""
+    return os.getenv("SHADOWSCOPE_WEBHOOK_ALLOW_PRIVATE", "").strip() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _validate_webhook_url(url: str) -> str | None:
+    """Return a rejection reason, or ``None`` if the URL is acceptable.
+
+    Cheap stdlib-only check: scheme + literal-IP range. Hostnames are
+    pass-through in v1 (no DNS resolution); the caller is trusting the
+    operator-supplied config for those.
+    """
+    if not isinstance(url, str) or not url:
+        return "empty url"
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "unparseable url"
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _WEBHOOK_ALLOWED_SCHEMES:
+        return f"disallowed scheme {scheme!r}"
+    host = parsed.hostname
+    if not host:
+        return "missing host"
+    # Literal IP check. Hostnames return ValueError from ip_address and
+    # are accepted as-is (v1 contract — see docstring).
+    if _webhook_allow_private():
+        return None
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_unspecified
+        or ip.is_reserved
+        or ip.is_multicast
+    ):
+        return f"private/loopback/link-local IP {host!r}"
+    return None
 
 
 def post_webhook(
@@ -167,8 +253,15 @@ def post_webhook(
     """POST ``payload`` as JSON to ``url``. Returns ``True`` on 2xx.
 
     Soft-fails on any error (timeout, connection refused, non-2xx,
-    rate-limiter starvation) and returns ``False`` — never raises.
+    rate-limiter starvation, SSRF-policy rejection) and returns ``False``
+    — never raises. Rejected URLs are surfaced to stderr so operators can
+    spot misconfigured webhook targets without changing the soft-fail
+    contract.
     """
+    reason = _validate_webhook_url(url)
+    if reason is not None:
+        print(f"webhook URL rejected: {reason}", file=sys.stderr)
+        return False
     try:
         response = post(source_key, url, json=payload, timeout=timeout)
     except Exception:

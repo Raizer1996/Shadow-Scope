@@ -260,3 +260,78 @@ def test_pdns_rate_limit_bucket_registered():
     capacity, period = ratelimit._DEFAULT_BUCKETS["pdns"]
     assert capacity == 5
     assert period == 60
+
+
+# ---------------------------------------------------------------------------
+# Soft-fail cache persistence — the empty ``{}`` MUST land in the cache
+# so a quiet IP doesn't refetch on every enrichment.
+# ---------------------------------------------------------------------------
+
+
+def test_pdns_empty_result_is_persisted_to_cache(monkeypatch, tmp_path):
+    """When PDNS returns ``{}`` (its documented soft-fail), the orchestrator
+    must persist a cache row anyway — otherwise a low-signal IP refetches
+    on every call and burns the tight Mnemonic free-tier quota.
+
+    Previously PDNS shared :func:`_shodan_filter`, which discards falsy
+    dicts. The dedicated :func:`_pdns_filter` keeps ``{}`` while still
+    rejecting ``{"error": ...}`` payloads.
+    """
+    from ioc_tool.core import database, enrich
+
+    # Repoint cache at a per-test SQLite file.
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "ioc.db"))
+    database.init_db()
+
+    # Stub all other sources to None so we can isolate the PDNS row.
+    from tests.test_smoke import _stub_all_network
+    _stub_all_network(monkeypatch)
+
+    # PDNS returns its documented soft-fail.
+    monkeypatch.setattr(pdns, "enrich_ip", lambda v: {})
+
+    result = enrich.enrich_ioc("203.0.113.99", "ip")
+
+    # The orchestrator surfaces the empty PDNS row (info-only).
+    assert "PDNS" in result["modules"]
+    assert result["modules"]["PDNS"]["data"] == {}
+
+    # And — the critical assertion — the row IS in the cache.
+    ioc_id = database.add_or_update_ioc("203.0.113.99", "ip")
+    cached = database.get_latest_enrichment(ioc_id, "pdns")
+    assert cached is not None, "PDNS soft-fail must be cached, not refetched"
+
+
+def test_pdns_error_dict_not_persisted(monkeypatch, tmp_path):
+    """An explicit ``{"error": ...}`` from the upstream is NOT cached —
+    we don't want to pin a transient outage into the cache for hours.
+    """
+    from ioc_tool.core import database, enrich
+
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "ioc.db"))
+    database.init_db()
+
+    from tests.test_smoke import _stub_all_network
+    _stub_all_network(monkeypatch)
+
+    monkeypatch.setattr(pdns, "enrich_ip", lambda v: {"error": "upstream 503"})
+
+    enrich.enrich_ioc("203.0.113.99", "ip")
+
+    ioc_id = database.add_or_update_ioc("203.0.113.99", "ip")
+    cached = database.get_latest_enrichment(ioc_id, "pdns")
+    assert cached is None, "error-dict payloads must not pollute the cache"
+
+
+def test_pdns_filter_unit():
+    """Direct unit on the filter: empty dict kept, error rejected, None rejected."""
+    from ioc_tool.core.enrich import _pdns_filter
+
+    assert _pdns_filter({}) == {}
+    assert _pdns_filter({"first_seen": "2024-01-01T00:00:00Z"}) == {
+        "first_seen": "2024-01-01T00:00:00Z"
+    }
+    assert _pdns_filter({"error": "boom"}) is None
+    assert _pdns_filter(None) is None
+    # Non-dicts (defensive) collapse to None.
+    assert _pdns_filter("not a dict") is None  # type: ignore[arg-type]

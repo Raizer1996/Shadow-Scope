@@ -138,7 +138,12 @@ def _otx_hit_stub(value, ioc_type):
 
 def test_vt_throttled_marks_fallback_on_vt_entry(monkeypatch, _isolated_db):
     """VT soft-fails with a 429; OTX still runs and the VT entry carries
-    a ``fallback_used: 'otx'`` annotation so analysts know we substituted."""
+    a ``fallback_used: 'otx'`` annotation so analysts know we substituted.
+
+    The annotation lives on the **outer** module entry (the dict that
+    wraps ``data``), not on ``data`` itself — that way a subsequent
+    cache hit (which re-decodes ``data`` from JSON) doesn't drop it.
+    """
     _stub_all_quiet(monkeypatch)
     # VT signals throttling via the ledger and returns None.
     monkeypatch.setattr(vt, "enrich_ip", _vt_429_stub)
@@ -147,10 +152,13 @@ def test_vt_throttled_marks_fallback_on_vt_entry(monkeypatch, _isolated_db):
     result = enrich.enrich_ioc("8.8.8.8", "ip")
 
     # VT entry exists (synthesised placeholder, since vt returned None)
-    # and carries the fallback annotation.
+    # and carries the fallback annotation on the wrapper.
     assert "VirusTotal" in result["modules"]
-    vt_data = result["modules"]["VirusTotal"]["data"]
-    assert vt_data.get("fallback_used") == "otx"
+    vt_entry = result["modules"]["VirusTotal"]
+    assert vt_entry.get("fallback_used") == "otx"
+    # The inner cached ``data`` payload must NOT carry the annotation —
+    # we keep cache-bound dicts pristine.
+    assert "fallback_used" not in (vt_entry.get("data") or {})
     # OTX still landed in the result the normal way.
     assert "OTX" in result["modules"]
 
@@ -190,7 +198,7 @@ def test_vt_throttled_runs_otx_when_not_planned(monkeypatch, _isolated_db):
     result = enrich.enrich_ioc("8.8.8.8", "ip")
 
     assert "OTX" in result["modules"]
-    assert result["modules"]["VirusTotal"]["data"].get("fallback_used") == "otx"
+    assert result["modules"]["VirusTotal"].get("fallback_used") == "otx"
     assert otx_calls, "OTX fetcher should have been invoked"
 
 
@@ -209,8 +217,11 @@ def test_vt_success_does_not_trigger_fallback(monkeypatch, _isolated_db):
 
     result = enrich.enrich_ioc("8.8.8.8", "ip")
 
-    vt_data = result["modules"]["VirusTotal"]["data"]
-    assert "fallback_used" not in vt_data
+    vt_entry = result["modules"]["VirusTotal"]
+    # Neither the outer wrapper nor the inner ``data`` should carry an
+    # annotation when VT succeeded — the hook must short-circuit.
+    assert "fallback_used" not in vt_entry
+    assert "fallback_used" not in (vt_entry.get("data") or {})
     # OTX still ran normally (planned), so no auto-add semantics in play.
     assert "OTX" in result["modules"]
 
@@ -230,9 +241,11 @@ def test_failover_disabled_env_skips_annotation(monkeypatch, _isolated_db):
     result = enrich.enrich_ioc("8.8.8.8", "ip")
 
     # OTX still ran because it's a planned source for ip — but we should
-    # NOT see the fallback annotation on the (absent) VT entry.
+    # NOT see the fallback annotation on the (absent) VT entry, on
+    # either the outer wrapper or the inner ``data`` dict.
     vt_entry = result["modules"].get("VirusTotal")
     if vt_entry is not None:
+        assert "fallback_used" not in vt_entry
         assert "fallback_used" not in (vt_entry.get("data") or {})
 
 

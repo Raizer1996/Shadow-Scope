@@ -468,6 +468,16 @@ def list_tags() -> list[dict]:
     return rows
 
 
+# Minimum gap between successive ``score_history`` rows that carry the
+# same composite score. Hitting the same IOC 50× in a minute (e.g.
+# during a bulk re-enrich of an existing watchlist) previously wrote 50
+# identical points; the Watch-tab graph showed a flat-line plateau with
+# tens of stacked dots. We coalesce identical-score writes inside this
+# window so the series stays meaningful — score changes always insert
+# regardless of gap.
+_SCORE_HISTORY_DEDUP_WINDOW_S = 60.0
+
+
 def update_last_score(ioc_id: int, score: int) -> None:
     """Persist the latest composite score on the iocs row + append a history row.
 
@@ -477,19 +487,65 @@ def update_last_score(ioc_id: int, score: int) -> None:
     Cheap insert, fire-and-forget — same suppression that wraps the
     caller protects the enrichment pipeline from any storage failure.
 
+    Dedup: if the previous row for this IOC carries the **same** score
+    and was written within :data:`_SCORE_HISTORY_DEDUP_WINDOW_S`
+    seconds, skip the insert. A score *change* always writes a new
+    row regardless of gap (so the graph never misses an inflection).
+    The ``UPDATE iocs SET last_score`` runs unconditionally — that's
+    cheap and keeps the iocs row's ``last_score`` mirror in sync.
+
     Side-effect: publishes a ``score`` event on the in-process bus so any
     connected SSE clients update in near-real-time. The publish is a
     no-op when the web server isn't attached, so CLI runs are unaffected.
+    The event is published whether or not we wrote a new history row —
+    a live dashboard still wants to see "we just touched this IOC".
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     score_int = int(score)
+    now = datetime.now()
     cursor.execute('UPDATE iocs SET last_score = ? WHERE id = ?', (score_int, ioc_id))
-    cursor.execute(
-        'INSERT INTO score_history (ioc_id, score, recorded_at) '
-        'VALUES (?, ?, ?)',
-        (ioc_id, score_int, datetime.now()),
-    )
+
+    # Lookup last history row for this IOC. We only need the latest by
+    # ``recorded_at`` — the supporting index ``idx_score_history_ioc``
+    # makes this cheap. ``ORDER BY id DESC`` tie-breaks identical
+    # timestamps deterministically (autoincrement → most recent insert
+    # wins).
+    last_row = cursor.execute(
+        'SELECT score, recorded_at FROM score_history '
+        'WHERE ioc_id = ? '
+        'ORDER BY recorded_at DESC, id DESC LIMIT 1',
+        (ioc_id,),
+    ).fetchone()
+
+    should_insert = True
+    if last_row is not None:
+        try:
+            last_score = int(last_row['score'])
+        except (KeyError, TypeError, ValueError):
+            last_score = None
+        last_at = last_row['recorded_at']
+        # SQLite returns the column as a datetime (we register a
+        # converter at module load) — but tolerate strings for forward-
+        # compat with rows written by older schemas / external tools.
+        if isinstance(last_at, str):
+            try:
+                last_at = datetime.fromisoformat(last_at)
+            except ValueError:
+                last_at = None
+        if (
+            last_score == score_int
+            and last_at is not None
+            and (now - last_at).total_seconds() < _SCORE_HISTORY_DEDUP_WINDOW_S
+        ):
+            should_insert = False
+
+    if should_insert:
+        cursor.execute(
+            'INSERT INTO score_history (ioc_id, score, recorded_at) '
+            'VALUES (?, ?, ?)',
+            (ioc_id, score_int, now),
+        )
     # Resolve the IOC value for the event payload — the SSE consumer
     # works in IOC-string space, not DB-id space.
     row = cursor.execute(
