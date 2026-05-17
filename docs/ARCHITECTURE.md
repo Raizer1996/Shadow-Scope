@@ -90,6 +90,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/modules/nvd.py` | NIST NVD CVE metadata (CVSS v3.1 base score + severity) |
 | `ioc_tool/modules/epss.py` | FIRST.org EPSS exploit-prediction probability + percentile |
 | `ioc_tool/modules/kev.py` | CISA KEV (Known Exploited Vulnerabilities) catalog membership |
+| `ioc_tool/modules/pdns.py` | Passive DNS (Mnemonic free tier) — first-seen / last-seen / IP age (info-only, IP IOCs only) |
 | `ioc_tool/data/ioc.db` | SQLite cache (gitignored) |
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |
 | `ioc_tool/data/cisa_kev.json` | CISA KEV catalog snapshot (gitignored cache, refreshed daily) |

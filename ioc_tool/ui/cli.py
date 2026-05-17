@@ -98,6 +98,49 @@ def get_score_color(score: int) -> str:
     return "green"
 
 
+def _format_pdns_details(pdns_data: dict[str, Any]) -> str:
+    """Render the Passive DNS block for the per-IOC detailed view.
+
+    Shape::
+
+        first 2024-03-14  last 2026-05-15  (794 d, 12 records)
+        rrnames: example.com, other.example.com, ...
+
+    Returns an empty string when the payload is empty so the CLI cell
+    just shows the score column without spurious whitespace.
+    """
+    if not pdns_data:
+        return ""
+    first = pdns_data.get('first_seen') or ''
+    last = pdns_data.get('last_seen') or ''
+    # Surface YYYY-MM-DD only — the full timestamp is in the JSON dump.
+    if first:
+        first = first[:10]
+    if last:
+        last = last[:10]
+    age = pdns_data.get('age_days')
+    records = pdns_data.get('record_count') or 0
+    rrnames = pdns_data.get('top_rrnames') or []
+
+    parts: list[str] = []
+    if first:
+        parts.append(f"first {first}")
+    if last:
+        parts.append(f"last {last}")
+    tail_bits: list[str] = []
+    if isinstance(age, int):
+        tail_bits.append(f"{age} d")
+    if records:
+        tail_bits.append(f"{records} records")
+    if tail_bits:
+        parts.append("(" + ", ".join(tail_bits) + ")")
+    line = "  ".join(parts)
+    if rrnames:
+        names = ", ".join(rrnames[:5])
+        line += f"\nrrnames: {names}"
+    return line
+
+
 def print_single_result(result: dict[str, Any], should_defang: bool = False) -> None:
     """Used for 'show' command - detailed view of a single IOC."""
     ioc_value = _display_ioc(result['ioc'], should_defang)
@@ -280,6 +323,8 @@ def print_single_result(result: dict[str, Any], should_defang: bool = False) -> 
             if first_seen:
                 parts.append(f"First seen: {first_seen}")
             details = " — ".join(parts)
+        elif source == 'PDNS':
+            details = _format_pdns_details(data.get('data') or {})
 
         table.add_row(source, f"[{score_color}]{score_val}[/{score_color}]", str(details))
 
@@ -529,6 +574,15 @@ def print_aggregated_table(
             ptr = (rdns_mod.get('data') or {}).get('ptr')
             if ptr:
                 summary_parts.append(f"[dim]ptr={ptr}[/dim]")
+
+        # PDNS — first-seen / age in days for the IP, if observed
+        pdns_mod = modules.get('PDNS')
+        if pdns_mod:
+            pd_data = pdns_mod.get('data') or {}
+            age = pd_data.get('age_days')
+            first = (pd_data.get('first_seen') or '')[:10]
+            if first and isinstance(age, int):
+                summary_parts.append(f"[dim]pdns={first} ({age}d)[/dim]")
 
         # Risk Score Coloring
         # Green: 0 (Safe)

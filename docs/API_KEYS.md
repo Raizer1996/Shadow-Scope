@@ -60,6 +60,15 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 - **Scope**: hash (md5 / sha1 / sha256)
 - **Env var**: none required — module short-circuits on network errors and skips gracefully.
 
+### Mnemonic Passive DNS — *no API key*
+- **Signup**: none for low-volume queries; commercial tier available at https://www.mnemonic.io/resources/blog/introducing-passivedns/
+- **Docs**: https://docs.mnemonic.io/display/public/API/PassiveDNS+Search+API
+- **Free tier**: anonymous, gentle rate (ShadowScope self-caps at 5 req/min via the `pdns` bucket in `core/ratelimit.py`).
+- **Used for**: passive DNS first-seen / last-seen / record-count on IP IOCs. Info-only — surfaces context (brand-new infrastructure vs. long-lived backbone) but does NOT push the composite score.
+- **Scope**: IP only (v1; Mnemonic also indexes domains — domain support deferred to keep the v1 scope tight)
+- **Env var**: none required.
+- **CIRCL (secondary path, optional)**: a future expansion may route through CIRCL Passive DNS when `CIRCL_USERNAME` / `CIRCL_PASSWORD` are set. The env-var placeholders ship commented out in `ioc_tool/.env.example`; the v1 module only implements the Mnemonic path.
+
 ### CVE enrichment — *no API keys required*
 
 ShadowScope's CVE pipeline pulls from three free, public sources. All three fire in parallel when an IOC matches the `CVE-YYYY-NNNN` shape.

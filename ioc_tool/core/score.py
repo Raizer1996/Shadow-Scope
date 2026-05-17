@@ -390,6 +390,21 @@ def calculate_asn_score(data: dict | None) -> int:
     return 0
 
 
+def calculate_pdns_score(data: dict | None) -> int:
+    """Passive DNS enrichment is info-only — first-seen / last-seen /
+    record-count are context for the analyst, not a malicious signal.
+
+    A brand-new IP (age_days < 7) hinting at NRD-like risk would be
+    appealing, but the precedent in this codebase is that *IP* age
+    isn't scored (NRD is domain-only). Until we wire a dedicated IP-age
+    heuristic with an empirical threshold, this stays a hard 0 so the
+    composite tier isn't pushed around by what is really just metadata.
+    The data still surfaces in CLI / dashboard via the info-only path
+    in :mod:`ioc_tool.core.enrich`.
+    """
+    return 0
+
+
 def calculate_pulsedive_score(data: dict | None) -> int:
     """Map Pulsedive's ``risk`` string into our 0–100 scale.
 

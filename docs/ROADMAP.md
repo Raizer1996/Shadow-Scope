@@ -82,7 +82,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 - [ ] **Pivot suggestions** — given IP, surface related domains via PDNS / cert overlap. **[issue]**
 - [x] **Reverse DNS** lookup on every IP — new `modules/rdns.py` info-only source ('rDNS'); stdlib `socket.gethostbyaddr` with 3s timeout snapshot/restore; PTR + aliases surface in CLI summary and dashboard.
 - [x] **Suspicious TLD scoring** — `tld_check` heuristic: rightmost-label match against curated high-abuse list (.zip/.top/.xyz/.tk/.surf/.click/...) → 60; medium-abuse list (.info/.biz/.online/.site/...) → 30; neutral TLDs return None. Wired into domain heuristics composite next to NRD / DGA / typosquat / IDN.
-- [ ] **First-seen / IP age** from PDNS data. **[issue]**
+- [x] **First-seen / IP age** from PDNS data — new `modules/pdns.py` info-only source ('PDNS') backed by Mnemonic free PassiveDNS (no auth, 10s timeout, 5/min rate-limit bucket); surfaces `first_seen`, `last_seen`, `age_days`, `record_count`, top-5 `rrnames` in the CLI summary + dashboard IP-core panel; pure info-only, never pushes the composite score; CIRCL secondary path stubbed via env placeholders for a future v2 (2026-05-17)
 <!-- Moved to Done 2026-05-14 — LLM summary (local Ollama, --summary flag) -->
 
 - [ ] **Auto-tag with MITRE ATT&CK** technique mapping based on observed behavior. **[issue]**
