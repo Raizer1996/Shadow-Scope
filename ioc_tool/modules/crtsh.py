@@ -24,7 +24,7 @@ from typing import Any
 from ..core import http
 
 BASE_URL = "https://crt.sh/"
-TIMEOUT = 20  # seconds — crt.sh can be slow under load (preserve tuned override)
+TIMEOUT = 10  # seconds — cap so a slow crt.sh doesn't gate the whole enrich response
 MAX_RESULTS_KEPT = 50  # keep the diff compact when caching
 
 # Per-source bucket — public CT search; cap politely since it's slow.

@@ -35,7 +35,40 @@ const fireCrabState = (label) => {
   try { window.dispatchEvent(new CustomEvent("cc:state", { detail: label })); } catch {}
 };
 
-function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, clearRecentStrip }) {
+// Skeleton card shown between enrich-button press and the first source
+// landing. Replaces the stale prior IOC view (which used to linger and
+// felt broken on slow networks). Kept intentionally cheap — no data
+// fetches, only CSS shimmer.
+function EnrichSkeleton({ ioc, fmt }) {
+  const label = fmt ? fmt(ioc) : ioc;
+  return (
+    <div className="enrich-view enrich-skeleton" aria-busy="true">
+      <section className="hero">
+        <div className="hero-left">
+          <div className="hero-ioc">{label}</div>
+          <div className="hero-sub dim">// enriching… waiting on sources</div>
+        </div>
+        <div className="hero-right">
+          <div className="score-skel shimmer" />
+        </div>
+      </section>
+      <div className="source-table-skel">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="source-row-skel shimmer" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, clearRecentStrip, pendingIoc }) {
+  // Instant feedback path: a fetch is in flight for an IOC that isn't the
+  // currently active record. Render a skeleton instead of holding the
+  // stale prior IOC on-screen (which looks like nothing happened).
+  const showSkeleton = !!pendingIoc && (!ioc || ioc.ioc !== pendingIoc);
+  if (showSkeleton) {
+    return <EnrichSkeleton ioc={pendingIoc} fmt={fmt} />;
+  }
   // Empty workspace (or strip just cleared) — render a prompt instead of
   // collapsing to a blank screen. The "/" key shortcut already focuses
   // the top input so the hint is actionable.

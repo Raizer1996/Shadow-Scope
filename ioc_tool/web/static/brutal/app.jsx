@@ -27,6 +27,9 @@ function App() {
   const [activeIocId, setActiveIocId] = useState(null);
   const [diffPair, setDiffPair] = useState(["ioc_01", "ioc_03"]);
   const [enriching, setEnriching] = useState(false);
+  // Pending IOC string for the in-flight enrich call. Drives the skeleton
+  // card so the user sees instant feedback instead of the stale active row.
+  const [pendingIoc, setPendingIoc] = useState(null);
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [accent, setAccent] = useState("ember");
   const [patterns, setPatterns] = useState(false);
@@ -150,6 +153,7 @@ function App() {
     const value = text.trim();
     if (!value) return;
     setEnriching(true);
+    setPendingIoc(value);
     setTab("enrich");
 
     // Live backend call. The setResults filter dedups by record id
@@ -177,6 +181,7 @@ function App() {
       })
       .finally(() => {
         setEnriching(false);
+        setPendingIoc(null);
       });
   };
 
@@ -191,7 +196,7 @@ function App() {
       <InputBar onEnrich={onEnrich} defang={defang} setDefang={setDefang} llm={llm} setLlm={setLlm} enriching={enriching} />
 
       <main className="main">
-        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} />}
+        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} pendingIoc={pendingIoc} />}
         {tab === "batch"  && <BatchView results={results} setActiveIocId={setActiveIocId} setTab={setTab} fmt={fmt} />}
         {tab === "watch"  && <WatchView fmt={fmt} results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}
