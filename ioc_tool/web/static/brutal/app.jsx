@@ -30,6 +30,9 @@ function App() {
   // Pending IOC string for the in-flight enrich call. Drives the skeleton
   // card so the user sees instant feedback instead of the stale active row.
   const [pendingIoc, setPendingIoc] = useState(null);
+  // Streaming progress meta: total source count from the SSE `meta` event so
+  // the skeleton can render "landed/total" instead of an unbounded spinner.
+  const [streamProgress, setStreamProgress] = useState(null);
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [accent, setAccent] = useState("ember");
   const [patterns, setPatterns] = useState(false);
@@ -156,20 +159,65 @@ function App() {
     setPendingIoc(value);
     setTab("enrich");
 
-    // Live backend call. The setResults filter dedups by record id
-    // AND by raw ioc string so re-enriching the same IOC never creates
-    // a duplicate row, even when the backend canonicalises (e.g. CVE
-    // uppercase, ASN strip leading zeros) and the local input would
-    // otherwise hash to a different key for the same indicator.
-    window.shadowscopeFetch(value, { defang, summary: llm })
+    // Streaming enrich — progressively merges per-source events into the
+    // results strip so the user sees the first source as soon as it lands
+    // instead of waiting on the slowest. Falls back to the blocking
+    // endpoint when llm summary is requested (the LLM call needs the full
+    // result and isn't worth refactoring into the stream).
+    const useStream = !llm && typeof window.shadowscopeFetchStream === "function";
+
+    // Optimistic in-progress record. Lets EnrichView render partial
+    // modules as `module` events stream in (the existing render path
+    // tolerates a sparse modules dict).
+    let pendingId = null;
+    const updatePending = (mut) => {
+      setResults(prev => {
+        const next = prev.slice();
+        const i = next.findIndex(r => r.id === pendingId);
+        if (i < 0) return prev;
+        next[i] = mut(next[i]);
+        return next;
+      });
+    };
+
+    const fetchPromise = useStream
+      ? window.shadowscopeFetchStream(value, { defang }, {
+          onMeta: (m) => {
+            pendingId = "stream-" + Math.random().toString(36).slice(2, 9);
+            const stub = {
+              id: pendingId,
+              ioc: value,
+              type: m.type || "unknown",
+              modules: {},
+              final_score: 0,
+              streaming: true,
+            };
+            setResults(prev => [stub, ...prev.filter(r => r.ioc !== value)]);
+            setActiveIocId(pendingId);
+            setStreamProgress({ pending: m.pending || null });
+          },
+          onModule: (ev) => {
+            if (!pendingId) return;
+            updatePending(r => ({
+              ...r,
+              modules: { ...r.modules, [ev.name]: ev.entry },
+            }));
+          },
+        })
+      : window.shadowscopeFetch(value, { defang, summary: llm });
+
+    fetchPromise
       .then((record) => {
         setResults(prev => [
           record,
-          ...prev.filter(r => r.id !== record.id && r.ioc !== record.ioc && r.ioc !== value),
+          ...prev.filter(r => r.id !== record.id && r.id !== pendingId && r.ioc !== record.ioc && r.ioc !== value),
         ]);
         setActiveIocId(record.id);
       })
       .catch((err) => {
+        if (pendingId) {
+          setResults(prev => prev.filter(r => r.id !== pendingId));
+        }
         console.warn("[shadowscope] /api/ui/enrich failed:", err.message);
         // Show a transient toast and leave the strip unchanged. Falling
         // back to fake records would hide real backend / auth problems.
@@ -182,6 +230,7 @@ function App() {
       .finally(() => {
         setEnriching(false);
         setPendingIoc(null);
+        setStreamProgress(null);
       });
   };
 
@@ -196,7 +245,7 @@ function App() {
       <InputBar onEnrich={onEnrich} defang={defang} setDefang={setDefang} llm={llm} setLlm={setLlm} enriching={enriching} />
 
       <main className="main">
-        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} pendingIoc={pendingIoc} />}
+        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} pendingIoc={pendingIoc} streamProgress={streamProgress} />}
         {tab === "batch"  && <BatchView results={results} setActiveIocId={setActiveIocId} setTab={setTab} fmt={fmt} />}
         {tab === "watch"  && <WatchView fmt={fmt} results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}

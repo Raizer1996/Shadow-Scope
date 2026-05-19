@@ -2346,7 +2346,16 @@ body.patterns .ti-score::after {
 .source-table-skel { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
 .source-row-skel {
   height: 28px; border: 1px solid var(--line); border-radius: 3px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 10px;
 }
+.source-row-skel.done {
+  background: transparent;
+  border-color: var(--accent, #6cf);
+  animation: none;
+}
+.skel-source-name { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.skel-source-tick { color: var(--accent, #6cf); font-weight: bold; }
 .shimmer {
   background: linear-gradient(90deg,
     var(--bg) 0%,

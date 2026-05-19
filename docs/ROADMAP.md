@@ -125,6 +125,7 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ## v0.9 — UI Surfaces
 
+- [x] **Streaming dashboard enrich** — new SSE endpoint `GET /api/ui/enrich/stream` yields per-source `module` events as each source completes (via `asyncio.as_completed`) instead of blocking on the slowest. Dashboard's `onEnrich` consumes the stream through `shadowscopeFetchStream` (fetch + manual SSE parsing, preserves the bearer token EventSource can't carry) and renders an instant skeleton card with `landed/total` source progress until the `final` event lands. Same UI-shaped payload as `/api/ui/enrich`, so the reshape path stays identical. Also tightened tail-latency caps: `crt.sh` 20s → 10s, ASN 15s → 10s. New helpers in `core/enrich.py`: `enrich_ioc_stream` async generator, `_build_enrich_tasks` + `_finalize_enrich` extracted so the blocking and streaming paths share the same fan-out (2026-05-19)
 - [ ] **GraphQL API** *(optional)*. **[issue]**
 - [ ] **TUI** — full-screen terminal UI with `textual`. **[issue]**
 - [ ] **Browser extension** — right-click any IP/domain → enrich popup. **[issue]**

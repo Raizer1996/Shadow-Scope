@@ -480,6 +480,85 @@ def test_ui_enrich_carries_no_cache_param(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# /api/ui/enrich/stream — SSE per-source progress
+# ---------------------------------------------------------------------------
+
+
+def _stub_stream(monkeypatch, events):
+    """Replace enrich.enrich_ioc_stream with a generator yielding ``events``.
+
+    Caller supplies plain dicts; the stub wraps them in an async generator
+    that swallows the no_cache kwarg the endpoint passes through.
+    """
+    async def _stream(value, ioc_type, *, no_cache=False):
+        for ev in events:
+            yield ev
+    monkeypatch.setattr(api_mod.enrich, "enrich_ioc_stream", _stream)
+
+
+def test_ui_enrich_stream_yields_meta_module_final(client, monkeypatch):
+    """Stream emits meta, one module per source, and a final shaped payload."""
+    _stub_stream(monkeypatch, [
+        {"event": "meta", "ioc": "evil.example.com", "type": "domain",
+         "allowlisted": False, "pending": 2},
+        {"event": "module", "name": "VirusTotal",
+         "entry": {"score": 75, "data": {
+             "last_analysis_stats": {"malicious": 7, "harmless": 60,
+                                     "suspicious": 0, "undetected": 35},
+         }}},
+        {"event": "module", "name": "URLhaus",
+         "entry": {"score": 95, "data": {"threat": "malware_download"}}},
+        {"event": "final", "result": {
+            "ioc": "evil.example.com",
+            "type": "domain",
+            "modules": {
+                "VirusTotal": {"score": 75, "data": {
+                    "last_analysis_stats": {"malicious": 7, "harmless": 60,
+                                            "suspicious": 0, "undetected": 35},
+                }},
+                "URLhaus": {"score": 95, "data": {"threat": "malware_download"}},
+            },
+            "final_score": 85,
+        }},
+    ])
+    r = client.get("/api/ui/enrich/stream?ioc=evil.example.com")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    body = r.text
+    # Each event arrives in its own SSE frame.
+    assert "event: meta" in body
+    assert "event: module" in body
+    assert "event: final" in body
+    # Module names surface in the per-source events.
+    assert "VirusTotal" in body
+    assert "URLhaus" in body
+    # Final event carries the UI-shaped payload with an id + agreement block,
+    # not just the raw orchestrator output — that's what the dashboard consumes.
+    assert "\"id\": \"ioc_" in body
+    assert "\"agreement\":" in body
+
+
+def test_ui_enrich_stream_rejects_unknown_type(client, monkeypatch):
+    _stub_stream(monkeypatch, [])  # never reached
+    r = client.get("/api/ui/enrich/stream?ioc=not-an-ioc!")
+    assert r.status_code == 400
+
+
+def test_ui_enrich_stream_propagates_no_cache(client, monkeypatch):
+    seen: dict = {}
+    async def _stream(value, ioc_type, *, no_cache=False):
+        seen["no_cache"] = no_cache
+        yield {"event": "meta", "ioc": value, "type": ioc_type,
+               "allowlisted": False, "pending": 0}
+        yield {"event": "final", "result": {
+            "ioc": value, "type": ioc_type, "modules": {}, "final_score": 0,
+        }}
+    monkeypatch.setattr(api_mod.enrich, "enrich_ioc_stream", _stream)
+    client.get("/api/ui/enrich/stream?ioc=8.8.8.8&no_cache=true")
+    assert seen["no_cache"] is True
+
+
+# ---------------------------------------------------------------------------
 # /api/cache/{stats,prune,clear} — cache maintenance endpoints
 # ---------------------------------------------------------------------------
 

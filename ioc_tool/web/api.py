@@ -743,6 +743,86 @@ async def ui_enrich(
     return shaped
 
 
+@app.get("/api/ui/enrich/stream", dependencies=[Depends(require_token)])
+async def ui_enrich_stream(
+    ioc: str = Query(..., description="IOC value (auto-detected, refanged)"),
+    defang: bool = Query(False, description="Defang the ioc field on the final event"),
+    no_cache: bool = Query(False, description="Bypass the SQLite cache"),
+) -> StreamingResponse:
+    """Stream per-source enrichment events as Server-Sent Events.
+
+    Mirrors ``GET /api/ui/enrich`` but yields ``module`` events as each
+    source resolves so the dashboard can render progressively instead of
+    waiting for the slowest source. Final event carries the same UI-shaped
+    payload the non-streaming endpoint returns.
+
+    Events:
+
+    * ``event: meta``  — ``{ioc, type, allowlisted, pending}``
+    * ``event: module``— ``{name, entry: {score, data}}``
+    * ``event: final`` — full ``_to_ui_shape`` payload (same as ``/api/ui/enrich``)
+    * ``event: error`` — ``{detail}`` on unrecoverable error
+
+    Headers include ``X-Accel-Buffering: no`` so nginx-style proxies don't
+    coalesce events into a single chunk.
+    """
+    import json as _json
+
+    refanged = defang_mod.refang(ioc)
+    ioc_type = parser.detect_type(refanged)
+    if ioc_type == "unknown":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to detect IOC type for value: {ioc!r}.",
+        )
+
+    # Snapshot prev_score before the stream starts so the final event can
+    # surface the delta the same way GET /api/ui/enrich does.
+    database.init_db()
+    prev_score: int | None = None
+    ioc_id_prev = database.get_ioc_id(refanged)
+    if ioc_id_prev is not None:
+        conn = database.get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT last_score FROM iocs WHERE id = ?", (ioc_id_prev,))
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0] is not None:
+            prev_score = int(row[0])
+
+    async def _gen():
+        try:
+            agen = enrich.enrich_ioc_stream(refanged, ioc_type, no_cache=no_cache)
+            async for ev in agen:
+                kind = ev.get("event")
+                if kind == "final":
+                    result = ev["result"]
+                    if defang:
+                        result = _apply_output_defang(result, True)
+                    shaped = _to_ui_shape(result, prev_score)
+                    payload = _json.dumps(shaped, default=str)
+                    yield f"event: final\ndata: {payload}\n\n"
+                else:
+                    payload = _json.dumps(ev, default=str)
+                    yield f"event: {kind}\ndata: {payload}\n\n"
+        except asyncio.CancelledError:
+            # Client disconnected; let the generator clean up.
+            raise
+        except Exception as exc:  # pragma: no cover — defensive surface
+            err = _json.dumps({"detail": str(exc)})
+            yield f"event: error\ndata: {err}\n\n"
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @app.get("/api/ui/recent", dependencies=[Depends(require_token)])
 def ui_recent(
     limit: int = Query(8, ge=1, le=500, description="Max rows to return"),

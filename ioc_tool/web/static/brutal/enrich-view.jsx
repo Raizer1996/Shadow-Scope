@@ -35,39 +35,57 @@ const fireCrabState = (label) => {
   try { window.dispatchEvent(new CustomEvent("cc:state", { detail: label })); } catch {}
 };
 
-// Skeleton card shown between enrich-button press and the first source
-// landing. Replaces the stale prior IOC view (which used to linger and
-// felt broken on slow networks). Kept intentionally cheap — no data
-// fetches, only CSS shimmer.
-function EnrichSkeleton({ ioc, fmt }) {
+// Skeleton card shown between enrich-button press and the final event.
+// While the stream is active, lists each source as it lands so the user
+// sees concrete progress instead of an opaque spinner. Replaces the stale
+// prior IOC view (which used to linger and felt broken on slow networks).
+function EnrichSkeleton({ ioc, fmt, landed, pending }) {
   const label = fmt ? fmt(ioc) : ioc;
+  const landedList = Array.isArray(landed) ? landed : [];
+  const total = pending != null ? pending : null;
+  const remaining = total != null ? Math.max(0, total - landedList.length) : 6;
   return (
     <div className="enrich-view enrich-skeleton" aria-busy="true">
       <section className="hero">
         <div className="hero-left">
           <div className="hero-ioc">{label}</div>
-          <div className="hero-sub dim">// enriching… waiting on sources</div>
+          <div className="hero-sub dim">
+            {total != null
+              ? `// streaming sources ${landedList.length}/${total}`
+              : "// enriching… waiting on sources"}
+          </div>
         </div>
         <div className="hero-right">
           <div className="score-skel shimmer" />
         </div>
       </section>
       <div className="source-table-skel">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="source-row-skel shimmer" />
+        {landedList.map((name) => (
+          <div key={"done-" + name} className="source-row-skel done">
+            <span className="skel-source-name">{name}</span>
+            <span className="skel-source-tick">✓</span>
+          </div>
+        ))}
+        {Array.from({ length: remaining }).map((_, i) => (
+          <div key={"pend-" + i} className="source-row-skel shimmer" />
         ))}
       </div>
     </div>
   );
 }
 
-function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, clearRecentStrip, pendingIoc }) {
+function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, clearRecentStrip, pendingIoc, streamProgress }) {
   // Instant feedback path: a fetch is in flight for an IOC that isn't the
-  // currently active record. Render a skeleton instead of holding the
-  // stale prior IOC on-screen (which looks like nothing happened).
-  const showSkeleton = !!pendingIoc && (!ioc || ioc.ioc !== pendingIoc);
+  // currently active record, OR the active record is the streaming stub
+  // (modules dict is being filled in piecewise). Render the skeleton with
+  // live source-by-source progress instead of a 0-score partial view.
+  const isStreamingStub = !!(ioc && ioc.streaming);
+  const showSkeleton = isStreamingStub || (!!pendingIoc && (!ioc || ioc.ioc !== pendingIoc));
   if (showSkeleton) {
-    return <EnrichSkeleton ioc={pendingIoc} fmt={fmt} />;
+    const skelLabel = isStreamingStub ? ioc.ioc : pendingIoc;
+    const landed = isStreamingStub ? Object.keys(ioc.modules || {}) : [];
+    const pendingCount = streamProgress ? streamProgress.pending : null;
+    return <EnrichSkeleton ioc={skelLabel} fmt={fmt} landed={landed} pending={pendingCount} />;
   }
   // Empty workspace (or strip just cleared) — render a prompt instead of
   // collapsing to a blank screen. The "/" key shortcut already focuses

@@ -525,10 +525,25 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         }
 
     ioc_id = database.add_or_update_ioc(value, ioc_type)
+    tasks, planned_sources = _build_enrich_tasks(value, ioc_type, ioc_id)
+
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    results, scores = _collect_raw_results(raw_results)
+    return _finalize_enrich(value, ioc_type, ioc_id, results, scores, planned_sources)
+
+
+def _build_enrich_tasks(
+    value: str, ioc_type: str, ioc_id: int
+) -> tuple[list, set[str]]:
+    """Construct the per-source ``asyncio.to_thread`` task list.
+
+    Pulled out of ``_enrich_ioc_inner`` so the streaming variant
+    (``enrich_ioc_stream``) can reuse the same fan-out without duplicating
+    the ~200-line block of if/append routing. ``planned_sources`` is the
+    set of source keys that were scheduled — the failover hook reads it
+    to know whether OTX needs to be kicked off because VT was rate-limited.
+    """
     tasks: list = []
-    # Track which source keys are already in the planned fan-out so the
-    # post-gather failover hook can tell "OTX already ran normally" from
-    # "OTX needs to be added because VT 429'd and OTX wasn't planned".
     planned_sources: set[str] = set()
 
     # --- VirusTotal — all IOC types ---
@@ -742,13 +757,22 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             score.calculate_kev_score,
         ))
 
-    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    return tasks, planned_sources
 
+
+def _collect_raw_results(
+    raw_results: list,
+) -> tuple[dict[str, Any], list[tuple[str, int]]]:
+    """Reduce ``asyncio.gather(return_exceptions=True)`` output to (results, scores).
+
+    A source that crashed or returned ``None`` is dropped per the never-crash
+    contract. The streaming variant builds the same accumulators incrementally
+    rather than via this helper.
+    """
     results: dict[str, Any] = {}
     scores: list[tuple[str, int]] = []
     for item in raw_results:
         if isinstance(item, BaseException):
-            # Source crashed in the thread — swallow per the never-crash contract.
             continue
         if item is None:
             continue
@@ -756,19 +780,26 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         results[display_name] = {'score': src_score, 'data': data}
         if contributes:
             scores.append((display_name, src_score))
+    return results, scores
 
-    # ---------------------------------------------------------------------
-    # Provider failover hook — VT 429 → OTX
-    # ---------------------------------------------------------------------
-    # If VT got throttled (recorded in the rate-limit ledger by core.http)
-    # AND failover is enabled AND the IOC type is one OTX covers, run OTX
-    # synchronously now (if it wasn't already planned) and annotate the VT
-    # result dict with the fallback source.  Purely additive: does NOT
-    # touch the score that feeds calculate_final_risk.
-    # Source key comes from the module constant rather than a hardcoded
-    # string so the failover check, the bucket config in ratelimit.py,
-    # and the ledger marker all stay in lock-step — a rename in vt.py
-    # propagates here without a silent miss.
+
+def _finalize_enrich(
+    value: str,
+    ioc_type: str,
+    ioc_id: int,
+    results: dict[str, Any],
+    scores: list[tuple[str, int]],
+    planned_sources: set[str],
+) -> dict:
+    """Apply VT→OTX failover + heuristics + composite score; return final shape.
+
+    Shared by ``_enrich_ioc_inner`` and ``enrich_ioc_stream`` so the two
+    code paths produce identical output. Side-effect: stamps ``last_score``
+    onto the iocs row (best-effort; failures are swallowed).
+    """
+    # Provider failover hook — VT 429 → OTX. Purely additive: does NOT
+    # touch the score that feeds calculate_final_risk. Source key from the
+    # module constant so a rename in vt.py propagates here without a miss.
     if (
         _failover_enabled()
         and ioc_type in _OTX_FAILOVER_TYPES
@@ -776,11 +807,9 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     ):
         _apply_vt_otx_failover(value, ioc_type, ioc_id, results, scores, planned_sources)
 
-    # ---------------------------------------------------------------------
-    # Local heuristics — pure functions on data we already have.
-    # Bundled under a single 'Heuristics' module entry so they surface in
-    # the output without changing the per-source schema.
-    # ---------------------------------------------------------------------
+    # Local heuristics — pure functions on data we already have. Bundled
+    # under a single 'Heuristics' module entry so they surface in the output
+    # without changing the per-source schema.
     heuristics_data: dict[str, Any] = {}
     heuristics_scores: list[int] = []
 
@@ -821,9 +850,6 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             scores.append(('Heuristics', composite))
 
     final_score = score.calculate_final_risk(scores)
-    # Stamp the latest composite onto the iocs row — drives watch-mode
-    # delta detection. Cheap UPDATE, fire-and-forget; failures are ignored
-    # by the database layer so this never blocks a return.
     with contextlib.suppress(Exception):
         database.update_last_score(ioc_id, final_score)
     return {
@@ -832,6 +858,91 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         'modules': results,
         'final_score': final_score,
     }
+
+
+async def enrich_ioc_stream(
+    value: str,
+    ioc_type: str,
+    *,
+    no_cache: bool = False,
+):
+    """Stream per-source enrichment events as each completes.
+
+    Async generator that yields plain dicts the caller can wrap in any
+    transport (SSE, NDJSON, websocket). Event types:
+
+    * ``{'event': 'meta', 'ioc': ..., 'type': ..., 'allowlisted': bool}``
+      — emitted once at start.
+    * ``{'event': 'module', 'name': ..., 'entry': {'score': int, 'data': dict}}``
+      — emitted as each source completes (or never, on soft-fail).
+    * ``{'event': 'final', 'result': <shaped enrichment dict>}``
+      — emitted once after all sources resolved + heuristics + composite.
+
+    The shape of the final ``result`` matches :func:`enrich_ioc_async`'s
+    return value so the dashboard reshape path stays identical.
+    """
+    maybe_auto_prune()
+    no_cache_token = no_cache_ctx.set(no_cache) if no_cache else None
+    ledger_token = http.rate_limited_ctx.set(set())
+    try:
+        value = parser.normalize_value(value, ioc_type)
+
+        allow_hit = allowlist.is_allowlisted(value, ioc_type)
+        if allow_hit is not None:
+            shaped = {
+                'ioc': value,
+                'type': ioc_type,
+                'modules': {'Allowlist': {'score': 0, 'data': allow_hit}},
+                'final_score': 0,
+                'allowlisted': True,
+            }
+            yield {'event': 'meta', 'ioc': value, 'type': ioc_type, 'allowlisted': True}
+            yield {'event': 'final', 'result': shaped}
+            return
+
+        ioc_id = database.add_or_update_ioc(value, ioc_type)
+        tasks, planned_sources = _build_enrich_tasks(value, ioc_type, ioc_id)
+        yield {
+            'event': 'meta',
+            'ioc': value,
+            'type': ioc_type,
+            'allowlisted': False,
+            'pending': len(tasks),
+        }
+
+        results: dict[str, Any] = {}
+        scores: list[tuple[str, int]] = []
+        # ``asyncio.as_completed`` returns futures in completion order so
+        # the fastest source surfaces first. Exceptions are swallowed to
+        # match the never-crash contract — a crashed source is just absent
+        # from the stream.
+        futures = [asyncio.ensure_future(t) for t in tasks]
+        try:
+            for fut in asyncio.as_completed(futures):
+                try:
+                    item = await fut
+                except BaseException:
+                    continue
+                if item is None:
+                    continue
+                display_name, data, src_score, contributes = item
+                entry = {'score': src_score, 'data': data}
+                results[display_name] = entry
+                if contributes:
+                    scores.append((display_name, src_score))
+                yield {'event': 'module', 'name': display_name, 'entry': entry}
+        finally:
+            # Cancel any straggler if the consumer disconnected mid-stream.
+            for f in futures:
+                if not f.done():
+                    f.cancel()
+
+        shaped = _finalize_enrich(value, ioc_type, ioc_id, results, scores, planned_sources)
+        yield {'event': 'final', 'result': shaped}
+    finally:
+        http.rate_limited_ctx.reset(ledger_token)
+        if no_cache_token is not None:
+            no_cache_ctx.reset(no_cache_token)
 
 
 def enrich_ioc(value: str, ioc_type: str, *, no_cache: bool = False) -> dict:
