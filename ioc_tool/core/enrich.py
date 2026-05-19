@@ -525,17 +525,46 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         }
 
     ioc_id = database.add_or_update_ioc(value, ioc_type)
-    tasks: list = []
-    # Track which source keys are already in the planned fan-out so the
-    # post-gather failover hook can tell "OTX already ran normally" from
-    # "OTX needs to be added because VT 429'd and OTX wasn't planned".
+    tasks, planned_sources = _build_enrich_tasks(value, ioc_type, ioc_id)
+
+    raw_results = await asyncio.gather(
+        *(coro for _, coro in tasks), return_exceptions=True,
+    )
+    results, scores = _collect_raw_results(raw_results)
+    return _finalize_enrich(value, ioc_type, ioc_id, results, scores, planned_sources)
+
+
+def _build_enrich_tasks(
+    value: str, ioc_type: str, ioc_id: int
+) -> tuple[list[tuple[str, Any]], set[str]]:
+    """Construct the per-source ``asyncio.to_thread`` task list.
+
+    Pulled out of ``_enrich_ioc_inner`` so the streaming variant
+    (``enrich_ioc_stream``) can reuse the same fan-out without duplicating
+    the ~200-line block of if/append routing.
+
+    Returns ``(tasks, planned_sources)`` where ``tasks`` is a list of
+    ``(display_name, awaitable)`` tuples. The display name is the same
+    one the inner ``_run_source`` returns on success — preserving it
+    alongside the awaitable lets the streaming path emit a ``skipped``
+    event when a source returns ``None`` (no data / API key missing),
+    keeping the dashboard's landed/total counter honest.
+
+    ``planned_sources`` is the set of source keys that were scheduled —
+    the failover hook reads it to know whether OTX needs to be kicked
+    off because VT was rate-limited.
+    """
+    tasks: list[tuple[str, Any]] = []
     planned_sources: set[str] = set()
+
+    def _add(name: str, coro: Any) -> None:
+        tasks.append((name, coro))
 
     # --- VirusTotal — all IOC types ---
     # Source key comes from the module constant so a rename in
     # ``modules/vt.py`` propagates here without a silent miss in the
     # failover ledger check below.
-    tasks.append(asyncio.to_thread(
+    _add('VirusTotal', asyncio.to_thread(
         _run_source, ioc_id, vt._SOURCE, 'VirusTotal',
         _vt_fetcher(value, ioc_type), _vt_scorer,
     ))
@@ -543,7 +572,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- AbuseIPDB — IP only ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('AbuseIPDB', asyncio.to_thread(
             _run_source, ioc_id, 'abuseipdb', 'AbuseIPDB',
             lambda: abuseipdb.enrich_ip(value),
             score.calculate_abuseipdb_score,
@@ -551,11 +580,11 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- Tor exit-node — IP only (no DB cache; matches historical behaviour) ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(_tor_check, value))
+        _add('TOR', asyncio.to_thread(_tor_check, value))
 
     # --- Shodan — IP only (info-only score; error-dict → None) ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('Shodan', asyncio.to_thread(
             _run_source, ioc_id, 'shodan', 'Shodan',
             lambda: shodan_mod.host_search(value),
             None,
@@ -565,7 +594,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- IPQualityScore — IP only ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('IPQS', asyncio.to_thread(
             _run_source, ioc_id, 'ipqs', 'IPQS',
             lambda: ip_quality_score.enrich_ip(value),
             _ipqs_scorer,
@@ -573,7 +602,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- IPinfo — IP only (info-only) ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('IPinfo', asyncio.to_thread(
             _run_source, ioc_id, 'ipinfo', 'IPinfo',
             lambda: ipinfo_mod.enrich_ip(value),
             None,
@@ -582,7 +611,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- Reverse DNS (PTR) — IP only (info-only, stdlib lookup) ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('rDNS', asyncio.to_thread(
             _run_source, ioc_id, 'rdns', 'rDNS',
             lambda: rdns.enrich_ip(value),
             None,
@@ -595,7 +624,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     # call — the previous ``_shodan_filter`` wiring discarded ``{}`` and
     # forced a fresh upstream hit every time, burning the free-tier quota.
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('PDNS', asyncio.to_thread(
             _run_source, ioc_id, 'pdns', 'PDNS',
             lambda: pdns.enrich_ip(value),
             score.calculate_pdns_score,
@@ -605,7 +634,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- Censys Hosts v2 — IP only (info-only; deeper banners, JARM, cert chain, OS) ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('Censys', asyncio.to_thread(
             _run_source, ioc_id, 'censys', 'Censys',
             lambda: censys.host_lookup(value),
             None,
@@ -615,7 +644,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- AbstractAPI — IP only (anonymisation flags) ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('AbstractAPI', asyncio.to_thread(
             _run_source, ioc_id, 'abstract', 'AbstractAPI',
             lambda: abstract_api.enrich_ip(value),
             score.calculate_abstract_score,
@@ -623,7 +652,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- GreyNoise — IP only ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('GreyNoise', asyncio.to_thread(
             _run_source, ioc_id, 'greynoise', 'GreyNoise',
             lambda: greynoise.enrich_ip(value),
             score.calculate_greynoise_score,
@@ -631,7 +660,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- URLhaus — URL / domain / IP ---
     if ioc_type in ('url', 'domain', 'ip'):
-        tasks.append(asyncio.to_thread(
+        _add('URLhaus', asyncio.to_thread(
             _run_source, ioc_id, 'urlhaus', 'URLhaus',
             _urlhaus_fetcher(value, ioc_type),
             score.calculate_urlhaus_score,
@@ -639,7 +668,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- ThreatFox — IP / domain / URL / hash ---
     if ioc_type in ('ip', 'domain', 'url', 'hash'):
-        tasks.append(asyncio.to_thread(
+        _add('ThreatFox', asyncio.to_thread(
             _run_source, ioc_id, 'threatfox', 'ThreatFox',
             lambda: threatfox.enrich(value),
             score.calculate_threatfox_score,
@@ -647,7 +676,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- AlienVault OTX — IP / domain / URL / hash ---
     if ioc_type in ('ip', 'domain', 'url', 'hash'):
-        tasks.append(asyncio.to_thread(
+        _add('OTX', asyncio.to_thread(
             _run_source, ioc_id, otx._SOURCE, 'OTX',
             lambda: otx.enrich(value, ioc_type),
             score.calculate_otx_score,
@@ -656,7 +685,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- URLscan.io — IP / domain / URL ---
     if ioc_type in ('ip', 'domain', 'url'):
-        tasks.append(asyncio.to_thread(
+        _add('URLscan', asyncio.to_thread(
             _run_source, ioc_id, 'urlscan', 'URLscan',
             lambda: urlscan.enrich(value, ioc_type),
             score.calculate_urlscan_score,
@@ -664,7 +693,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- Pulsedive — IP / domain / URL (free, no key required) ---
     if ioc_type in ('ip', 'domain', 'url'):
-        tasks.append(asyncio.to_thread(
+        _add('Pulsedive', asyncio.to_thread(
             _run_source, ioc_id, 'pulsedive', 'Pulsedive',
             lambda: pulsedive.enrich(value, ioc_type),
             score.calculate_pulsedive_score,
@@ -672,7 +701,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- MalwareBazaar — hash only ---
     if ioc_type == 'hash':
-        tasks.append(asyncio.to_thread(
+        _add('MalwareBazaar', asyncio.to_thread(
             _run_source, ioc_id, 'malwarebazaar', 'MalwareBazaar',
             lambda: malwarebazaar.enrich_hash(value),
             score.calculate_malwarebazaar_score,
@@ -680,7 +709,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- abuse.ch Feodo Tracker — IP only (botnet C2 blocklist) ---
     if ioc_type == 'ip':
-        tasks.append(asyncio.to_thread(
+        _add('Feodo', asyncio.to_thread(
             _run_source, ioc_id, 'feodo', 'Feodo',
             lambda: feodo.enrich_ip(value),
             score.calculate_feodo_score,
@@ -688,7 +717,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- abuse.ch SSL Blacklist — hash only (SHA-1 cert fingerprints) ---
     if ioc_type == 'hash':
-        tasks.append(asyncio.to_thread(
+        _add('SSLBL', asyncio.to_thread(
             _run_source, ioc_id, 'sslbl', 'SSLBL',
             lambda: sslbl.enrich_hash(value),
             score.calculate_sslbl_score,
@@ -696,7 +725,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- crt.sh certificate transparency — domain only ---
     if ioc_type == 'domain':
-        tasks.append(asyncio.to_thread(
+        _add('crt.sh', asyncio.to_thread(
             _run_source, ioc_id, 'crtsh', 'crt.sh',
             lambda: crtsh.enrich_domain(value),
             score.calculate_crtsh_score,
@@ -704,7 +733,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- WHOIS — domain only (datetime serialisation hook) ---
     if ioc_type == 'domain':
-        tasks.append(asyncio.to_thread(
+        _add('WHOIS', asyncio.to_thread(
             _run_source, ioc_id, 'whois', 'WHOIS',
             lambda: whois_mod.get_whois_data(value),
             None,
@@ -713,7 +742,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
 
     # --- ASN enrichment via bgpview.io (info-only score) ---
     if ioc_type == 'asn':
-        tasks.append(asyncio.to_thread(
+        _add('ASN', asyncio.to_thread(
             _run_source, ioc_id, 'asn_bgpview', 'ASN',
             lambda: asn_mod.enrich(value),
             score.calculate_asn_score,
@@ -726,29 +755,38 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     # caches the full catalog on disk at ioc_tool/data/cisa_kev.json
     # (see ioc_tool.modules.kev) — that's a second layer below the DB row.
     if ioc_type == 'cve':
-        tasks.append(asyncio.to_thread(
+        _add('NVD', asyncio.to_thread(
             _run_source, ioc_id, 'nvd', 'NVD',
             lambda: nvd.enrich_cve(value),
             score.calculate_nvd_score,
         ))
-        tasks.append(asyncio.to_thread(
+        _add('EPSS', asyncio.to_thread(
             _run_source, ioc_id, 'epss', 'EPSS',
             lambda: epss.enrich_cve(value),
             score.calculate_epss_score,
         ))
-        tasks.append(asyncio.to_thread(
+        _add('KEV', asyncio.to_thread(
             _run_source, ioc_id, 'kev', 'KEV',
             lambda: kev.get_kev_entry(value),
             score.calculate_kev_score,
         ))
 
-    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    return tasks, planned_sources
 
+
+def _collect_raw_results(
+    raw_results: list,
+) -> tuple[dict[str, Any], list[tuple[str, int]]]:
+    """Reduce ``asyncio.gather(return_exceptions=True)`` output to (results, scores).
+
+    A source that crashed or returned ``None`` is dropped per the never-crash
+    contract. The streaming variant builds the same accumulators incrementally
+    rather than via this helper.
+    """
     results: dict[str, Any] = {}
     scores: list[tuple[str, int]] = []
     for item in raw_results:
         if isinstance(item, BaseException):
-            # Source crashed in the thread — swallow per the never-crash contract.
             continue
         if item is None:
             continue
@@ -756,19 +794,26 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         results[display_name] = {'score': src_score, 'data': data}
         if contributes:
             scores.append((display_name, src_score))
+    return results, scores
 
-    # ---------------------------------------------------------------------
-    # Provider failover hook — VT 429 → OTX
-    # ---------------------------------------------------------------------
-    # If VT got throttled (recorded in the rate-limit ledger by core.http)
-    # AND failover is enabled AND the IOC type is one OTX covers, run OTX
-    # synchronously now (if it wasn't already planned) and annotate the VT
-    # result dict with the fallback source.  Purely additive: does NOT
-    # touch the score that feeds calculate_final_risk.
-    # Source key comes from the module constant rather than a hardcoded
-    # string so the failover check, the bucket config in ratelimit.py,
-    # and the ledger marker all stay in lock-step — a rename in vt.py
-    # propagates here without a silent miss.
+
+def _finalize_enrich(
+    value: str,
+    ioc_type: str,
+    ioc_id: int,
+    results: dict[str, Any],
+    scores: list[tuple[str, int]],
+    planned_sources: set[str],
+) -> dict:
+    """Apply VT→OTX failover + heuristics + composite score; return final shape.
+
+    Shared by ``_enrich_ioc_inner`` and ``enrich_ioc_stream`` so the two
+    code paths produce identical output. Side-effect: stamps ``last_score``
+    onto the iocs row (best-effort; failures are swallowed).
+    """
+    # Provider failover hook — VT 429 → OTX. Purely additive: does NOT
+    # touch the score that feeds calculate_final_risk. Source key from the
+    # module constant so a rename in vt.py propagates here without a miss.
     if (
         _failover_enabled()
         and ioc_type in _OTX_FAILOVER_TYPES
@@ -776,11 +821,9 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     ):
         _apply_vt_otx_failover(value, ioc_type, ioc_id, results, scores, planned_sources)
 
-    # ---------------------------------------------------------------------
-    # Local heuristics — pure functions on data we already have.
-    # Bundled under a single 'Heuristics' module entry so they surface in
-    # the output without changing the per-source schema.
-    # ---------------------------------------------------------------------
+    # Local heuristics — pure functions on data we already have. Bundled
+    # under a single 'Heuristics' module entry so they surface in the output
+    # without changing the per-source schema.
     heuristics_data: dict[str, Any] = {}
     heuristics_scores: list[int] = []
 
@@ -821,9 +864,6 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
             scores.append(('Heuristics', composite))
 
     final_score = score.calculate_final_risk(scores)
-    # Stamp the latest composite onto the iocs row — drives watch-mode
-    # delta detection. Cheap UPDATE, fire-and-forget; failures are ignored
-    # by the database layer so this never blocks a return.
     with contextlib.suppress(Exception):
         database.update_last_score(ioc_id, final_score)
     return {
@@ -832,6 +872,101 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         'modules': results,
         'final_score': final_score,
     }
+
+
+async def enrich_ioc_stream(
+    value: str,
+    ioc_type: str,
+    *,
+    no_cache: bool = False,
+):
+    """Stream per-source enrichment events as each completes.
+
+    Async generator that yields plain dicts the caller can wrap in any
+    transport (SSE, NDJSON, websocket). Event types:
+
+    * ``{'event': 'meta', 'ioc': ..., 'type': ..., 'allowlisted': bool}``
+      — emitted once at start.
+    * ``{'event': 'module', 'name': ..., 'entry': {'score': int, 'data': dict}}``
+      — emitted as each source completes (or never, on soft-fail).
+    * ``{'event': 'final', 'result': <shaped enrichment dict>}``
+      — emitted once after all sources resolved + heuristics + composite.
+
+    The shape of the final ``result`` matches :func:`enrich_ioc_async`'s
+    return value so the dashboard reshape path stays identical.
+    """
+    maybe_auto_prune()
+    no_cache_token = no_cache_ctx.set(no_cache) if no_cache else None
+    ledger_token = http.rate_limited_ctx.set(set())
+    try:
+        value = parser.normalize_value(value, ioc_type)
+
+        allow_hit = allowlist.is_allowlisted(value, ioc_type)
+        if allow_hit is not None:
+            shaped = {
+                'ioc': value,
+                'type': ioc_type,
+                'modules': {'Allowlist': {'score': 0, 'data': allow_hit}},
+                'final_score': 0,
+                'allowlisted': True,
+            }
+            yield {'event': 'meta', 'ioc': value, 'type': ioc_type, 'allowlisted': True}
+            yield {'event': 'final', 'result': shaped}
+            return
+
+        ioc_id = database.add_or_update_ioc(value, ioc_type)
+        tasks, planned_sources = _build_enrich_tasks(value, ioc_type, ioc_id)
+        yield {
+            'event': 'meta',
+            'ioc': value,
+            'type': ioc_type,
+            'allowlisted': False,
+            'pending': len(tasks),
+        }
+
+        results: dict[str, Any] = {}
+        scores: list[tuple[str, int]] = []
+        # Wrap each task so the source's display name survives a soft-fail
+        # (``_run_source`` returns ``None`` when an API key is missing or
+        # the upstream has no data). Without the wrapper, ``as_completed``
+        # surfaces a bare ``None`` and the dashboard counter stalls at
+        # "landed/total" because skipped sources never emit a frame.
+        async def _named(name: str, awaitable: Any) -> tuple[str, Any]:
+            try:
+                return name, await awaitable
+            except BaseException:
+                return name, None
+
+        # ``asyncio.as_completed`` returns futures in completion order so
+        # the fastest source surfaces first.
+        futures = [asyncio.ensure_future(_named(n, c)) for n, c in tasks]
+        try:
+            for fut in asyncio.as_completed(futures):
+                name, item = await fut
+                if item is None:
+                    # Soft-fail or crash — emit a ``skipped`` event so the
+                    # dashboard counts it toward landed/total instead of
+                    # leaving the progress bar hanging.
+                    yield {'event': 'skipped', 'name': name}
+                    continue
+                display_name, data, src_score, contributes = item
+                entry = {'score': src_score, 'data': data}
+                results[display_name] = entry
+                if contributes:
+                    scores.append((display_name, src_score))
+                yield {'event': 'module', 'name': display_name, 'entry': entry}
+        finally:
+            # Cancel any straggler if the consumer disconnected mid-stream.
+            for f in futures:
+                if not f.done():
+                    f.cancel()
+
+        shaped = _finalize_enrich(value, ioc_type, ioc_id, results, scores, planned_sources)
+        yield {'event': 'final', 'result': shaped}
+    finally:
+        http.rate_limited_ctx.reset(ledger_token)
+        if no_cache_token is not None:
+            no_cache_ctx.reset(no_cache_token)
 
 
 def enrich_ioc(value: str, ioc_type: str, *, no_cache: bool = False) -> dict:

@@ -23,7 +23,7 @@ import re
 from ..core import http
 
 BASE_URL = "https://stat.ripe.net/data"
-TIMEOUT = 15
+TIMEOUT = 10  # RIPE Stat is fast (<1s typical); cap so a tail latency doesn't gate enrich
 
 # Per-source bucket — RIPE Stat is generous, polite cap.
 _SOURCE = "asn"

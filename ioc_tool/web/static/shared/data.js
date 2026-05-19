@@ -188,6 +188,75 @@ window.shadowscopeFetch = async function (ioc, opts) {
   return await r.json();
 };
 
+// Streaming enrich — calls /api/ui/enrich/stream and dispatches per-source
+// events to the supplied handlers as they arrive. Returns a Promise that
+// resolves to the final shaped record (same shape as shadowscopeFetch).
+//
+// Why fetch+ReadableStream instead of EventSource? EventSource cannot send
+// the Authorization header, so a token-protected install would 401 on every
+// call. fetch streaming + manual SSE-frame parsing keeps the auth path the
+// same as every other endpoint.
+//
+// Handlers (all optional):
+//   onMeta({ioc, type, pending, allowlisted})
+//   onModule({name, entry: {score, data}})
+//   onSkipped({name})  // source returned no data (soft-fail / no API key)
+//   onError({detail})
+window.shadowscopeFetchStream = async function (ioc, opts, handlers) {
+  opts = opts || {};
+  handlers = handlers || {};
+  const params = new URLSearchParams({ ioc: String(ioc).trim() });
+  if (opts.defang)   params.set("defang", "true");
+  if (opts.no_cache) params.set("no_cache", "true");
+  const headers = { "Accept": "text/event-stream" };
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const r = await fetch("/api/ui/enrich/stream?" + params.toString(), { headers });
+  if (!r.ok || !r.body) {
+    const body = r.body ? "" : "(no body)";
+    const text = r.body ? await r.text().catch(() => "") : body;
+    throw new Error("HTTP " + r.status + " " + text.slice(0, 200));
+  }
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let final = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    // SSE frames are separated by a blank line ("\n\n").
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      // Parse one frame: collect "event:" + "data:" lines.
+      let evt = "message";
+      let data = "";
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) evt = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+        // ":" comment lines are ignored.
+      }
+      if (!data) continue;
+      let parsed;
+      try { parsed = JSON.parse(data); } catch (e) { continue; }
+      if (evt === "meta")  { handlers.onMeta  && handlers.onMeta(parsed); }
+      else if (evt === "module") { handlers.onModule && handlers.onModule(parsed); }
+      else if (evt === "skipped") { handlers.onSkipped && handlers.onSkipped(parsed); }
+      else if (evt === "final") { final = parsed; }
+      else if (evt === "error") {
+        handlers.onError && handlers.onError(parsed);
+        throw new Error(parsed.detail || "stream error");
+      }
+    }
+  }
+  if (!final) throw new Error("stream closed before final event");
+  return final;
+};
+
 // Fetch the newest cached IOCs for the recent strip. Returns an array of
 // records in the same shape window.shadowscopeFetch produces, sorted
 // newest-first. Empty list = no enrichments cached yet — caller should

@@ -2336,3 +2336,42 @@ body.patterns .ti-score::after {
   padding: 10px 18px 14px;
   border-top: 1px solid var(--line);
 }
+
+/* Enrich skeleton — instant feedback between button press and first source. */
+.enrich-skeleton .hero-sub { margin-top: 6px; font-size: 12px; }
+.enrich-skeleton .score-skel {
+  width: 96px; height: 64px;
+  border: 1px solid var(--line); border-radius: 4px;
+}
+.source-table-skel { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.source-row-skel {
+  height: 28px; border: 1px solid var(--line); border-radius: 3px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 10px;
+}
+.source-row-skel.done {
+  background: transparent;
+  border-color: var(--accent, #6cf);
+  animation: none;
+}
+.source-row-skel.skipped {
+  background: transparent;
+  border-color: var(--line);
+  border-style: dashed;
+  animation: none;
+  opacity: 0.5;
+}
+.skel-source-name { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.skel-source-tick { color: var(--accent, #6cf); font-weight: bold; }
+.shimmer {
+  background: linear-gradient(90deg,
+    var(--bg) 0%,
+    var(--ink-3, rgba(255,255,255,0.05)) 50%,
+    var(--bg) 100%);
+  background-size: 200% 100%;
+  animation: ss-shimmer 1.2s linear infinite;
+}
+@keyframes ss-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
