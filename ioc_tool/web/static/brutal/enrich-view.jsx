@@ -39,11 +39,17 @@ const fireCrabState = (label) => {
 // While the stream is active, lists each source as it lands so the user
 // sees concrete progress instead of an opaque spinner. Replaces the stale
 // prior IOC view (which used to linger and felt broken on slow networks).
-function EnrichSkeleton({ ioc, fmt, landed, pending }) {
+//
+// ``landed`` = sources that returned data; ``skipped`` = sources that
+// soft-failed (no API key, no data, etc). Both count toward the total so
+// the "X/Y" counter doesn't stall halfway through.
+function EnrichSkeleton({ ioc, fmt, landed, skipped, pending }) {
   const label = fmt ? fmt(ioc) : ioc;
   const landedList = Array.isArray(landed) ? landed : [];
+  const skippedList = Array.isArray(skipped) ? skipped : [];
   const total = pending != null ? pending : null;
-  const remaining = total != null ? Math.max(0, total - landedList.length) : 6;
+  const completed = landedList.length + skippedList.length;
+  const remaining = total != null ? Math.max(0, total - completed) : 6;
   return (
     <div className="enrich-view enrich-skeleton" aria-busy="true">
       <section className="hero">
@@ -51,7 +57,7 @@ function EnrichSkeleton({ ioc, fmt, landed, pending }) {
           <div className="hero-ioc">{label}</div>
           <div className="hero-sub dim">
             {total != null
-              ? `// streaming sources ${landedList.length}/${total}`
+              ? `// streaming sources ${completed}/${total}`
               : "// enriching… waiting on sources"}
           </div>
         </div>
@@ -64,6 +70,12 @@ function EnrichSkeleton({ ioc, fmt, landed, pending }) {
           <div key={"done-" + name} className="source-row-skel done">
             <span className="skel-source-name">{name}</span>
             <span className="skel-source-tick">✓</span>
+          </div>
+        ))}
+        {skippedList.map((name) => (
+          <div key={"skip-" + name} className="source-row-skel skipped">
+            <span className="skel-source-name dim">{name}</span>
+            <span className="skel-source-tick dim">·</span>
           </div>
         ))}
         {Array.from({ length: remaining }).map((_, i) => (
@@ -84,8 +96,9 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
   if (showSkeleton) {
     const skelLabel = isStreamingStub ? ioc.ioc : pendingIoc;
     const landed = isStreamingStub ? Object.keys(ioc.modules || {}) : [];
+    const skipped = isStreamingStub ? (ioc.skipped || []) : [];
     const pendingCount = streamProgress ? streamProgress.pending : null;
-    return <EnrichSkeleton ioc={skelLabel} fmt={fmt} landed={landed} pending={pendingCount} />;
+    return <EnrichSkeleton ioc={skelLabel} fmt={fmt} landed={landed} skipped={skipped} pending={pendingCount} />;
   }
   // Empty workspace (or strip just cleared) — render a prompt instead of
   // collapsing to a blank screen. The "/" key shortcut already focuses

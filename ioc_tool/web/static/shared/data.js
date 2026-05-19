@@ -200,6 +200,7 @@ window.shadowscopeFetch = async function (ioc, opts) {
 // Handlers (all optional):
 //   onMeta({ioc, type, pending, allowlisted})
 //   onModule({name, entry: {score, data}})
+//   onSkipped({name})  // source returned no data (soft-fail / no API key)
 //   onError({detail})
 window.shadowscopeFetchStream = async function (ioc, opts, handlers) {
   opts = opts || {};
@@ -244,6 +245,7 @@ window.shadowscopeFetchStream = async function (ioc, opts, handlers) {
       try { parsed = JSON.parse(data); } catch (e) { continue; }
       if (evt === "meta")  { handlers.onMeta  && handlers.onMeta(parsed); }
       else if (evt === "module") { handlers.onModule && handlers.onModule(parsed); }
+      else if (evt === "skipped") { handlers.onSkipped && handlers.onSkipped(parsed); }
       else if (evt === "final") { final = parsed; }
       else if (evt === "error") {
         handlers.onError && handlers.onError(parsed);

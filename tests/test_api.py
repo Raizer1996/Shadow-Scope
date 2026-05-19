@@ -544,6 +544,41 @@ def test_ui_enrich_stream_rejects_unknown_type(client, monkeypatch):
     assert r.status_code == 400
 
 
+def test_ui_enrich_stream_forwards_skipped_events(client, monkeypatch):
+    """Soft-fail (None-returning) sources must emit `event: skipped` frames.
+
+    Used by the dashboard's landed/total counter so it doesn't stall on
+    sources without an API key.
+    """
+    _stub_stream(monkeypatch, [
+        {"event": "meta", "ioc": "1.2.3.4", "type": "ip",
+         "allowlisted": False, "pending": 3},
+        {"event": "module", "name": "VirusTotal",
+         "entry": {"score": 50, "data": {
+             "last_analysis_stats": {"malicious": 1, "harmless": 80,
+                                     "suspicious": 0, "undetected": 19},
+         }}},
+        {"event": "skipped", "name": "Shodan"},
+        {"event": "skipped", "name": "IPinfo"},
+        {"event": "final", "result": {
+            "ioc": "1.2.3.4",
+            "type": "ip",
+            "modules": {"VirusTotal": {"score": 50, "data": {
+                "last_analysis_stats": {"malicious": 1, "harmless": 80,
+                                        "suspicious": 0, "undetected": 19},
+            }}},
+            "final_score": 50,
+        }},
+    ])
+    r = client.get("/api/ui/enrich/stream?ioc=1.2.3.4")
+    assert r.status_code == 200
+    body = r.text
+    assert "event: skipped" in body
+    # Skipped names appear in the payload (dashboard renders them).
+    assert "Shodan" in body
+    assert "IPinfo" in body
+
+
 def test_ui_enrich_stream_propagates_no_cache(client, monkeypatch):
     seen: dict = {}
     async def _stream(value, ioc_type, *, no_cache=False):

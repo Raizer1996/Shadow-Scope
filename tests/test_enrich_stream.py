@@ -147,6 +147,36 @@ def test_stream_short_circuits_on_allowlist(monkeypatch, _isolated_db):
     assert final["result"]["final_score"] == 0
 
 
+def test_stream_emits_skipped_for_soft_fail_sources(monkeypatch, _isolated_db):
+    """A source returning None must surface as a `skipped` event, not as silence.
+
+    Without this guarantee the dashboard's landed/total counter stalls at,
+    say, 12/22 forever because the 10 soft-failing sources never emit a
+    frame. The display name comes from ``_build_enrich_tasks`` so the UI
+    can render the skipped row with the same label as a successful one.
+    """
+    import asyncio
+
+    _all_sources_quiet(monkeypatch)
+    # VT explicitly returns None — should emit a `skipped` event named
+    # "VirusTotal" (the display name baked into _build_enrich_tasks).
+    monkeypatch.setattr(vt, "enrich_ip", lambda v: None)
+
+    events = asyncio.run(_collect(enrich.enrich_ioc_stream("9.9.9.9", "ip")))
+
+    kinds = [e["event"] for e in events]
+    assert "skipped" in kinds, f"expected at least one `skipped` event, got {kinds}"
+    skipped_names = {e["name"] for e in events if e["event"] == "skipped"}
+    # VT is always scheduled for IPs and we stubbed it to None.
+    assert "VirusTotal" in skipped_names
+    # And meta's `pending` count must equal the total of all module +
+    # skipped frames (excluding meta / final themselves) — otherwise the
+    # counter would either over- or under-shoot.
+    meta = events[0]
+    completed = sum(1 for e in events if e["event"] in ("module", "skipped"))
+    assert meta["pending"] == completed
+
+
 def test_stream_meta_carries_pending_count(monkeypatch, _isolated_db):
     """The first `meta` event tells the UI how many tasks were scheduled.
 

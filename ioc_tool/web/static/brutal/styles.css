@@ -2354,6 +2354,13 @@ body.patterns .ti-score::after {
   border-color: var(--accent, #6cf);
   animation: none;
 }
+.source-row-skel.skipped {
+  background: transparent;
+  border-color: var(--line);
+  border-style: dashed;
+  animation: none;
+  opacity: 0.5;
+}
 .skel-source-name { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
 .skel-source-tick { color: var(--accent, #6cf); font-weight: bold; }
 .shimmer {

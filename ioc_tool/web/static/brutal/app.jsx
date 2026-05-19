@@ -45,6 +45,13 @@ function App() {
 
   const activeIoc = results.find(r => r.id === activeIocId) || results[0];
 
+  // Live ref into the latest `results` array so onEnrich's stream callbacks
+  // (which close over the value at click time) can read fresh state when
+  // checking for an existing record on re-enrich. Without this the callbacks
+  // would see the stale snapshot from the click closure.
+  const resultsRef = useRef(results);
+  useEffect(() => { resultsRef.current = results; }, [results]);
+
   const accentMap = {
     ember: { hex: "#ff6b35" },
     mint:  { hex: "#3ddc97" },
@@ -156,52 +163,103 @@ function App() {
     const value = text.trim();
     if (!value) return;
     setEnriching(true);
-    setPendingIoc(value);
     setTab("enrich");
 
-    // Streaming enrich — progressively merges per-source events into the
-    // results strip so the user sees the first source as soon as it lands
-    // instead of waiting on the slowest. Falls back to the blocking
-    // endpoint when llm summary is requested (the LLM call needs the full
-    // result and isn't worth refactoring into the stream).
+    // Streaming enrich. Falls back to blocking endpoint when LLM summary is
+    // requested (Ollama call needs the full result).
     const useStream = !llm && typeof window.shadowscopeFetchStream === "function";
 
-    // Optimistic in-progress record. Lets EnrichView render partial
-    // modules as `module` events stream in (the existing render path
-    // tolerates a sparse modules dict).
-    let pendingId = null;
-    const updatePending = (mut) => {
-      setResults(prev => {
-        const next = prev.slice();
-        const i = next.findIndex(r => r.id === pendingId);
-        if (i < 0) return prev;
-        next[i] = mut(next[i]);
-        return next;
-      });
+    // Re-enrich path: the user is enriching an IOC already in the strip.
+    // Keep their current view rendered instead of replacing it with a
+    // skeleton — once `final` lands we swap the record in place.
+    const isReEnrich = resultsRef.current.some(r => r.ioc === value);
+
+    // Track of the in-flight enrich. ``stubId`` identifies the skeleton
+    // record we may insert; ``activeBeforeFinal`` is captured at enrich
+    // start so the .then can detect whether the user pivoted to another
+    // IOC mid-stream (in which case we leave them alone instead of yanking
+    // them back to the result we just fetched).
+    let stubId = null;
+    let stubInserted = false;
+    let timerFired = false;
+    let pendingMeta = null;
+    const activeBeforeFinal = activeIocId;
+
+    const tryInsertStub = () => {
+      if (stubInserted || isReEnrich || !pendingMeta) return;
+      stubId = "stream-" + Math.random().toString(36).slice(2, 9);
+      const stub = {
+        id: stubId,
+        ioc: value,
+        type: pendingMeta.type || "unknown",
+        modules: {},
+        skipped: [],
+        final_score: 0,
+        streaming: true,
+      };
+      setResults(prev => [stub, ...prev.filter(r => r.ioc !== value)]);
+      setActiveIocId(stubId);
+      stubInserted = true;
     };
+
+    // Defer the skeleton stub by 80 ms so cache hits (which usually
+    // complete in under that) never paint the skeleton at all. For
+    // anything slower the 80 ms is below the human-perceived "delay"
+    // threshold, so we still feel instant. Re-enriches skip the stub
+    // entirely — the existing record stays on-screen until the final
+    // event replaces it.
+    let stubTimer = null;
+    if (!isReEnrich) {
+      // ``pendingIoc`` drives the early skeleton render path for the
+      // case where activeIoc points to a *different* IOC than what the
+      // user just enriched. Setting it on the same timer as the stub
+      // means we don't paint a skeleton for cache hits.
+      stubTimer = setTimeout(() => {
+        timerFired = true;
+        setPendingIoc(value);
+        tryInsertStub();
+      }, 80);
+    }
 
     const fetchPromise = useStream
       ? window.shadowscopeFetchStream(value, { defang }, {
           onMeta: (m) => {
-            pendingId = "stream-" + Math.random().toString(36).slice(2, 9);
-            const stub = {
-              id: pendingId,
-              ioc: value,
-              type: m.type || "unknown",
-              modules: {},
-              final_score: 0,
-              streaming: true,
-            };
-            setResults(prev => [stub, ...prev.filter(r => r.ioc !== value)]);
-            setActiveIocId(pendingId);
+            pendingMeta = m;
             setStreamProgress({ pending: m.pending || null });
+            if (isReEnrich) {
+              // Re-enrich: point active at the existing record so any
+              // pivot view stays consistent. No stub.
+              const existing = resultsRef.current.find(r => r.ioc === value);
+              if (existing) setActiveIocId(existing.id);
+              return;
+            }
+            // Late meta (after timer fired) → insert stub now.
+            if (timerFired) tryInsertStub();
           },
           onModule: (ev) => {
-            if (!pendingId) return;
-            updatePending(r => ({
-              ...r,
-              modules: { ...r.modules, [ev.name]: ev.entry },
-            }));
+            if (!stubInserted) return;  // re-enrich path; skip partial
+            setResults(prev => {
+              const next = prev.slice();
+              const i = next.findIndex(r => r.id === stubId);
+              if (i < 0) return prev;
+              next[i] = {
+                ...next[i],
+                modules: { ...next[i].modules, [ev.name]: ev.entry },
+              };
+              return next;
+            });
+          },
+          onSkipped: (ev) => {
+            if (!stubInserted) return;
+            setResults(prev => {
+              const next = prev.slice();
+              const i = next.findIndex(r => r.id === stubId);
+              if (i < 0) return prev;
+              const skipped = next[i].skipped || [];
+              if (skipped.includes(ev.name)) return prev;
+              next[i] = { ...next[i], skipped: [...skipped, ev.name] };
+              return next;
+            });
           },
         })
       : window.shadowscopeFetch(value, { defang, summary: llm });
@@ -210,13 +268,27 @@ function App() {
       .then((record) => {
         setResults(prev => [
           record,
-          ...prev.filter(r => r.id !== record.id && r.id !== pendingId && r.ioc !== record.ioc && r.ioc !== value),
+          ...prev.filter(r =>
+            r.id !== record.id &&
+            r.id !== stubId &&
+            r.ioc !== record.ioc &&
+            r.ioc !== value
+          ),
         ]);
-        setActiveIocId(record.id);
+        // Activity-steal guard: only follow the new record if the user
+        // is still on what we set when this enrich started (stub for new
+        // IOC, or the existing record on re-enrich). If they pivoted to
+        // an unrelated row mid-stream, leave them alone.
+        setActiveIocId(curr => {
+          if (curr === stubId) return record.id;
+          if (curr === record.id) return record.id;  // re-enrich, deterministic id
+          if (isReEnrich && curr === activeBeforeFinal) return record.id;
+          return curr;
+        });
       })
       .catch((err) => {
-        if (pendingId) {
-          setResults(prev => prev.filter(r => r.id !== pendingId));
+        if (stubId) {
+          setResults(prev => prev.filter(r => r.id !== stubId));
         }
         console.warn("[shadowscope] /api/ui/enrich failed:", err.message);
         // Show a transient toast and leave the strip unchanged. Falling
@@ -228,6 +300,7 @@ function App() {
         setTimeout(() => toast.remove(), 3500);
       })
       .finally(() => {
+        if (stubTimer) clearTimeout(stubTimer);
         setEnriching(false);
         setPendingIoc(null);
         setStreamProgress(null);
