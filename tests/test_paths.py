@@ -43,7 +43,8 @@ def test_env_example_is_bundled():
 def test_read_utf16_ioc_file(tmp_path):
     # Windows PowerShell 5.1 `>` / Out-File default: UTF-16 LE with BOM.
     f = tmp_path / "iocs.txt"
-    f.write_text("8.8.8.8\r\nevil.com\r\n", encoding="utf-16")
+    # write_bytes: write_text would turn "\n" into "\r\n" on Windows.
+    f.write_bytes("8.8.8.8\r\nevil.com\r\n".encode("utf-16"))
     assert cli._read_text_lines(str(f)) == ["8.8.8.8", "evil.com"]
 
 
