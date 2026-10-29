@@ -136,8 +136,9 @@ Organized by **release milestone** (foundational → expansion → polish) and b
 
 ## v1.0 — Packaging & Distribution
 
-- [x] **PyPI package** — `pyproject.toml` ships a buildable wheel via `setuptools.build_meta`: dependencies pinned (`requests`, `rich`, `python-dotenv`, `python-whois`, `fastapi`, `uvicorn[standard]`), optional `dev` extras, package-data carries `web/static/*` and `data/*.json`, console_scripts entry `shadowscope = ioc_tool.main:main`. Verified locally: 100 KB wheel, 24 modules, entry point + static files included. Upload to PyPI is a separate `twine upload` step.
-- [ ] **pipx install** docs — straightforward once on PyPI: `pipx install shadowscope`.
+- [x] **PyPI package** — `pyproject.toml` ships a buildable wheel via `setuptools.build_meta`: dependencies pinned (`requests`, `rich`, `python-dotenv`, `python-whois`, `fastapi`, `uvicorn[standard]`), optional `dev` extras, package-data carries `web/static/**/*` and `.env.example` (the earlier `web/static/*` glob shipped `index.html` only — blank dashboard on pip installs; fixed 2026-10-29), console_scripts entry `shadowscope = ioc_tool.main:main`. Verified locally: 100 KB wheel, 24 modules, entry point + static files included. Upload to PyPI is a separate `twine upload` step.
+- [x] **pipx install** docs — `pipx install git+https://github.com/Raizer1996/Shadow-Scope.git` works today; config + data move to a per-user dir for installed copies (`core/paths.py`, `SHADOWSCOPE_HOME` override) (2026-10-29)
+- [x] **Windows install** — `scripts/install-windows.ps1` (+ `.cmd` wrapper): per-user venv under `%LOCALAPPDATA%\ShadowScope`, launcher on user PATH, `.env` from template with placeholders blanked + ACL to current user, `-DryRun`, `-Uninstall [-Purge]`. UTF-8 stdio on Windows, BOM/UTF-16-aware `-f` IOC files. CI: `windows-latest` job runs pytest + installs/uninstalls via the script + serves the dashboard; `package` job asserts the wheel carries dashboard assets (2026-10-29)
 <!-- Moved to Done 2026-05-14 — Docker image (multi-stage python:3.12-slim, non-root, healthcheck) -->
 <!-- Moved to Done 2026-05-14 — Docker Compose stack (Redis backend deferred — single-container SQLite is sufficient for current scale) -->
 - [ ] **Kubernetes Helm chart**. **[issue]**

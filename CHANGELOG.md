@@ -7,6 +7,27 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Windows installer** — `scripts/install-windows.ps1` / `install-windows.cmd`:
+  per-user, no admin. venv + `shadowscope.exe` launcher on the user PATH,
+  `.env` created from the template (placeholders blanked, ACL restricted to
+  the current user), `-DryRun`, `-Uninstall [-Purge]`. Windows CI job.
+- **`SHADOWSCOPE_HOME`** + per-user config/data dir for installed copies
+  (`core/paths.py`). Source checkouts and Docker keep `ioc_tool/.env` +
+  `ioc_tool/data/`. Migration: a copy previously pip-installed into
+  `site-packages` kept its cache in `site-packages/ioc_tool/data/`; move
+  `ioc.db` to the new per-user `data/` dir to keep history.
+
+### Fixed
+
+- Wheel shipped `web/static/index.html` only — `/ui` loaded blank on any
+  pip/pipx install. Package-data now globs `web/static/**/*` and includes
+  `.env.example`.
+- `enrich -f` crashed with `UnicodeDecodeError` on UTF-16 files (Windows
+  PowerShell 5.1 `>` default) and kept a stray BOM on UTF-8-with-BOM files.
+- Redirected output on Windows (`--csv > out.csv`) could raise
+  `UnicodeEncodeError` under cp1252; stdio is forced to UTF-8 there.
+- `.env` with a UTF-8 BOM silently dropped its first key.
+
 - **Brutalist React dashboard** at `/ui` — terminal-grade aesthetic
   (orange accent, dense monospace, score-coded ticker, score banner,
   tab nav: Enrich / Batch / Watch / Cases / Diff). React 18 +

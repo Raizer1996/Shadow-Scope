@@ -5,10 +5,14 @@ import os
 import sqlite3
 from datetime import datetime
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+from . import paths
 
-# Default DB lives at ioc_tool/data/ioc.db — same path as before so any
-# user who never sets --workspace keeps working off their existing cache.
+# ioc_tool/data in a source checkout / Docker; a per-user dir when installed
+# from a wheel (see core/paths.py).
+DATA_DIR = paths.DATA_DIR
+
+# Default DB is DATA_DIR/ioc.db — same path as before so any user who
+# never sets --workspace keeps working off their existing cache.
 DB_PATH = os.path.join(DATA_DIR, 'ioc.db')
 
 
@@ -64,6 +68,8 @@ def list_workspaces() -> list[dict]:
 sqlite3.register_adapter(datetime, lambda dt: dt.isoformat(sep=" "))
 
 def get_db_connection():
+    # First run of an installed package: the per-user data dir may not exist.
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn

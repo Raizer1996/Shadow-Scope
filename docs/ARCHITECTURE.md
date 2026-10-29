@@ -62,7 +62,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 
 | Path | Purpose |
 |------|---------|
-| `ioc_tool/main.py` | Entry point: loads `.env`, hands off to `ui.cli.main()` |
+| `ioc_tool/main.py` | Entry point: loads `.env` (location from `core/paths.py`), forces UTF-8 stdio on Windows, hands off to `ui.cli.main()` |
 | `ioc_tool/ui/cli.py` | Interactive menu + arg-flag shortcuts (`-1/-2/-3`) |
 | `ioc_tool/ui/banner.py` | "Sniper Scope" ASCII art + colors |
 | `ioc_tool/core/parser.py` | Detect IOC type from string |
@@ -70,6 +70,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/core/extractor.py` | Extract IOCs from arbitrary text blobs |
 | `ioc_tool/core/enrich.py` | Orchestrate per-source enrichment + cache lookups |
 | `ioc_tool/core/database.py` | SQLite wrapper (IOCs + enrichments tables) |
+| `ioc_tool/core/paths.py` | Resolves the `.env` file + `data/` dir: package dir in a checkout / Docker, per-user dir when installed from a wheel, `SHADOWSCOPE_HOME` overrides |
 | `ioc_tool/core/score.py` | Per-source scoring + composite risk avg |
 | `ioc_tool/core/output.py` | JSON/CSV serializers for results |
 | `ioc_tool/core/llm.py` | LLM-generated natural-language verdict via local Ollama (optional, `--summary` / `?summary=true`) |
@@ -97,6 +98,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |
 | `ioc_tool/data/cisa_kev.json` | CISA KEV catalog snapshot (gitignored cache, refreshed daily) |
 | `ioc_tool/web/__init__.py` | REST API package marker |
+| `scripts/install-windows.ps1` | Per-user Windows installer (venv + launcher + user PATH + `.env`), `-DryRun` / `-Uninstall [-Purge]`; `install-windows.cmd` wraps it for cmd.exe / double-click |
 | `ioc_tool/web/api.py` | FastAPI app + routes — thin HTTP layer over `enrich_ioc_async` |
 | `ioc_tool/web/static/index.html` | Dashboard shell (terminal-dark theme, no framework) |
 | `ioc_tool/web/static/styles.css` | Dashboard CSS (vanilla, dark palette + monospace) |
@@ -175,7 +177,19 @@ The feature is purely additive — disable it by omitting the flag/query param, 
 
 ## Configuration
 
-All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. See [`API_KEYS.md`](API_KEYS.md) for provider details.
+All secrets in `.env` (gitignored). Template: `ioc_tool/.env.example` (also shipped in the wheel). See [`API_KEYS.md`](API_KEYS.md) for provider details.
+
+### Config + data location (`core/paths.py`)
+
+| Layout | `.env` | `data/` (SQLite, feed mirrors) |
+|--------|--------|--------------------------------|
+| Source checkout / Docker | `ioc_tool/.env` | `ioc_tool/data/` |
+| Installed wheel (pip / pipx / Windows installer) — Windows | `%LOCALAPPDATA%\ShadowScope\.env` | `%LOCALAPPDATA%\ShadowScope\data\` |
+| Installed wheel — macOS | `~/Library/Application Support/ShadowScope/.env` | `…/ShadowScope/data/` |
+| Installed wheel — Linux | `${XDG_DATA_HOME:-~/.local/share}/shadowscope/.env` | `…/shadowscope/data/` |
+| `SHADOWSCOPE_HOME=<dir>` set in the process env | `<dir>/.env` | `<dir>/data/` |
+
+"Installed" means the package directory sits under `site-packages` / `dist-packages`. `SHADOWSCOPE_HOME` must come from the real environment — it decides where `.env` is, so it can't live inside it. The `.env` file is read as `utf-8-sig` so a Notepad BOM doesn't swallow the first key.
 
 ### Behavioural env vars (no key required)
 

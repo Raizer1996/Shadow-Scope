@@ -19,10 +19,10 @@ want a tighter (or looser) refresh cadence.
 import os
 import time
 
-from ..core import http
+from ..core import http, paths
 
 TOR_EXIT_LIST_URL = "https://check.torproject.org/torbulkexitlist"
-CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'tor_nodes.txt')
+CACHE_FILE = os.path.join(paths.DATA_DIR, 'tor_nodes.txt')
 
 _DEFAULT_TTL_HOURS = 24.0
 
