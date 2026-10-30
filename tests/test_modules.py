@@ -1507,14 +1507,14 @@ class TestEPSS:
         assert epss.enrich_cve("CVE-2024-1234") is None
 
     def test_calculate_epss_high(self) -> None:
-        """epss=0.97 → 97 (probability * 100, rounded)."""
+        """A high raw probability is never dragged down by its bucket."""
         data = {"epss": "0.97", "percentile": "0.95"}
         assert score_mod.calculate_epss_score(data) == 97
 
     def test_calculate_epss_top_percentile_floor(self) -> None:
-        """epss=0.30 percentile=0.995 → 70 (top-1% floor kicks in)."""
+        """epss=0.30 percentile=0.995 → 90 (top-1% bucket beats 30)."""
         data = {"epss": "0.30", "percentile": "0.995"}
-        assert score_mod.calculate_epss_score(data) == 70
+        assert score_mod.calculate_epss_score(data) == 90
 
     def test_calculate_epss_score_none(self) -> None:
         """None / empty payload → 0."""

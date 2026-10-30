@@ -119,28 +119,55 @@ The CLI subcommand `shadowscope serve` (handled in `ui/cli.py::handle_serve`) la
 
 ## Risk-scoring algorithm
 
-Per-source raw scores → averaged → composite final score (0–100).
+Per-source raw scores → weighted mean → composite final score (0–100).
 
 | Source | Formula |
 |--------|---------|
-| VirusTotal | `malicious_count / total_engines * 100` |
+| VirusTotal | detection **count** (`malicious` + `0.5 × suspicious`): `>=20 → 95`, `>=6 → 85`, `>=3 → 65`, `>=1 → 35`, clean → `0` |
 | AbuseIPDB  | `abuseConfidenceScore` (already 0–100) |
 | IPQS       | `fraud_score` (already 0–100) |
 | Tor        | `100` if on exit-node list else `0` |
-| WHOIS age  | `<30d → 90`, `30–180d → 60`, `>180d → 10`, unknown → `50` |
+| WHOIS age  | `<30d → 90`, `30–180d → 60`, `>180d → 10`, unknown → `50`. Offset-aware and naive dates both accepted (naive assumed UTC) |
 | URLhaus    | `95` if online hit, `70` if offline hit, `80` otherwise hit, `0` if no data |
 | ThreatFox  | hit & `confidence_level >= 75 → 95`, `>= 50 → 80`, other hit → `60`, no data → `0` |
 | MalwareBazaar | `95` on any hit (sample known to abuse.ch), `0` if no data |
 | GreyNoise  | `malicious=90`, `benign/riot=0`, `unknown=0`, none=`0` |
-| OTX        | pulses 1–2 → `50`, 3–9 → `75`, ≥10 → `90`; `reputation < 0` adds `+10` (cap `100`); no pulses + `reputation >= 0` → `0` |
+| OTX        | gated on strength: `reputation < -2` or a named adversary → `90`; `reputation < 0` with ≥3 pulses → `75`, ≥1 pulse → `50`; pulse count alone caps at `35` (≥10), `25` (≥3), `10` (≥1); curator `false_positive` → `0` |
 | URLscan    | any result with malicious verdict → `90`; history exists, no malicious verdict → `30`; `total == 0` or no data → `0` |
 | Shodan     | `0` (informational only — tags/ports/vulns shown but not scored) |
 | IPinfo     | `0` (informational only — ASN/org/geo shown) |
 | NVD        | `int(round(CVSS v3.1 baseScore * 10))` — 0 if no v3.1 metric |
-| EPSS       | `int(round(epss * 100))`; floor at `70` when `percentile >= 0.99` |
+| EPSS       | `max(round(epss * 100), percentile_bucket)` where the bucket is `>=0.99 → 90`, `>=0.95 → 75`, `>=0.90 → 60`, `>=0.70 → 35` |
 | KEV        | `100` if listed in CISA KEV catalog, else `0` |
 
-Final = `int(sum(scores) / len(scores))`.
+Final = `int(Σ(weight × score) / Σ weight)` over the contributing sources —
+see `SOURCE_WEIGHTS` in `core/score.py` for the per-source trust tiers.
+Info-only sources (Shodan, IPinfo, Censys, rDNS, PDNS, ASN) are excluded.
+
+**Local heuristics** (domain IOCs) are bundled into a single `Heuristics`
+entry whose score is the **strongest** sub-signal (NRD / DGA / typosquat /
+suspicious TLD / IDN homograph), not their mean — the checks are independent
+detectors, so a sub-check with nothing to report must not cancel out a real
+detection.
+
+### Known limitation — composite dilution
+
+The weighted mean treats a source that looked and found nothing as a vote of
+`0` at full weight, so each additional source pulls malicious verdicts down.
+Curated blocklists (KEV, Feodo, SSLBL, URLhaus, MalwareBazaar, ThreatFox)
+correctly abstain by returning `None` on a miss, but the reputation sources
+(VirusTotal, AbuseIPDB, IPQS, AbstractAPI, OTX, URLscan, Pulsedive, crt.sh)
+return a payload on a clean read and therefore vote. A single blocklist
+confirmation cannot outvote several quiet sources, and the `Critical` tier is
+effectively unreachable (ceiling 94 for IPs, 88 for domains, and only with
+every source simultaneously maxed).
+
+Replacing the mean with a role-based combiner — curated hits set a score
+*floor*, reputation sources combine via noisy-OR, context flags (Tor, VPN,
+domain age, cert volume) become a bounded modifier, and GreyNoise RIOT /
+allowlist act as suppressors — is tracked in `ROADMAP.md`. It changes the
+meaning of `final_score`, so it needs a decision on versioning the stored
+value first.
 
 Tiers:
 

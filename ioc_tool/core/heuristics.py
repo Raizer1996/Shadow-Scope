@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 import os
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 # Visually-confusable character pairs. Lookalike attacks substitute these
@@ -96,7 +96,7 @@ def nrd_check(creation_date: Any) -> dict | None:
     if parsed is None:
         return None
 
-    age_days = (datetime.now() - parsed).days
+    age_days = (datetime.now(timezone.utc) - parsed).days
     if age_days < 0:
         # Future-dated creation? Treat as unparseable rather than crashing.
         return None
@@ -123,26 +123,38 @@ def nrd_check(creation_date: Any) -> dict | None:
 
 
 def _coerce_to_datetime(value: Any) -> datetime | None:
-    """Best-effort conversion of WHOIS creation_date variants → datetime."""
+    """Best-effort conversion of WHOIS creation_date variants → datetime.
+
+    Always returns a timezone-aware (UTC) datetime so callers can subtract
+    it from ``datetime.now(timezone.utc)``. Registrars sometimes hand back
+    offset-aware values; mixing those with a naive ``now()`` raised
+    TypeError, which the orchestrator swallowed — losing the NRD signal
+    entirely. Naive input is assumed UTC, the WHOIS convention.
+    """
     if value is None:
         return None
     if isinstance(value, list):
         if not value:
             return None
         value = value[0]
+    parsed: datetime | None = None
     if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
+        parsed = value
+    elif isinstance(value, str):
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
             try:
-                return datetime.strptime(value, fmt)
+                parsed = datetime.strptime(value, fmt)
+                break
             except ValueError:
                 continue
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            return None
-    return None
+        if parsed is None:
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                return None
+    if parsed is None:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------

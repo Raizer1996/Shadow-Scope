@@ -5,6 +5,18 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Scoring calibration.** VirusTotal scores the detection **count**
+  (`>=3 → 65`, `>=6 → 85`, `>=20 → 95`, `suspicious` at half weight)
+  instead of `malicious / total_engines`, which rendered a 5/94 verdict
+  as a 5. EPSS takes `max(probability, percentile_bucket)` — raw EPSS
+  probabilities are tiny by construction, so the 90th percentile used to
+  score 3. The `Heuristics` composite keeps its strongest sub-signal
+  rather than averaging them.
+  **These change existing scores**; `final_score` values stored before
+  this release are not comparable with new ones.
+
 ### Added
 
 - **Windows installer** — `scripts/install-windows.ps1` / `install-windows.cmd`:
@@ -19,6 +31,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Offset-aware WHOIS dates silently dropped two domain signals.**
+  `calculate_whois_score` and `heuristics.nrd_check` subtracted an
+  offset-aware `creation_date` from a naive `datetime.now()`, raising
+  `TypeError`. Raised inside a thread-pooled source, it was swallowed by
+  the orchestrator's `gather(return_exceptions=True)`, so the WHOIS row
+  vanished — and with it the NRD heuristic, which reads WHOIS's payload.
+  Registrars returning offset-aware dates therefore had newly-registered-
+  domain detection silently disabled. Naive dates are now assumed UTC.
 - Wheel shipped `web/static/index.html` only — `/ui` loaded blank on any
   pip/pipx install. Package-data now globs `web/static/**/*` and includes
   `.env.example`.

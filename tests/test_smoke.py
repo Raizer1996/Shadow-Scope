@@ -70,8 +70,9 @@ def test_vt_score_zero_when_empty():
 
 
 def test_vt_score_basic():
+    """Scored on detection count, not share of engines: 5 detections -> 65."""
     stats = {"malicious": 5, "suspicious": 0, "harmless": 45, "undetected": 50}
-    assert score.calculate_vt_score(stats) == 5  # 5/100 * 100
+    assert score.calculate_vt_score(stats) == 65
 
 
 def test_abuseipdb_score():
@@ -682,9 +683,10 @@ def test_enrich_ioc_concurrency_returns_expected_shape(monkeypatch, tmp_path):
     assert result["ioc"] == "1.2.3.4"
     assert result["type"] == "ip"
     assert "VirusTotal" in result["modules"]
-    # 5 malicious / 100 total = 5
-    assert result["modules"]["VirusTotal"]["score"] == 5
-    assert result["final_score"] == 5
+    # 5 detections -> 65 (count-based bucket, not share of engines)
+    assert result["modules"]["VirusTotal"]["score"] == 65
+    # Every other source is stubbed out, so VT is the sole contributor.
+    assert result["final_score"] == 65
 
 
 def test_enrich_ioc_async_can_be_awaited(monkeypatch, tmp_path):
