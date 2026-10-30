@@ -12,6 +12,7 @@ requires-python = ">=3.10"
 authors = [{ name = "Raizer", email = "artmbordulev@gmail.com" }]
 keywords = ["threat-intelligence", "ioc", "soc", "ir", "cti", "security"]
 classifiers = [
+    "Operating System :: OS Independent",
     "Development Status :: 4 - Beta",
     "Intended Audience :: Information Technology",
     "License :: OSI Approved :: MIT License",
@@ -19,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
 ]
 dependencies = [
@@ -53,7 +55,9 @@ include = ["ioc_tool*"]
 exclude = ["tests*", "build*", "dist*"]
 
 [tool.setuptools.package-data]
-"ioc_tool" = ["web/static/*", "data/*.json"]
+# `**` is required: the dashboard lives in web/static/{brutal,shared}/ and a
+# bare `web/static/*` ships index.html alone (blank UI on pip installs).
+"ioc_tool" = ["web/static/**/*", ".env.example"]
 
 [tool.ruff]
 line-length = 100

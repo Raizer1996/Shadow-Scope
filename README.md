@@ -65,7 +65,48 @@ nano ioc_tool/.env          # paste your API keys
 python3 -m ioc_tool.main    # interactive mode
 ```
 
-## 🛠️ Installation
+## 🪟 Windows install
+
+Per-user, no admin rights. Needs Python 3.10+ ([python.org](https://www.python.org/downloads/windows/) or `winget install Python.Python.3.12`) and Git.
+
+```powershell
+git clone https://github.com/Raizer1996/Shadow-Scope.git
+cd Shadow-Scope
+.\scripts\install-windows.cmd
+```
+
+`install-windows.cmd` runs `scripts\install-windows.ps1` with `-ExecutionPolicy Bypass` for that one process only; it does not change your machine's policy. The installer:
+
+- creates a venv in `%LOCALAPPDATA%\ShadowScope\venv`
+- puts a `shadowscope.exe` launcher on your **user** PATH
+- creates `%LOCALAPPDATA%\ShadowScope\.env` with empty key slots, readable by your account only
+- keeps the cache in `%LOCALAPPDATA%\ShadowScope\data\`
+
+Then:
+
+```powershell
+notepad $env:LOCALAPPDATA\ShadowScope\.env   # paste API keys
+# open a NEW terminal so PATH refreshes
+shadowscope enrich 8.8.8.8
+shadowscope serve                             # dashboard at http://127.0.0.1:8765/ui
+```
+
+| Task | Command |
+|------|---------|
+| Preview without changing anything | `.\scripts\install-windows.cmd -DryRun` |
+| Upgrade | `git pull`, then re-run the installer (`.env` and data are kept) |
+| Custom location | `... -InstallDir D:\Tools\ShadowScope` (sets `SHADOWSCOPE_HOME`) |
+| Uninstall (keep keys + cache) | `.\scripts\install-windows.cmd -Uninstall` |
+| Uninstall everything | `.\scripts\install-windows.cmd -Uninstall -Purge` |
+
+Without cloning: `pipx install git+https://github.com/Raizer1996/Shadow-Scope.git`. The `.env` then goes in `%LOCALAPPDATA%\ShadowScope\.env` (copy `.env.example` from the repo). You can also use the Docker image via Docker Desktop.
+
+Windows notes:
+
+- IOC lists written by PowerShell 5.1 (`> iocs.txt`, which is UTF-16) and by Notepad (UTF-8 with BOM) are read correctly.
+- `--csv` / `--json` output redirected to a file is UTF-8.
+
+## 🛠️ Installation (Linux / macOS / from source)
 
 1. **Clone the repository**
 
@@ -90,6 +131,8 @@ python3 -m ioc_tool.main    # interactive mode
    See [`docs/API_KEYS.md`](docs/API_KEYS.md) for provider signup links and free-tier limits.
 
    Minimum recommended: `VT_API_KEY` + `ABUSEIPDB_API_KEY`. Missing keys are skipped gracefully.
+
+   Installed with `pip` / `pipx` instead of running from the checkout? Then `.env` and the cache live in a per-user directory: `~/.local/share/shadowscope/` on Linux, `~/Library/Application Support/ShadowScope/` on macOS. Set `SHADOWSCOPE_HOME=/some/dir` to choose a different directory.
 
 ## 💻 Usage
 

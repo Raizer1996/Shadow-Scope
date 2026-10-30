@@ -25,14 +25,10 @@ import os
 import time
 from typing import Any
 
-from ..core import http
+from ..core import http, paths
 
 FEED_URL = "https://feodotracker.abuse.ch/downloads/ipblocklist.json"
-CACHE_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "data",
-    "feodo_blocklist.json",
-)
+CACHE_FILE = os.path.join(paths.DATA_DIR, "feodo_blocklist.json")
 _DEFAULT_TTL_HOURS = 24.0
 _TIMEOUT = 10  # seconds — preserve original tuned override
 

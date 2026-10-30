@@ -855,10 +855,13 @@ def _finalize_enrich(
             heuristics_scores.append(idn['score'])
 
     if heuristics_data:
-        composite = (
-            int(sum(heuristics_scores) / len(heuristics_scores))
-            if heuristics_scores else 0
-        )
+        # Strongest sub-signal wins, rather than their mean. The checks are
+        # independent detectors, not repeated measurements of one quantity:
+        # a domain that is a confirmed typosquat (95) is a typosquat whether
+        # or not it is also newly registered. Averaging let a sub-check that
+        # had nothing to say — ``nrd_check`` returns 0 for a mature domain —
+        # cancel out a real detection.
+        composite = max(heuristics_scores) if heuristics_scores else 0
         results['Heuristics'] = {'score': composite, 'data': heuristics_data}
         if composite > 0:
             scores.append(('Heuristics', composite))

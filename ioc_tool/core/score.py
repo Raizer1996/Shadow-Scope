@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Per-source trust weights for the composite final risk.
 #
@@ -41,18 +41,38 @@ SOURCE_WEIGHTS: dict[str, float] = {
 
 
 def calculate_vt_score(stats):
-    """
-    VirusTotal score = (# of positives / total vendors) * 100
+    """VirusTotal engine verdicts → 0-100, scored on the detection COUNT.
+
+    The old formula was ``malicious / total_engines * 100``. With ~94
+    engines in the pool that turns a 5-engine detection into a score of 5,
+    which is indistinguishable from clean once it reaches the composite —
+    yet 3-5 independent engines flagging a sample is a real signal and
+    well past the threshold most SOC playbooks act on.
+
+    ``suspicious`` counts half: engines use it for heuristic-only hits,
+    which corroborate but do not confirm.
+
+    - no payload / no engines reporting -> 0
+    - >= 20 detections -> 95
+    - >=  6 detections -> 85
+    - >=  3 detections -> 65
+    - >=  1 detection  -> 35
+    - clean            -> 0
     """
     if not stats:
         return 0
-    malicious = stats.get('malicious', 0)
-    total = sum(stats.values())
+    try:
+        total = sum(v for v in stats.values() if isinstance(v, (int, float)))
+        detections = stats.get('malicious', 0) + 0.5 * stats.get('suspicious', 0)
+    except TypeError:
+        return 0
     if total == 0:
         return 0
 
-    # Using malicious count as positives
-    return int((malicious / total) * 100)
+    for threshold, value in ((20, 95), (6, 85), (3, 65), (1, 35)):
+        if detections >= threshold:
+            return value
+    return 0
 
 def calculate_abuseipdb_score(data):
     """
@@ -86,7 +106,16 @@ def calculate_whois_score(creation_date):
     if not isinstance(creation_date, datetime):
         return 50
 
-    age = (datetime.now() - creation_date).days
+    # Some registrars return offset-aware datetimes (and ISO strings carrying
+    # an offset parse that way), which cannot be subtracted from a naive
+    # ``now()`` — that raised TypeError, and because the exception surfaced
+    # inside a thread-pooled source it was swallowed by the orchestrator's
+    # gather, silently dropping WHOIS *and* the NRD heuristic that reads it.
+    # WHOIS dates are UTC by convention, so treat naive input as UTC.
+    if creation_date.tzinfo is None:
+        creation_date = creation_date.replace(tzinfo=timezone.utc)
+
+    age = (datetime.now(timezone.utc) - creation_date).days
 
     if age < 30:
         return 90
@@ -297,24 +326,38 @@ def calculate_nvd_score(data: dict | None) -> int:
 
 
 def calculate_epss_score(data: dict | None) -> int:
-    """Map EPSS exploit-probability (0.0–1.0) onto 0–100.
+    """Map EPSS onto 0–100 from the percentile *and* the raw probability.
 
-    Top-percentile floor: when ``percentile >= 0.99`` we floor the
-    score at 70 even if the raw probability rounds lower — being in
-    the top 1% of CVEs by exploit likelihood is a strong signal in its
-    own right.
+    EPSS probabilities are tiny by construction — the median CVE sits
+    around 0.0005, and 0.03 already puts a CVE near the 90th percentile.
+    Scoring ``epss * 100`` alone therefore contributed ~0-3 for almost
+    every CVE, so the signal never reached the composite. The percentile
+    says how a CVE ranks against the whole catalogue, which is the part
+    an analyst actually prioritises on.
+
+    We take the larger of the two mappings so a genuinely high raw
+    probability is never dragged down by its bucket:
+
+    - percentile >= 0.99 -> 90
+    - percentile >= 0.95 -> 75
+    - percentile >= 0.90 -> 60
+    - percentile >= 0.70 -> 35
+    - plus ``round(epss * 100)`` whenever that is higher
     """
     if not data:
         return 0
     try:
-        epss = float(data.get("epss", 0))
-        pct = float(data.get("percentile", 0))
-        result = int(round(epss * 100))
-        if pct >= 0.99:
-            result = max(result, 70)
-        return result
+        epss = float(data.get("epss", 0) or 0)
+        pct = float(data.get("percentile", 0) or 0)
     except (ValueError, TypeError):
         return 0
+
+    pct_score = 0
+    for threshold, value in ((0.99, 90), (0.95, 75), (0.90, 60), (0.70, 35)):
+        if pct >= threshold:
+            pct_score = value
+            break
+    return max(int(round(epss * 100)), pct_score)
 
 
 def calculate_kev_score(data: dict | None) -> int:

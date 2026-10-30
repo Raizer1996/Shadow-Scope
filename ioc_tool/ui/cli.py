@@ -15,6 +15,7 @@ from ..core import (
     enrich,
     extractor,
     parser,
+    paths,
 )
 from ..core import (
     defang as defang_mod,
@@ -83,7 +84,7 @@ def check_config(quiet: bool = False) -> None:
         target.print(
             Panel(
                 f"[yellow]Warning: Missing API Keys for: {', '.join(missing)}.\n"
-                f"Some modules will be skipped. Configure .env to enable them.[/yellow]",
+                f"Some modules will be skipped. Configure {paths.env_file()} to enable them.[/yellow]",
                 title="Configuration Warning",
                 expand=False,
             )
@@ -699,11 +700,10 @@ def handle_enrich(args: argparse.Namespace) -> None:
         file_path = getattr(args, 'file', None)
         if file_path:
             try:
-                with open(file_path) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            iocs_to_process.append(line)
+                for line in _read_text_lines(file_path):
+                    line = line.strip()
+                    if line:
+                        iocs_to_process.append(line)
             except FileNotFoundError:
                 msg_console.print(f"[red]Error: File {file_path} not found.[/red]")
                 return
@@ -2001,6 +2001,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser_arg
+
+
+def _read_text_lines(file_path: str) -> list[str]:
+    """Read an IOC list regardless of the editor/shell that produced it.
+
+    Windows PowerShell 5.1 ``>`` / ``Out-File`` writes UTF-16 LE with a BOM
+    and Notepad may add a UTF-8 BOM; the platform default (cp1252) would
+    turn either into garbage IOCs. Sniff the BOM, else assume UTF-8.
+    """
+    with open(file_path, "rb") as f:
+        raw = f.read()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = raw.decode("utf-16", errors="replace")
+    else:
+        text = raw.decode("utf-8-sig", errors="replace")
+    return text.splitlines()
 
 
 def main() -> None:

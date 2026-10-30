@@ -5,7 +5,48 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Scoring calibration.** VirusTotal scores the detection **count**
+  (`>=3 → 65`, `>=6 → 85`, `>=20 → 95`, `suspicious` at half weight)
+  instead of `malicious / total_engines`, which rendered a 5/94 verdict
+  as a 5. EPSS takes `max(probability, percentile_bucket)` — raw EPSS
+  probabilities are tiny by construction, so the 90th percentile used to
+  score 3. The `Heuristics` composite keeps its strongest sub-signal
+  rather than averaging them.
+  **These change existing scores**; `final_score` values stored before
+  this release are not comparable with new ones.
+
 ### Added
+
+- **Windows installer** — `scripts/install-windows.ps1` / `install-windows.cmd`:
+  per-user, no admin. venv + `shadowscope.exe` launcher on the user PATH,
+  `.env` created from the template (placeholders blanked, ACL restricted to
+  the current user), `-DryRun`, `-Uninstall [-Purge]`. Windows CI job.
+- **`SHADOWSCOPE_HOME`** + per-user config/data dir for installed copies
+  (`core/paths.py`). Source checkouts and Docker keep `ioc_tool/.env` +
+  `ioc_tool/data/`. Migration: a copy previously pip-installed into
+  `site-packages` kept its cache in `site-packages/ioc_tool/data/`; move
+  `ioc.db` to the new per-user `data/` dir to keep history.
+
+### Fixed
+
+- **Offset-aware WHOIS dates silently dropped two domain signals.**
+  `calculate_whois_score` and `heuristics.nrd_check` subtracted an
+  offset-aware `creation_date` from a naive `datetime.now()`, raising
+  `TypeError`. Raised inside a thread-pooled source, it was swallowed by
+  the orchestrator's `gather(return_exceptions=True)`, so the WHOIS row
+  vanished — and with it the NRD heuristic, which reads WHOIS's payload.
+  Registrars returning offset-aware dates therefore had newly-registered-
+  domain detection silently disabled. Naive dates are now assumed UTC.
+- Wheel shipped `web/static/index.html` only — `/ui` loaded blank on any
+  pip/pipx install. Package-data now globs `web/static/**/*` and includes
+  `.env.example`.
+- `enrich -f` crashed with `UnicodeDecodeError` on UTF-16 files (Windows
+  PowerShell 5.1 `>` default) and kept a stray BOM on UTF-8-with-BOM files.
+- Redirected output on Windows (`--csv > out.csv`) could raise
+  `UnicodeEncodeError` under cp1252; stdio is forced to UTF-8 there.
+- `.env` with a UTF-8 BOM silently dropped its first key.
 
 - **Brutalist React dashboard** at `/ui` — terminal-grade aesthetic
   (orange accent, dense monospace, score-coded ticker, score banner,
