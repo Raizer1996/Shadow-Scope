@@ -18,6 +18,8 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
+from . import score as _score_mod
+
 # CSV columns — keep this list authoritative. Tests assert on it.
 CSV_COLUMNS: list[str] = [
     "ioc",
@@ -57,14 +59,13 @@ CSV_COLUMNS: list[str] = [
 
 
 def _risk_tier(score: int) -> str:
-    """Map a 0-100 final score to a tier label.
+    """Tier label for ``score`` — thin alias over :func:`score.risk_tier`.
 
-    Matches the tier table in ``docs/ARCHITECTURE.md`` and the
-    color-coding used in ``ui/cli.py``: Safe / Low / Medium / High /
-    Critical.
+    Kept under the private name because ``ui/cli.py`` and the test-suite
+    reference ``output_mod._risk_tier``; the mapping itself lives in
+    ``core/score.py`` so every surface shares one table.
     """
-    if score is None:
-        return "Safe"
+    return _score_mod.risk_tier(score)
     try:
         s = int(score)
     except (TypeError, ValueError):

@@ -36,6 +36,24 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **CLI enriched the defanged string.** `enrich 1[.]2[.]3[.]4` classified
+  the input correctly but queried every source (and keyed the cache) with
+  the literal `1[.]2[.]3[.]4`, so defanged IOCs always came back "Safe".
+  `parser.normalize_value` now refangs ip/domain/url/hash/email; `enrich`
+  and `show` pass the normalised value. The REST API already did this.
+- **IPQS never ran.** The module read `IP_QUALITY_SCORE` while every
+  template/doc/compose file and `/sources` said `IPQS_API_KEY`. Documented
+  name now wins; the legacy name is still honoured.
+- **WHOIS errors corrupted `--json`/`--csv` output** — the module printed
+  `WHOIS error: …` to stdout from a worker thread. Now stderr.
+- **Four different risk-tier scales.** `show` (≥70 Critical / ≥40 Medium /
+  else Low), the `enrich` table (0 Safe / <40 Low / <75 Medium / <100 High /
+  100 Critical, Tor forced Critical), `core/output` and `core/llm`
+  (80/60/40/20) disagreed, so a score of 65 read as Medium, Low and High
+  depending on the surface. One `core.score.risk_tier()` table
+  (80/60/40/20, matching `docs/ARCHITECTURE.md` and the dashboard) now
+  drives all of them; Tor is shown as a flag instead of re-tiering.
+
 - Suppress Python 3.12+ `DeprecationWarning` from the default SQLite
   `datetime` adapter by registering an explicit ISO 8601 adapter at module
   load time.

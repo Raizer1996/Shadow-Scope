@@ -427,6 +427,34 @@ def calculate_pulsedive_score(data: dict | None) -> int:
     }.get(risk, 0)
 
 
+RISK_TIERS = (
+    (80, "Critical"),
+    (60, "High"),
+    (40, "Medium"),
+    (20, "Low"),
+)
+
+
+def risk_tier(score):
+    """Map a 0-100 composite score to its tier label.
+
+    Single source of truth for Safe / Low / Medium / High / Critical —
+    the table in ``docs/ARCHITECTURE.md``. Every surface (CLI table,
+    ``show``, ``--json``/``--csv``/``--stix``/``--md``, LLM prompt,
+    dashboard ``window.RISK_TIER``) must derive its label from here so
+    one IOC never reads as "Medium" in one place and "High" in another.
+    Safe-by-default on ``None`` / non-numeric input.
+    """
+    try:
+        s = int(score)
+    except (TypeError, ValueError):
+        return "Safe"
+    for floor, label in RISK_TIERS:
+        if s >= floor:
+            return label
+    return "Safe"
+
+
 def calculate_final_risk(named_scores):
     """Weighted average of ``(source_name, score)`` tuples.
 
