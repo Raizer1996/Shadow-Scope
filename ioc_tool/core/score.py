@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Per-source trust weights for the composite final risk.
 #
@@ -62,6 +62,20 @@ def calculate_abuseipdb_score(data):
         return 0
     return data.get('abuseConfidenceScore', 0)
 
+def _naive_utc(dt):
+    """Drop tzinfo after converting to UTC so it can be subtracted from ``datetime.now()``.
+
+    Many registrars (via python-whois) return offset-aware ``creation_date``
+    values; subtracting one from a naive ``now()`` raises ``TypeError``, which
+    the orchestrator's ``gather(return_exceptions=True)`` swallowed — so the
+    WHOIS row (and the NRD heuristic that reads it) silently vanished for
+    those domains.
+    """
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
 def calculate_whois_score(creation_date):
     """
     Domain age < 30 days -> 90
@@ -86,7 +100,7 @@ def calculate_whois_score(creation_date):
     if not isinstance(creation_date, datetime):
         return 50
 
-    age = (datetime.now() - creation_date).days
+    age = (datetime.now() - _naive_utc(creation_date)).days
 
     if age < 30:
         return 90

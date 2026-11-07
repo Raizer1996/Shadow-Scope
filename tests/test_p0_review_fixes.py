@@ -8,11 +8,12 @@ table shared by every surface.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from ioc_tool.core import heuristics, parser, score
 from ioc_tool.core import llm as llm_mod
 from ioc_tool.core import output as output_mod
-from ioc_tool.core import parser, score
 from ioc_tool.modules import ip_quality_score, whois_mod
 from ioc_tool.ui import cli
 
@@ -136,3 +137,24 @@ def test_cli_show_view_labels_65_as_high(capsys):
     result = {"ioc": "8.8.8.8", "type": "ip", "modules": {}, "final_score": 65}
     cli.print_single_result(result)
     assert "High" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# 5. tz-aware WHOIS creation dates must not crash the scorer / NRD check
+# ---------------------------------------------------------------------------
+
+
+def test_whois_score_accepts_tz_aware_creation_date():
+    old = datetime(1997, 9, 15, 4, 0, tzinfo=timezone.utc)
+    assert score.calculate_whois_score(old) == 10
+    assert score.calculate_whois_score(old.replace(tzinfo=None)) == 10
+    fresh = datetime.now(timezone.utc) - timedelta(days=3)
+    assert score.calculate_whois_score(fresh) == 90
+    assert score.calculate_whois_score([fresh]) == 90
+
+
+def test_nrd_check_accepts_tz_aware_creation_date():
+    fresh = datetime.now(timezone.utc) - timedelta(days=3)
+    out = heuristics.nrd_check(fresh)
+    assert out is not None and out.get("age_days") == 3
+    assert heuristics.nrd_check(fresh.replace(tzinfo=None)) is not None

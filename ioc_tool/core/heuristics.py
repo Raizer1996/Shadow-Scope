@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 import os
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 # Visually-confusable character pairs. Lookalike attacks substitute these
@@ -96,6 +96,8 @@ def nrd_check(creation_date: Any) -> dict | None:
     if parsed is None:
         return None
 
+    if parsed.tzinfo is not None:  # aware → naive UTC; see score._naive_utc
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
     age_days = (datetime.now() - parsed).days
     if age_days < 0:
         # Future-dated creation? Treat as unparseable rather than crashing.
