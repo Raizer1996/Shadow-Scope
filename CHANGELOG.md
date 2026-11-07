@@ -7,6 +7,20 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **MCP server** — `shadowscope-mcp` (`pip install "shadowscope[mcp]"`,
+  `ioc_tool/mcp_server.py`) exposes `enrich_ioc`, `enrich_many`,
+  `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` over
+  stdio for Claude Code and other MCP clients. Runs the orchestrator
+  in-process against the same `.env` + SQLite cache as the CLI; no REST
+  server needed. Register with
+  `claude mcp add --scope user shadowscope -- shadowscope-mcp`.
+
+### Changed
+
+- `requirements.txt` pins `fastapi==0.162.2` (was 0.118.0). The `mcp` extra
+  on Python 3.14 needs `starlette>=0.49`, which FastAPI 0.118 rejects; the
+  full suite passes unchanged on 0.162.2.
+
 - **Brutalist React dashboard** at `/ui` — terminal-grade aesthetic
   (orange accent, dense monospace, score-coded ticker, score banner,
   tab nav: Enrich / Batch / Watch / Cases / Diff). React 18 +

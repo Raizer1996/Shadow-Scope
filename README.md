@@ -98,6 +98,15 @@ interactive menu, or pass a subcommand for a one-shot operation.
 
 > Paste defanged IOCs (`1[.]2[.]3[.]4`, `hxxp://evil[.]com`, `user[at]example[.]com`) — they're auto-refanged on input. Use `--defang` to defang results on output so reports are safe to share.
 
+**MCP server (Claude Code / any MCP client)**
+
+```bash
+pip install "shadowscope[mcp]"
+claude mcp add --scope user shadowscope -- shadowscope-mcp
+```
+
+Exposes `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` over stdio, running the same pipeline and cache as the CLI (no REST server required).
+
 **Interactive mode**
 
 ```bash
