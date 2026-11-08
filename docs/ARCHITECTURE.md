@@ -119,7 +119,7 @@ The CLI subcommand `shadowscope serve` (handled in `ui/cli.py::handle_serve`) la
 
 ## Risk-scoring algorithm
 
-Per-source raw scores → averaged → composite final score (0–100).
+Per-source raw scores → weighted → **strongest signal + corroboration** → composite final score (0–100). (Score **v2**, Nov 2026; `score_version` is returned with every result and stored on `score_history` rows.)
 
 | Source | Formula |
 |--------|---------|
@@ -140,7 +140,15 @@ Per-source raw scores → averaged → composite final score (0–100).
 | EPSS       | `int(round(epss * 100))`; floor at `70` when `percentile >= 0.99` |
 | KEV        | `100` if listed in CISA KEV catalog, else `0` |
 
-Final = `int(sum(scores) / len(scores))`.
+Composite (`core/score.py::calculate_final_risk`, score v2):
+
+```
+weighted_i = score_i × SOURCE_WEIGHTS[source_i]      (default 0.5; KEV/Feodo/SSLBL 1.0 … AbstractAPI 0.4)
+final      = max(weighted_i) + 10 if ≥ 2 sources have weighted_i ≥ 50 else 0
+             clamped to 0–100, half-up rounding
+```
+
+Why not a mean: v1 averaged every source that returned anything, so "looked, found nothing" was a 0 vote at full weight — a Tor exit with AbuseIPDB 100 + Pulsedive 95 came out 57 "Medium" and a Feodo-listed C2 next to seven quiet sources scored 14 "Safe". Threat intel is evidentiary: one confirmed blocklist hit is enough, and independent agreement should push higher, never lower. v2 is monotone (more evidence never lowers the score), zeros/missing sources are neutral, a lone tier-4 source cannot exceed Medium, and two independent strong sources reach Critical. Info-only sources (Shodan, IPinfo, Censys, rDNS, PDNS, ASN) are excluded before this step. `final_score` values written before v2 are not comparable with v2 values — compare `score_version` when diffing history.
 
 Tiers:
 

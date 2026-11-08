@@ -17,6 +17,16 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Composite score v2 — strongest weighted signal + corroboration** replaces
+  the weighted mean (`core/score.py::calculate_final_risk`). v1 let "no data"
+  zeros and weak sources drag confirmed hits down: a Tor exit with AbuseIPDB
+  100 + Pulsedive 95 scored 57 "Medium", a Feodo-listed C2 14 "Safe". Now
+  `final = max(score × weight) (+10 when ≥ 2 sources are ≥ 50 weighted)`,
+  clamped 0–100. Results carry `score_version: 2`; `score_history` rows store
+  the version so pre-v2 points are not compared with new ones. Tor weight
+  0.7 → 0.5 (a lone exit node reads Medium, not High). The cache-derived
+  composite used by `/show` and the dashboard recent strip now passes named
+  scores, so it applies real weights instead of the 0.5 default.
 - **Certificate transparency now goes to api.ctlogs.dev first** (new
   `modules/ctlogs.py`, optional `CTLOGS_API_KEY`), with crt.sh as the
   automatic fallback. ctlogs answers in ~50 ms and does not 502 on large

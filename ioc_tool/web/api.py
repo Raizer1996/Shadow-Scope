@@ -591,7 +591,7 @@ _CACHED_SOURCES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[int]]:
+def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[tuple[str, int]]]:
     """Reconstruct a ``modules`` dict + per-source scores from SQLite rows.
 
     Shared by ``/show`` and ``/api/ui/recent``. Returns the same shape the
@@ -601,7 +601,7 @@ def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[int]]:
     """
     import json as _json
     modules: dict[str, dict[str, Any]] = {}
-    scores: list[int] = []
+    scores: list[tuple[str, int]] = []
     for source_key, display_name in _CACHED_SOURCES:
         row = database.get_latest_enrichment(ioc_id, source_key)
         if row is None:
@@ -611,7 +611,7 @@ def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[int]]:
         except (TypeError, ValueError):
             data = {}
         modules[display_name] = {"score": row["score"], "data": data}
-        scores.append(row["score"] or 0)
+        scores.append((display_name, row["score"] or 0))  # named → real weight, not the 0.5 default
     return modules, scores
 
 
@@ -1052,6 +1052,7 @@ def ui_score_history(
             iso = iso.split(".", 1)[0]
         points.append({
             "score": int(row["score"]),
+            "score_version": row.get("score_version"),  # None == pre-v2 (v1 mean)
             "recorded_at": (iso + "Z") if iso else None,
         })
     return {"ioc": refanged, "count": len(points), "points": points}

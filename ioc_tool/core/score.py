@@ -28,7 +28,7 @@ SOURCE_WEIGHTS: dict[str, float] = {
     # Tier 3 — community / fresh-but-noisy
     "ThreatFox":     0.7,
     "GreyNoise":     0.7,
-    "TOR":           0.7,
+    "TOR":           0.5,    # anonymiser, not malware: alone it should read Medium, not High
     "IPQS":          0.7,
     "OTX":           0.7,
     "URLscan":       0.6,
@@ -469,24 +469,43 @@ def risk_tier(score):
     return "Safe"
 
 
+SCORE_VERSION = 2
+
+# A source "corroborates" when its weighted score reaches this value; two or
+# more corroborating sources add the bonus. Keeps a single noisy provider
+# from reaching Critical on its own while rewarding independent agreement.
+CORROBORATION_THRESHOLD = 50
+CORROBORATION_BONUS = 10
+
+
 def calculate_final_risk(named_scores):
-    """Weighted average of ``(source_name, score)`` tuples.
+    """Composite 0-100 risk — **score v2: strongest weighted signal + corroboration**.
 
-    Each source's contribution is multiplied by its ``SOURCE_WEIGHTS`` entry
-    so that ground-truth blocklists (CISA KEV, abuse.ch Feodo / SSLBL) carry
-    more weight than thin-tier APIs (Pulsedive, AbstractAPI). Sources not in
-    the weights table default to 0.5 — neither boosted nor suppressed.
+    v1 was a weighted *mean* over every source that returned anything, so
+    "looked and found nothing" counted as a 0 vote at full weight: a Tor exit
+    with AbuseIPDB 100 and Pulsedive 95 averaged out to 57 "Medium", and a
+    Feodo-listed live C2 next to seven quiet sources scored 14 "Safe".
+    Threat intel does not average — one confirmed blocklist hit is enough.
 
-    Backwards-compatible with the old bare-int list: any int in ``named_scores``
-    is treated as ``(?, score)`` with the default weight, so legacy callers
-    don't crash. Prefer the tuple form in new code.
+    v2::
 
-    Returns 0 when no scores are passed.
+        weighted_i = score_i * SOURCE_WEIGHTS[name_i]         (default 0.5)
+        final      = max(weighted_i)
+                   + CORROBORATION_BONUS if >= 2 sources have weighted_i >= CORROBORATION_THRESHOLD
+        clamped to 0-100, half-up rounding
+
+    Properties: monotone (more evidence never lowers the score), zeros and
+    missing sources are neutral, ground-truth lists (weight ~1.0, score 95-100)
+    land in Critical alone, a single tier-4 source caps at Low, and two
+    independent strong sources push into Critical.
+
+    Accepts ``(source_name, score)`` tuples or bare numbers (legacy callers;
+    default weight). Non-numeric scores are skipped. Empty → 0.
     """
     if not named_scores:
         return 0
-    weighted_sum = 0.0
-    total_weight = 0.0
+    best = 0.0
+    corroborating = 0
     for item in named_scores:
         if isinstance(item, tuple) and len(item) == 2:
             name, score_val = item
@@ -495,11 +514,14 @@ def calculate_final_risk(named_scores):
             score_val = item
             weight = 0.5
         try:
-            score_val = float(score_val)
+            weighted = weight * float(score_val)
         except (TypeError, ValueError):
             continue
-        weighted_sum += weight * score_val
-        total_weight += weight
-    if total_weight == 0:
+        if weighted > best:
+            best = weighted
+        if weighted >= CORROBORATION_THRESHOLD:
+            corroborating += 1
+    if best <= 0:
         return 0
-    return int(weighted_sum / total_weight)
+    final = best + (CORROBORATION_BONUS if corroborating >= 2 else 0)
+    return int(min(100.0, final) + 0.5)

@@ -80,8 +80,9 @@ def test_abuseipdb_score():
     assert score.calculate_abuseipdb_score(None) == 0
 
 
-def test_final_risk_average():
-    assert score.calculate_final_risk([20, 40, 60]) == 40
+def test_final_risk_v2_strongest_signal():
+    # v2: strongest weighted signal (bare ints → default weight 0.5), not a mean.
+    assert score.calculate_final_risk([20, 40, 60]) == 30
     assert score.calculate_final_risk([]) == 0
 
 
@@ -680,13 +681,14 @@ def test_enrich_ioc_concurrency_returns_expected_shape(monkeypatch, tmp_path):
 
         result = _enrich_mod.enrich_ioc("1.2.3.4", "ip")
 
-    assert set(result.keys()) == {"ioc", "type", "modules", "final_score"}
+    assert set(result.keys()) == {"ioc", "type", "modules", "final_score", "score_version"}
     assert result["ioc"] == "1.2.3.4"
     assert result["type"] == "ip"
     assert "VirusTotal" in result["modules"]
-    # 5 malicious / 100 total = 5
+    # 5 malicious / 100 total = 5; composite v2 = 5 * VT weight 0.9 = 4.5 → 5 (half-up)
     assert result["modules"]["VirusTotal"]["score"] == 5
     assert result["final_score"] == 5
+    assert result["score_version"] == 2
 
 
 def test_enrich_ioc_async_can_be_awaited(monkeypatch, tmp_path):
