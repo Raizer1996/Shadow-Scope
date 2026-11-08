@@ -25,6 +25,9 @@ from ..core import (
 from ..core import (
     output as output_mod,
 )
+from ..core import (
+    score as score_mod,
+)
 from ..modules import (
     abuseipdb,  # noqa: F401  (imported for side-effect parity with previous CLI)
     filescan_io,
@@ -90,12 +93,19 @@ def check_config(quiet: bool = False) -> None:
         )
 
 
+# One colour per tier — tiers come from core.score.risk_tier so the CLI
+# never disagrees with --json / the dashboard about what a score means.
+_TIER_COLORS = {
+    "Safe": "green",
+    "Low": "blue",
+    "Medium": "orange1",
+    "High": "red",
+    "Critical": "purple",
+}
+
+
 def get_score_color(score: int) -> str:
-    if score >= 70:
-        return "red"
-    if score >= 40:
-        return "yellow"
-    return "green"
+    return _TIER_COLORS[score_mod.risk_tier(score)]
 
 
 def _format_pdns_details(pdns_data: dict[str, Any]) -> str:
@@ -147,7 +157,7 @@ def print_single_result(result: dict[str, Any], should_defang: bool = False) -> 
     ioc_type = result['type']
     final_score = result['final_score']
     color = get_score_color(final_score)
-    risk_level = "Critical" if final_score >= 70 else "Medium" if final_score >= 40 else "Low"
+    risk_level = score_mod.risk_tier(final_score)
 
     console.print(
         Panel(
@@ -584,35 +594,14 @@ def print_aggregated_table(
             if first and isinstance(age, int):
                 summary_parts.append(f"[dim]pdns={first} ({age}d)[/dim]")
 
-        # Risk Score Coloring
-        # Green: 0 (Safe)
-        # Blue: 1-39 (Low)
-        # Orange: 40-74 (Medium)
-        # Red: 75-99 (High)
-        # Purple: 100 (Critical)
-
-        risk_level = "Safe"
-        risk_color = "green"
-
-        if score == 0:
-            risk_level = "Safe"
-            risk_color = "green"
-        elif score < 40:
-            risk_level = "Low"
-            risk_color = "blue"
-        elif score < 75:
-            risk_level = "Medium"
-            risk_color = "orange1"
-        elif score < 100:
-            risk_level = "High"
-            risk_color = "red"
-        else:
-            risk_level = "Critical"
-            risk_color = "purple"
-
+        # Tier label + colour from the shared table (core.score.risk_tier),
+        # so this column matches `show`, --json/--csv/--stix/--md and the
+        # dashboard. Tor is surfaced as a flag, not by re-tiering: the Tor
+        # source already contributes a weighted 100 to the composite.
+        risk_level = score_mod.risk_tier(score)
+        risk_color = _TIER_COLORS[risk_level]
         if is_tor:
-            risk_level = "Critical"
-            risk_color = "purple"
+            summary_parts.append("[purple]TOR[/purple]")
 
         summary_parts.append(f"Risk:[{risk_color}]{risk_level}[/{risk_color}]")
 
@@ -733,7 +722,11 @@ def handle_enrich(args: argparse.Namespace) -> None:
         if ioc_type == 'unknown':
             msg_console.print(f"[yellow]Skipping unknown IOC type: {ioc}[/yellow]")
             continue
-        typed_iocs.append((ioc, ioc_type))
+        # detect_type refangs for classification only; normalise here so the
+        # value we enrich, cache and print is the live form (1[.]2[.]3[.]4 →
+        # 1.2.3.4). Without this every source was queried for the defanged
+        # literal and the IOC came back "Safe".
+        typed_iocs.append((parser.normalize_value(ioc, ioc_type), ioc_type))
 
     results: list[dict[str, Any]] = []
     if typed_iocs:
@@ -944,13 +937,14 @@ def _dispatch_webhooks(
 
 def handle_show(args: argparse.Namespace) -> None:
     """Pull cached enrichment for an IOC and print the detailed single-IOC view."""
-    ioc_id = database.get_ioc_id(args.ioc)
+    ioc_type = parser.detect_type(args.ioc)
+    ioc_value = parser.normalize_value(args.ioc, ioc_type)  # refang: cache keys are live-form
+    ioc_id = database.get_ioc_id(ioc_value)
     if not ioc_id:
-        console.print(f"[red]IOC {args.ioc} not found in database.[/red]")
+        console.print(f"[red]IOC {ioc_value} not found in database.[/red]")
         return
 
-    ioc_type = parser.detect_type(args.ioc)
-    result = enrich.enrich_ioc(args.ioc, ioc_type)
+    result = enrich.enrich_ioc(ioc_value, ioc_type)
     print_single_result(result, should_defang=getattr(args, 'defang', False))
 
     if getattr(args, 'summary', False):

@@ -447,7 +447,9 @@ def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
         certs = data.get("total")
         subs = data.get("subdomain_count")
         if certs:
-            return f"{certs} certs · {subs or 0} subdomains"
+            via = data.get("provider")
+            tail = f" · {via}" if via and via != "crt.sh" else ""
+            return f"{certs} certs · {subs or 0} subdomains{tail}"
     return "—" if score == 0 else ""
 
 
@@ -626,13 +628,13 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
     {"id": "URLscan",       "env": "URLSCAN_API_KEY",           "types": ["ip", "domain", "url"]},
     {"id": "Pulsedive",     "env": "PULSEDIVE_API_KEY",         "types": ["ip", "domain", "url"], "anonymous_ok": True},
     {"id": "AbstractAPI",   "env": "ABSTRACT_IP_INTELLIGENCE",  "types": ["ip"]},
-    {"id": "URLhaus",       "env": None,                        "types": ["url", "domain", "ip"]},
-    {"id": "ThreatFox",     "env": None,                        "types": ["ip", "domain", "url", "hash"]},
-    {"id": "MalwareBazaar", "env": None,                        "types": ["hash"]},
+    {"id": "URLhaus",       "env": "ABUSECH_AUTH_KEY",                        "types": ["url", "domain", "ip"]},
+    {"id": "ThreatFox",     "env": "ABUSECH_AUTH_KEY",                        "types": ["ip", "domain", "url", "hash"]},
+    {"id": "MalwareBazaar", "env": "ABUSECH_AUTH_KEY",                        "types": ["hash"]},
     {"id": "Feodo",         "env": None,                        "types": ["ip"]},
     {"id": "SSLBL",         "env": None,                        "types": ["hash"]},
     {"id": "WHOIS",         "env": None,                        "types": ["domain"]},
-    {"id": "crt.sh",        "env": None,                        "types": ["domain"]},
+    {"id": "crt.sh",        "env": "CTLOGS_API_KEY",            "types": ["domain"],        "anonymous_ok": True},
     {"id": "Tor",           "env": None,                        "types": ["ip"]},
     {"id": "NVD",           "env": None,                        "types": ["cve"]},
     {"id": "EPSS",          "env": None,                        "types": ["cve"]},
@@ -1353,8 +1355,8 @@ def list_sources() -> dict[str, bool]:
     Returns a flat ``{source_name: key_is_set}`` dict. Never returns the
     key itself — that would leak secrets into HTTP responses.
 
-    Sources that need no API key (URLhaus, ThreatFox, MalwareBazaar, Tor,
-    WHOIS) report ``True`` unconditionally.
+    Tor and WHOIS need no key and report ``True`` unconditionally; the
+    abuse.ch trio reports whether ``ABUSECH_AUTH_KEY`` is set.
     """
     return {
         "virustotal": bool(os.getenv("VT_API_KEY")),
@@ -1368,10 +1370,10 @@ def list_sources() -> dict[str, bool]:
         "hybrid_analysis": bool(os.getenv("HYBRID_ANALYSIS_API_KEY")),
         "joe_sandbox": bool(os.getenv("JOE_SANDBOX_CLOUD_API_KEY")),
         "filescan_io": bool(os.getenv("FILE_SCAN_IO")),
-        # No-key-required sources are always available
-        "urlhaus": True,
-        "threatfox": True,
-        "malwarebazaar": True,
+        # abuse.ch query APIs need one shared Auth-Key (free): https://auth.abuse.ch/
+        "urlhaus": bool(os.getenv("ABUSECH_AUTH_KEY")),
+        "threatfox": bool(os.getenv("ABUSECH_AUTH_KEY")),
+        "malwarebazaar": bool(os.getenv("ABUSECH_AUTH_KEY")),
         "tor": True,
         "whois": True,
     }

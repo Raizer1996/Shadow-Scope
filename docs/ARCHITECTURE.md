@@ -92,10 +92,12 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/modules/nvd.py` | NIST NVD CVE metadata (CVSS v3.1 base score + severity) |
 | `ioc_tool/modules/epss.py` | FIRST.org EPSS exploit-prediction probability + percentile |
 | `ioc_tool/modules/kev.py` | CISA KEV (Known Exploited Vulnerabilities) catalog membership |
+| `ioc_tool/modules/ctlogs.py` | Certificate transparency via api.ctlogs.dev (primary; `CTLOGS_API_KEY` optional). Same output shape as crt.sh; `core.enrich._ct_fetch` falls back to `crtsh.py` on failure. Cache key `crtsh`, display `crt.sh`, `provider` field says which answered. |
 | `ioc_tool/modules/pdns.py` | Passive DNS (Mnemonic free tier) — first-seen / last-seen / IP age (info-only, IP IOCs only) |
 | `ioc_tool/data/ioc.db` | SQLite cache (gitignored) |
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |
 | `ioc_tool/data/cisa_kev.json` | CISA KEV catalog snapshot (gitignored cache, refreshed daily) |
+| `ioc_tool/mcp_server.py` | MCP server (`shadowscope-mcp`, stdio) — in-process tools `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` for agents such as Claude Code. Needs the `mcp` extra. |
 | `ioc_tool/web/__init__.py` | REST API package marker |
 | `ioc_tool/web/api.py` | FastAPI app + routes — thin HTTP layer over `enrich_ioc_async` |
 | `ioc_tool/web/static/index.html` | Dashboard shell (terminal-dark theme, no framework) |

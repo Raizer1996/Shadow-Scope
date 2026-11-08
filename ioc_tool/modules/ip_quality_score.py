@@ -10,7 +10,9 @@ _SOURCE = 'ipqs'
 
 
 def enrich_ip(ip):
-    api_key = os.getenv('IP_QUALITY_SCORE')
+    # Documented name is IPQS_API_KEY (.env.example, docker-compose, API_KEYS.md,
+    # /sources). IP_QUALITY_SCORE is the legacy name the module shipped with.
+    api_key = os.getenv('IPQS_API_KEY') or os.getenv('IP_QUALITY_SCORE')
     if not api_key:
         return None
 

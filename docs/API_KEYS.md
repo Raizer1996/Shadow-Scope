@@ -39,26 +39,38 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 
 ## Free / freemium
 
-### URLhaus (abuse.ch) — *no API key*
+### abuse.ch Auth-Key — `ABUSECH_AUTH_KEY` (one key for URLhaus, ThreatFox, MalwareBazaar)
+- Signup: https://auth.abuse.ch/ (free; GitHub/Google/X login) → profile → **Auth-Key**.
+- Required since abuse.ch's 2024 "Community First" change: every query-API call without the `Auth-Key` header is answered `401 Unauthorized`. ShadowScope skips these three sources entirely when the variable is unset.
+- Feodo Tracker / SSL Blacklist bulk feeds stay keyless.
+
+### URLhaus (abuse.ch) — `ABUSECH_AUTH_KEY`
 - **Signup**: none — public API at https://urlhaus-api.abuse.ch/
 - **Free tier**: free, no rate limit beyond reasonable use (be polite)
 - **Used for**: URL / domain / IP lookups against abuse.ch's community-maintained malicious-URL database (phishing, malware drops, C2 panels). Returns threat type, tags, payload metadata, and a `url_status` (online / offline).
 - **Scope**: URL, domain, IP
 - **Env var**: none required — module short-circuits on network errors and skips gracefully.
 
-### ThreatFox (abuse.ch) — *no API key*
+### ThreatFox (abuse.ch) — `ABUSECH_AUTH_KEY`
 - **Signup**: none — public API at https://threatfox-api.abuse.ch/api/v1/
 - **Free tier**: free, no rate limit beyond reasonable use (be polite)
 - **Used for**: lookups against abuse.ch's fresh community-shared IOC feed (botnet C2, payload delivery, distribution hosts). Returns malware family, threat type, confidence level, and tags.
 - **Scope**: IP, domain, URL, hash
 - **Env var**: none required — module short-circuits on network errors and skips gracefully.
 
-### MalwareBazaar (abuse.ch) — *no API key*
+### MalwareBazaar (abuse.ch) — `ABUSECH_AUTH_KEY`
 - **Signup**: none — public API at https://mb-api.abuse.ch/api/v1/
 - **Free tier**: free, no rate limit beyond reasonable use (be polite)
 - **Used for**: hash → sample metadata against abuse.ch's malware sample repository. Returns malware family (`signature`), file type / size / name, tags, first-seen, delivery method, and vendor intel cross-references.
 - **Scope**: hash (md5 / sha1 / sha256)
 - **Env var**: none required — module short-circuits on network errors and skips gracefully.
+
+### ctlogs.dev certificate transparency — `CTLOGS_API_KEY` *(optional)*
+- Signup: https://account.ctlogs.dev/ (free key, non-commercial)
+- Without a key: 100 requests / UTC hour on the shared anonymous pool, one in flight at a time.
+- Free key: same hourly cap, 10 000 credits / month (one domain = 2 credits: `/v1/hosts` + `/v1/domain`).
+- Window: certificates valid now or expired within 90 days on every non-Pro plan.
+- Primary CT source since v1.1; crt.sh is the automatic fallback (no key, slow, 502s on big zones).
 
 ### Mnemonic Passive DNS — *no API key*
 - **Signup**: none for low-volume queries; commercial tier available at https://www.mnemonic.io/resources/blog/introducing-passivedns/

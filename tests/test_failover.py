@@ -29,6 +29,7 @@ from ioc_tool.modules import (
     abuseipdb,
     censys,
     crtsh,
+        ctlogs,
     epss,
     feodo,
     greynoise,
@@ -80,6 +81,7 @@ def _stub_all_quiet(monkeypatch):
     monkeypatch.setattr(asn_mod, "enrich", lambda v: None)
     monkeypatch.setattr(censys, "host_lookup", lambda v: {"error": "stub"})
     monkeypatch.setattr(crtsh, "enrich_domain", lambda v: None)
+    monkeypatch.setattr(ctlogs, "enrich_domain", lambda v: None)
     monkeypatch.setattr(epss, "enrich_cve", lambda v: None)
     monkeypatch.setattr(feodo, "enrich_ip", lambda v: None)
     monkeypatch.setattr(greynoise, "enrich_ip", lambda v: None)

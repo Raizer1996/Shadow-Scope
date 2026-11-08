@@ -7,6 +7,28 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **MCP server** — `shadowscope-mcp` (`pip install "shadowscope[mcp]"`,
+  `ioc_tool/mcp_server.py`) exposes `enrich_ioc`, `enrich_many`,
+  `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` over
+  stdio for Claude Code and other MCP clients. Runs the orchestrator
+  in-process against the same `.env` + SQLite cache as the CLI; no REST
+  server needed. Register with
+  `claude mcp add --scope user shadowscope -- shadowscope-mcp`.
+
+### Changed
+
+- **Certificate transparency now goes to api.ctlogs.dev first** (new
+  `modules/ctlogs.py`, optional `CTLOGS_API_KEY`), with crt.sh as the
+  automatic fallback. ctlogs answers in ~50 ms and does not 502 on large
+  zones; its free tier only covers certificates valid now or expired
+  within 90 days, so `total` is a 90-day count. Same cache key / display
+  name (`crt.sh`); a `provider` field and the dashboard detail string say
+  which backend answered. `docker-compose.yml` now also forwards
+  `PULSEDIVE_API_KEY`, `CENSYS_API_KEY`, `CTLOGS_API_KEY`.
+- `requirements.txt` pins `fastapi==0.162.2` (was 0.118.0). The `mcp` extra
+  on Python 3.14 needs `starlette>=0.49`, which FastAPI 0.118 rejects; the
+  full suite passes unchanged on 0.162.2.
+
 - **Brutalist React dashboard** at `/ui` — terminal-grade aesthetic
   (orange accent, dense monospace, score-coded ticker, score banner,
   tab nav: Enrich / Batch / Watch / Cases / Diff). React 18 +
@@ -35,6 +57,31 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
   `data/*.json` shipped as package-data, console_scripts entry.
 
 ### Fixed
+
+- **URLhaus, ThreatFox and MalwareBazaar were silently dead.** abuse.ch's
+  query APIs have required an `Auth-Key` header since 2024 and answered
+  every ShadowScope request with `401`, which the soft-fail contract
+  turned into "no data". New `ABUSECH_AUTH_KEY` (one free key from
+  auth.abuse.ch covers all three) is sent on every call; without it the
+  three sources are skipped and `/sources` reports them as not configured
+  instead of always-on.
+- **CLI enriched the defanged string.** `enrich 1[.]2[.]3[.]4` classified
+  the input correctly but queried every source (and keyed the cache) with
+  the literal `1[.]2[.]3[.]4`, so defanged IOCs always came back "Safe".
+  `parser.normalize_value` now refangs ip/domain/url/hash/email; `enrich`
+  and `show` pass the normalised value. The REST API already did this.
+- **IPQS never ran.** The module read `IP_QUALITY_SCORE` while every
+  template/doc/compose file and `/sources` said `IPQS_API_KEY`. Documented
+  name now wins; the legacy name is still honoured.
+- **WHOIS errors corrupted `--json`/`--csv` output** — the module printed
+  `WHOIS error: …` to stdout from a worker thread. Now stderr.
+- **Four different risk-tier scales.** `show` (≥70 Critical / ≥40 Medium /
+  else Low), the `enrich` table (0 Safe / <40 Low / <75 Medium / <100 High /
+  100 Critical, Tor forced Critical), `core/output` and `core/llm`
+  (80/60/40/20) disagreed, so a score of 65 read as Medium, Low and High
+  depending on the surface. One `core.score.risk_tier()` table
+  (80/60/40/20, matching `docs/ARCHITECTURE.md` and the dashboard) now
+  drives all of them; Tor is shown as a flag instead of re-tiering.
 
 - Suppress Python 3.12+ `DeprecationWarning` from the default SQLite
   `datetime` adapter by registering an explicit ISO 8601 adapter at module

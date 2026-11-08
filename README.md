@@ -21,9 +21,9 @@
   - **IPinfo** — Organization and ASN details
   - **Tor Detection** — Identifies active Tor exit nodes
   - **WHOIS** — Domain creation dates and registrar info
-  - **URLhaus** — abuse.ch malicious URL database (no API key)
-  - **ThreatFox (abuse.ch)** — fresh community-shared IOCs (no API key)
-  - **MalwareBazaar (abuse.ch)** — hash → malware family + sample metadata (no API key)
+  - **URLhaus** — abuse.ch malicious URL database (free abuse.ch Auth-Key)
+  - **ThreatFox (abuse.ch)** — fresh community-shared IOCs (free abuse.ch Auth-Key)
+  - **MalwareBazaar (abuse.ch)** — hash → malware family + sample metadata (free abuse.ch Auth-Key)
   - **GreyNoise** — classifies internet background noise vs targeted activity (kills SOC false positives)
   - **AlienVault OTX** — community pulse / threat-actor reports (free key)
   - **URLscan.io** — historical scan search, screenshots + verdicts (free key, optional)
@@ -97,6 +97,15 @@ ShadowScope uses discoverable argparse subcommands. Run with no arguments for th
 interactive menu, or pass a subcommand for a one-shot operation.
 
 > Paste defanged IOCs (`1[.]2[.]3[.]4`, `hxxp://evil[.]com`, `user[at]example[.]com`) — they're auto-refanged on input. Use `--defang` to defang results on output so reports are safe to share.
+
+**MCP server (Claude Code / any MCP client)**
+
+```bash
+pip install "shadowscope[mcp]"
+claude mcp add --scope user shadowscope -- shadowscope-mcp
+```
+
+Exposes `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` over stdio, running the same pipeline and cache as the CLI (no REST server required).
 
 **Interactive mode**
 
