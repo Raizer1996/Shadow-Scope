@@ -60,6 +60,13 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 - **Scope**: hash (md5 / sha1 / sha256)
 - **Env var**: none required — module short-circuits on network errors and skips gracefully.
 
+### ctlogs.dev certificate transparency — `CTLOGS_API_KEY` *(optional)*
+- Signup: https://account.ctlogs.dev/ (free key, non-commercial)
+- Without a key: 100 requests / UTC hour on the shared anonymous pool, one in flight at a time.
+- Free key: same hourly cap, 10 000 credits / month (one domain = 2 credits: `/v1/hosts` + `/v1/domain`).
+- Window: certificates valid now or expired within 90 days on every non-Pro plan.
+- Primary CT source since v1.1; crt.sh is the automatic fallback (no key, slow, 502s on big zones).
+
 ### Mnemonic Passive DNS — *no API key*
 - **Signup**: none for low-volume queries; commercial tier available at https://www.mnemonic.io/resources/blog/introducing-passivedns/
 - **Docs**: https://docs.mnemonic.io/display/public/API/PassiveDNS+Search+API

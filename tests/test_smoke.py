@@ -575,6 +575,7 @@ def _stub_all_network(monkeypatch):
         abuseipdb,
         censys,
         crtsh,
+        ctlogs,
         epss,
         feodo,
         greynoise,
@@ -599,6 +600,7 @@ def _stub_all_network(monkeypatch):
     monkeypatch.setattr(abuseipdb, "enrich_ip", lambda v: None)
     monkeypatch.setattr(censys, "host_lookup", lambda v: {})
     monkeypatch.setattr(crtsh, "enrich_domain", lambda v: None)
+    monkeypatch.setattr(ctlogs, "enrich_domain", lambda v: None)
     monkeypatch.setattr(epss, "enrich_cve", lambda v: None)
     monkeypatch.setattr(feodo, "enrich_ip", lambda v: None)
     monkeypatch.setattr(greynoise, "enrich_ip", lambda v: None)

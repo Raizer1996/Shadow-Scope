@@ -447,7 +447,9 @@ def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
         certs = data.get("total")
         subs = data.get("subdomain_count")
         if certs:
-            return f"{certs} certs · {subs or 0} subdomains"
+            via = data.get("provider")
+            tail = f" · {via}" if via and via != "crt.sh" else ""
+            return f"{certs} certs · {subs or 0} subdomains{tail}"
     return "—" if score == 0 else ""
 
 
@@ -632,7 +634,7 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
     {"id": "Feodo",         "env": None,                        "types": ["ip"]},
     {"id": "SSLBL",         "env": None,                        "types": ["hash"]},
     {"id": "WHOIS",         "env": None,                        "types": ["domain"]},
-    {"id": "crt.sh",        "env": None,                        "types": ["domain"]},
+    {"id": "crt.sh",        "env": "CTLOGS_API_KEY",            "types": ["domain"],        "anonymous_ok": True},
     {"id": "Tor",           "env": None,                        "types": ["ip"]},
     {"id": "NVD",           "env": None,                        "types": ["cve"]},
     {"id": "EPSS",          "env": None,                        "types": ["cve"]},

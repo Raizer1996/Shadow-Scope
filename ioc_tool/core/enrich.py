@@ -43,6 +43,7 @@ from ..modules import (
     abuseipdb,
     censys,
     crtsh,
+    ctlogs,
     epss,
     feodo,
     greynoise,
@@ -352,6 +353,22 @@ def _urlhaus_fetcher(value: str, ioc_type: str) -> Callable[[], dict | None]:
             return urlhaus.enrich_url(value)
         return urlhaus.enrich_host(value)
     return _do
+
+
+def _ct_fetch(value: str) -> dict | None:
+    """Certificate-transparency lookup: ctlogs.dev, then crt.sh.
+
+    ctlogs answers in ~50 ms with a 90-day window; crt.sh is all-time but
+    502s on large zones and is slow. Try the fast one, fall back to the
+    old one, tag the result so the UI can say which backend answered.
+    """
+    data = ctlogs.enrich_domain(value)
+    if data is not None:
+        return data
+    data = crtsh.enrich_domain(value)
+    if data is not None:
+        data.setdefault("provider", "crt.sh")
+    return data
 
 
 def _whois_post_process(data: dict) -> tuple[dict, int]:
@@ -723,11 +740,12 @@ def _build_enrich_tasks(
             score.calculate_sslbl_score,
         ))
 
-    # --- crt.sh certificate transparency — domain only ---
+    # --- Certificate transparency — domain only. ctlogs.dev first, crt.sh
+    #     fallback; same output shape, same cache key / display name. ---
     if ioc_type == 'domain':
         _add('crt.sh', asyncio.to_thread(
             _run_source, ioc_id, 'crtsh', 'crt.sh',
-            lambda: crtsh.enrich_domain(value),
+            lambda: _ct_fetch(value),
             score.calculate_crtsh_score,
         ))
 

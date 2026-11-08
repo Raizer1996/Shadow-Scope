@@ -92,6 +92,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/modules/nvd.py` | NIST NVD CVE metadata (CVSS v3.1 base score + severity) |
 | `ioc_tool/modules/epss.py` | FIRST.org EPSS exploit-prediction probability + percentile |
 | `ioc_tool/modules/kev.py` | CISA KEV (Known Exploited Vulnerabilities) catalog membership |
+| `ioc_tool/modules/ctlogs.py` | Certificate transparency via api.ctlogs.dev (primary; `CTLOGS_API_KEY` optional). Same output shape as crt.sh; `core.enrich._ct_fetch` falls back to `crtsh.py` on failure. Cache key `crtsh`, display `crt.sh`, `provider` field says which answered. |
 | `ioc_tool/modules/pdns.py` | Passive DNS (Mnemonic free tier) — first-seen / last-seen / IP age (info-only, IP IOCs only) |
 | `ioc_tool/data/ioc.db` | SQLite cache (gitignored) |
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |

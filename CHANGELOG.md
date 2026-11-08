@@ -17,6 +17,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Certificate transparency now goes to api.ctlogs.dev first** (new
+  `modules/ctlogs.py`, optional `CTLOGS_API_KEY`), with crt.sh as the
+  automatic fallback. ctlogs answers in ~50 ms and does not 502 on large
+  zones; its free tier only covers certificates valid now or expired
+  within 90 days, so `total` is a 90-day count. Same cache key / display
+  name (`crt.sh`); a `provider` field and the dashboard detail string say
+  which backend answered. `docker-compose.yml` now also forwards
+  `PULSEDIVE_API_KEY`, `CENSYS_API_KEY`, `CTLOGS_API_KEY`.
 - `requirements.txt` pins `fastapi==0.162.2` (was 0.118.0). The `mcp` extra
   on Python 3.14 needs `starlette>=0.49`, which FastAPI 0.118 rejects; the
   full suite passes unchanged on 0.162.2.
