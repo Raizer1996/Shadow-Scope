@@ -136,6 +136,11 @@ def init_db():
         'CREATE INDEX IF NOT EXISTS idx_score_history_ioc '
         'ON score_history(ioc_id, recorded_at)'
     )
+    # Score v2 (Nov 2026): tag every snapshot with the composite formula that
+    # produced it so pre-v2 points are never diffed against v2 ones. NULL on
+    # rows written before the column existed == v1.
+    with contextlib.suppress(sqlite3.OperationalError):
+        cursor.execute('ALTER TABLE score_history ADD COLUMN score_version INTEGER')
 
     # Table: enrichment_fields — denormalised lookup index over the
     # structured fields stored inside `enrichments.data`. Pivot queries
@@ -478,7 +483,7 @@ def list_tags() -> list[dict]:
 _SCORE_HISTORY_DEDUP_WINDOW_S = 60.0
 
 
-def update_last_score(ioc_id: int, score: int) -> None:
+def update_last_score(ioc_id: int, score: int, score_version: int | None = None) -> None:
     """Persist the latest composite score on the iocs row + append a history row.
 
     The history row is a snapshot of ``(ioc_id, score, recorded_at)`` and
@@ -542,9 +547,9 @@ def update_last_score(ioc_id: int, score: int) -> None:
 
     if should_insert:
         cursor.execute(
-            'INSERT INTO score_history (ioc_id, score, recorded_at) '
-            'VALUES (?, ?, ?)',
-            (ioc_id, score_int, now),
+            'INSERT INTO score_history (ioc_id, score, recorded_at, score_version) '
+            'VALUES (?, ?, ?, ?)',
+            (ioc_id, score_int, now, score_version),
         )
     # Resolve the IOC value for the event payload — the SSE consumer
     # works in IOC-string space, not DB-id space.
@@ -578,7 +583,7 @@ def get_score_history(ioc_id: int, *, limit: int = 200) -> list[dict]:
     conn = get_db_connection()
     try:
         rows = conn.execute(
-            'SELECT id, score, recorded_at FROM score_history '
+            'SELECT id, score, recorded_at, score_version FROM score_history '
             'WHERE ioc_id = ? ORDER BY recorded_at ASC, id ASC LIMIT ?',
             (ioc_id, int(limit)),
         ).fetchall()

@@ -883,12 +883,13 @@ def _finalize_enrich(
 
     final_score = score.calculate_final_risk(scores)
     with contextlib.suppress(Exception):
-        database.update_last_score(ioc_id, final_score)
+        database.update_last_score(ioc_id, final_score, score.SCORE_VERSION)
     return {
         'ioc': value,
         'type': ioc_type,
         'modules': results,
         'final_score': final_score,
+        'score_version': score.SCORE_VERSION,
     }
 
 

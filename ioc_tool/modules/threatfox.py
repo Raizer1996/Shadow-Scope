@@ -34,7 +34,7 @@ _SOURCE = "threatfox"
 def enrich(value: str) -> dict | None:
     """Look up any IOC (ip, domain, url, hash) in ThreatFox.
 
-    Returns the first matching entry from ``data[]`` on a hit
+    Returns the highest-confidence *exact* match from ``data[]`` on a hit
     (``query_status == "ok"``), or ``None`` on no-hit / network
     error / non-200 status / malformed payload.
     """
@@ -64,8 +64,39 @@ def enrich(value: str) -> dict | None:
     data = payload.get("data")
     if not data or not isinstance(data, list):
         return None
-
-    first = data[0]
-    if not isinstance(first, dict):
+    # ``search_ioc`` is a *substring* search: "google.com" returns
+    # sites.google.com/... and drive.google.com/... malware URLs. Taking
+    # data[0] turned every popular apex into a ThreatFox "hit" (80). Only an
+    # entry whose IOC *is* the queried value counts; the rest are related
+    # IOCs, reported as a count for pivoting but never scored.
+    exact = [d for d in data if isinstance(d, dict) and _is_exact(d, value)]
+    if not exact:
         return None
-    return first
+    best = max(exact, key=lambda d: _conf(d))
+    related = len(data) - len(exact)
+    if related:
+        best = {**best, "related_hits": related}
+    return best
+
+
+def _conf(entry: dict) -> int:
+    try:
+        return int(entry.get("confidence_level") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_exact(entry: dict, value: str) -> bool:
+    """True when ``entry['ioc']`` denotes exactly ``value`` (not a sub/superstring)."""
+    ioc = str(entry.get("ioc") or "").strip().lower()
+    want = (value or "").strip().lower()
+    if not ioc or not want:
+        return False
+    if ioc == want:
+        return True
+    kind = str(entry.get("ioc_type") or "")
+    if kind == "ip:port":
+        return ioc.rsplit(":", 1)[0] == want
+    if kind == "url":
+        return ioc.rstrip("/") == want.rstrip("/")
+    return False
