@@ -93,10 +93,12 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/modules/nvd.py` | NIST NVD CVE metadata (CVSS v3.1 base score + severity) |
 | `ioc_tool/modules/epss.py` | FIRST.org EPSS exploit-prediction probability + percentile |
 | `ioc_tool/modules/kev.py` | CISA KEV (Known Exploited Vulnerabilities) catalog membership |
+| `ioc_tool/modules/ctlogs.py` | Certificate transparency via api.ctlogs.dev (primary; `CTLOGS_API_KEY` optional). Same output shape as crt.sh; `core.enrich._ct_fetch` falls back to `crtsh.py` on failure. Cache key `crtsh`, display `crt.sh`, `provider` field says which answered. |
 | `ioc_tool/modules/pdns.py` | Passive DNS (Mnemonic free tier) — first-seen / last-seen / IP age (info-only, IP IOCs only) |
 | `ioc_tool/data/ioc.db` | SQLite cache (gitignored) |
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |
 | `ioc_tool/data/cisa_kev.json` | CISA KEV catalog snapshot (gitignored cache, refreshed daily) |
+| `ioc_tool/mcp_server.py` | MCP server (`shadowscope-mcp`, stdio) — in-process tools `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` for agents such as Claude Code. Needs the `mcp` extra. |
 | `ioc_tool/web/__init__.py` | REST API package marker |
 | `scripts/install-windows.ps1` | Per-user Windows installer (venv + launcher + user PATH + `.env`), `-DryRun` / `-Uninstall [-Purge]`; `install-windows.cmd` wraps it for cmd.exe / double-click |
 | `ioc_tool/web/api.py` | FastAPI app + routes — thin HTTP layer over `enrich_ioc_async` |
@@ -119,7 +121,7 @@ The CLI subcommand `shadowscope serve` (handled in `ui/cli.py::handle_serve`) la
 
 ## Risk-scoring algorithm
 
-Per-source raw scores → weighted mean → composite final score (0–100).
+Per-source raw scores → weighted → **strongest signal + corroboration** → composite final score (0–100). (Score **v2**, Nov 2026; `score_version` is returned with every result and stored on `score_history` rows.)
 
 | Source | Formula |
 |--------|---------|
@@ -140,34 +142,21 @@ Per-source raw scores → weighted mean → composite final score (0–100).
 | EPSS       | `max(round(epss * 100), percentile_bucket)` where the bucket is `>=0.99 → 90`, `>=0.95 → 75`, `>=0.90 → 60`, `>=0.70 → 35` |
 | KEV        | `100` if listed in CISA KEV catalog, else `0` |
 
-Final = `int(Σ(weight × score) / Σ weight)` over the contributing sources —
-see `SOURCE_WEIGHTS` in `core/score.py` for the per-source trust tiers.
-Info-only sources (Shodan, IPinfo, Censys, rDNS, PDNS, ASN) are excluded.
+Composite (`core/score.py::calculate_final_risk`, score v2):
+
+```
+weighted_i = score_i × SOURCE_WEIGHTS[source_i]      (default 0.5; KEV/Feodo/SSLBL 1.0 … AbstractAPI 0.4)
+final      = max(weighted_i) + 10 if ≥ 2 sources have weighted_i ≥ 50 else 0
+             clamped to 0–100, half-up rounding
+```
+
+Why not a mean: v1 averaged every source that returned anything, so "looked, found nothing" was a 0 vote at full weight — a Tor exit with AbuseIPDB 100 + Pulsedive 95 came out 57 "Medium" and a Feodo-listed C2 next to seven quiet sources scored 14 "Safe". Threat intel is evidentiary: one confirmed blocklist hit is enough, and independent agreement should push higher, never lower. v2 is monotone (more evidence never lowers the score), zeros/missing sources are neutral, a lone tier-4 source cannot exceed Medium, and two independent strong sources reach Critical. Info-only sources (Shodan, IPinfo, Censys, rDNS, PDNS, ASN) are excluded before this step. `final_score` values written before v2 are not comparable with v2 values — compare `score_version` when diffing history.
 
 **Local heuristics** (domain IOCs) are bundled into a single `Heuristics`
 entry whose score is the **strongest** sub-signal (NRD / DGA / typosquat /
 suspicious TLD / IDN homograph), not their mean — the checks are independent
 detectors, so a sub-check with nothing to report must not cancel out a real
 detection.
-
-### Known limitation — composite dilution
-
-The weighted mean treats a source that looked and found nothing as a vote of
-`0` at full weight, so each additional source pulls malicious verdicts down.
-Curated blocklists (KEV, Feodo, SSLBL, URLhaus, MalwareBazaar, ThreatFox)
-correctly abstain by returning `None` on a miss, but the reputation sources
-(VirusTotal, AbuseIPDB, IPQS, AbstractAPI, OTX, URLscan, Pulsedive, crt.sh)
-return a payload on a clean read and therefore vote. A single blocklist
-confirmation cannot outvote several quiet sources, and the `Critical` tier is
-effectively unreachable (ceiling 94 for IPs, 88 for domains, and only with
-every source simultaneously maxed).
-
-Replacing the mean with a role-based combiner — curated hits set a score
-*floor*, reputation sources combine via noisy-OR, context flags (Tor, VPN,
-domain age, cert volume) become a bounded modifier, and GreyNoise RIOT /
-allowlist act as suppressors — is tracked in `ROADMAP.md`. It changes the
-meaning of `final_score`, so it needs a decision on versioning the stored
-value first.
 
 Tiers:
 

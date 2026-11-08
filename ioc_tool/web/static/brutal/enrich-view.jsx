@@ -27,14 +27,6 @@ function useCounter(target, dur = 700) {
   return val;
 }
 
-// Crab event bus — UI components fire `cc:state` events with a state
-// label; ClaudeCrab listens and overrides its random cycle for ~3s
-// before falling back to the cycle. This wires the mascot to real
-// activity instead of a dumb timer.
-const fireCrabState = (label) => {
-  try { window.dispatchEvent(new CustomEvent("cc:state", { detail: label })); } catch {}
-};
-
 // Skeleton card shown between enrich-button press and the final event.
 // While the stream is active, lists each source as it lands so the user
 // sees concrete progress instead of an opaque spinner. Replaces the stale
@@ -130,18 +122,6 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
 
   // Animated score — counts up from previous IOC's score on each switch
   const animatedScore = useCounter(adjustedScore, 700);
-
-  // Wire crab to real activity:
-  //   IOC switch    → 'debugger' (eyes scan)
-  //   disable src   → 'confused' (rocks)
-  //   re-enable all → 'happy' / 'building'
-  React.useEffect(() => { fireCrabState("debugger"); }, [ioc.id]);
-  const prevDisabled = React.useRef(disabledSources.size);
-  React.useEffect(() => {
-    if (disabledSources.size > prevDisabled.current) fireCrabState("confused");
-    else if (disabledSources.size === 0 && prevDisabled.current > 0) fireCrabState("building");
-    prevDisabled.current = disabledSources.size;
-  }, [disabledSources]);
 
   const toggleSource = (name) => {
     const next = new Set(disabledSources);
@@ -317,174 +297,6 @@ const _SPIDER_RELEVANT_BY_TYPE = {
   email:  new Set(["OTX"]),
 };
 
-
-// Pixel mascot — Claude Crab in the clawd-tank style.
-// Locked to the upper-right of the .spider panel. Square head, 4
-// peg legs, side claw stubs. Cycles through clawd-tank states each
-// with its own prop + body animation: idle, debugger, typing,
-// building, sweeping, wizard, beacon, sleeping, confused, juggling.
-// A horizontal sway (cc-sway) gives the impression of motion without
-// the crab actually leaving its parking spot.
-const CRAB_STATES = [
-  { label: "thinking", glyph: "?",  desc: "reasoning"             },
-  { label: "debugger", glyph: "/",  desc: "Read · Grep · Glob"    },
-  { label: "typing",   glyph: "✎",  desc: "Edit · Write",   prop: "laptop"   },
-  { label: "building", glyph: "$",  desc: "Bash",            prop: "hammer"   },
-  { label: "sweeping", glyph: "≋",  desc: "PreCompact",      prop: "broom"    },
-  { label: "wizard",   glyph: "✦",  desc: "WebSearch · WebFetch" },
-  { label: "beacon",   glyph: "⌁",  desc: "MCP · LSP"            },
-  { label: "juggling", glyph: "◌",  desc: "subagents",       prop: "balls"    },
-  { label: "confused", glyph: "!?", desc: "no input · 60s"       },
-  { label: "sleeping", glyph: "z",  desc: "no sessions"          },
-];
-
-// Props that sit beside the crab — rendered as small inline SVGs at
-// fixed positions relative to the host. Each lives in its own slot
-// so it can animate independently of the body.
-function CrabProp({ kind }) {
-  // Inline-style fills below — Dark Reader can't easily override
-  // styles set as React `style={{ fill: ... }}` once a darkreader-lock
-  // meta tag is present, so the dark visuals stay intact.
-  const fillInk = { fill: "#1a1a1a" };
-  const fillAccent = { fill: "var(--accent)" };
-  switch (kind) {
-    case "hammer":
-      // Hammer being swung in the right claw. Handle is 1 pixel wide.
-      return (
-        <span className="cc-prop cc-prop-hammer">
-          <svg viewBox="0 0 7 9" width="70" height="90" shapeRendering="crispEdges">
-            <rect x="2" y="3" width="1" height="6" style={fillInk} />
-            <rect x="1" y="1" width="3" height="2" style={{ fill: "#9aa3ad" }} />
-            <rect x="0" y="0" width="5" height="3" style={{ fill: "#b8c1cc" }} />
-            <rect x="0" y="0" width="5" height="1" style={{ fill: "#dde3eb" }} />
-          </svg>
-        </span>
-      );
-    case "broom":
-      // Yellow broom being pushed along the ground.
-      return (
-        <span className="cc-prop cc-prop-broom">
-          <svg viewBox="0 0 5 9" width="50" height="90" shapeRendering="crispEdges">
-            <rect x="2" y="0" width="1" height="6" style={{ fill: "#8c5a2a" }} />
-            <rect x="0" y="6" width="5" height="2" style={{ fill: "#f4c447" }} />
-            <rect x="0" y="8" width="1" height="1" style={{ fill: "#c8970f" }} />
-            <rect x="2" y="8" width="1" height="1" style={{ fill: "#c8970f" }} />
-            <rect x="4" y="8" width="1" height="1" style={{ fill: "#c8970f" }} />
-          </svg>
-        </span>
-      );
-    case "laptop":
-      // Tiny pixel laptop with a glowing blue screen.
-      return (
-        <span className="cc-prop cc-prop-laptop">
-          <svg viewBox="0 0 12 7" width="120" height="70" shapeRendering="crispEdges">
-            <rect x="1" y="0" width="10" height="5" style={{ fill: "#3a4554" }} />
-            <rect x="2" y="1" width="8"  height="3" style={{ fill: "#5a7ea8" }} />
-            <rect x="5" y="2" width="2"  height="1" style={{ fill: "#dde9f5" }} />
-            <rect x="0" y="5" width="12" height="1" style={{ fill: "#2a3340" }} />
-            <rect x="0" y="6" width="12" height="1" style={{ fill: "#1a2028" }} />
-          </svg>
-        </span>
-      );
-    case "balls":
-      // Three small juggling balls floating above the crab.
-      return (
-        <span className="cc-prop cc-prop-balls">
-          <svg viewBox="0 0 16 10" width="160" height="100" shapeRendering="crispEdges">
-            <rect className="cc-ball cc-ball-a" x="2"  y="0" width="2" height="2" style={fillAccent} />
-            <rect className="cc-ball cc-ball-b" x="7"  y="2" width="2" height="2" style={fillAccent} />
-            <rect className="cc-ball cc-ball-c" x="12" y="0" width="2" height="2" style={fillAccent} />
-          </svg>
-        </span>
-      );
-    default:
-      return null;
-  }
-}
-
-function ClaudeCrab() {
-  const [stateIdx, setStateIdx] = React.useState(0);
-  // Override label — set briefly by external events ("debugger" when
-  // user switches IOCs, "confused" when sources change, etc).
-  // null = follow the random cycle; otherwise stick on this label.
-  const [override, setOverride] = React.useState(null);
-
-  React.useEffect(() => {
-    const t = setInterval(() => setStateIdx(i => (i + 1) % CRAB_STATES.length), 5400);
-    return () => clearInterval(t);
-  }, []);
-
-  React.useEffect(() => {
-    let clearTimer;
-    const onState = (e) => {
-      setOverride(e.detail);
-      clearTimeout(clearTimer);
-      clearTimer = setTimeout(() => setOverride(null), 2800);
-    };
-    window.addEventListener("cc:state", onState);
-    return () => {
-      window.removeEventListener("cc:state", onState);
-      clearTimeout(clearTimer);
-    };
-  }, []);
-
-  const state = override
-    ? (CRAB_STATES.find(s => s.label === override) || CRAB_STATES[stateIdx])
-    : CRAB_STATES[stateIdx];
-
-  return (
-    <span
-      className={`claude-crab-host cc-state-${state.label}`}
-      aria-hidden="true"
-      title={`clawd · ${state.label} (${state.desc})`}
-    >
-      <span className="cc-shadow" />
-      {state.prop && <CrabProp kind={state.prop} />}
-      {!state.prop && (
-        <span className={`cc-thought cc-thought-${state.label}`}>
-          <svg viewBox="0 0 12 11" width="44" height="40" shapeRendering="crispEdges">
-            {/* Cloud body — chunky pixel bubble; inline-style fills survive Dark Reader */}
-            <rect x="2" y="0" width="8"  height="1" style={{ fill: "#e8e8e8" }} />
-            <rect x="1" y="1" width="10" height="5" style={{ fill: "#e8e8e8" }} />
-            <rect x="2" y="6" width="8"  height="1" style={{ fill: "#e8e8e8" }} />
-            <rect x="3" y="8" width="2"  height="1" style={{ fill: "#e8e8e8" }} />
-            <rect x="5" y="10" width="1" height="1" style={{ fill: "#e8e8e8" }} />
-            <text
-              x="6" y="5"
-              textAnchor="middle"
-              fontFamily="JetBrains Mono"
-              fontSize={state.glyph.length > 1 ? 4.2 : 5.2}
-              fontWeight="800"
-              style={{ fill: "#0a0a0a" }}
-            >{state.glyph}</text>
-          </svg>
-        </span>
-      )}
-      <span className="cc-sprite">
-        <svg viewBox="0 0 14 12" width="140" height="120" shapeRendering="crispEdges">
-          {/* Square head — rows 0..4 */}
-          <rect x="2" y="0" width="10" height="5" style={{ fill: "var(--accent)" }} />
-          {/* Side claw stubs — rows 3..4 */}
-          <rect x="0"  y="3" width="2" height="2" style={{ fill: "var(--accent)" }} />
-          <rect x="12" y="3" width="2" height="2" style={{ fill: "var(--accent)" }} />
-          {/* Eyes — two black squares (inline style survives Dark Reader) */}
-          <rect className="cc-eye cc-eye-l" x="4" y="2" width="1" height="1" style={{ fill: "#0a0a0a" }} />
-          <rect className="cc-eye cc-eye-r" x="9" y="2" width="1" height="1" style={{ fill: "#0a0a0a" }} />
-          {/* Sleep-mouth — drawn only when sleeping; small M curve */}
-          <rect className="cc-zz cc-zz-1" x="5" y="3" width="1" height="1" style={{ fill: "#0a0a0a" }} />
-          <rect className="cc-zz cc-zz-2" x="8" y="3" width="1" height="1" style={{ fill: "#0a0a0a" }} />
-          {/* Body middle — rows 5..7 */}
-          <rect x="2" y="5" width="10" height="3" style={{ fill: "var(--accent)" }} />
-          {/* Four peg legs — 2 on each side of center */}
-          <rect className="cc-leg cc-leg-1" x="3"  y="8" width="1" height="4" style={{ fill: "var(--accent)" }} />
-          <rect className="cc-leg cc-leg-2" x="5"  y="8" width="1" height="4" style={{ fill: "var(--accent)" }} />
-          <rect className="cc-leg cc-leg-3" x="8"  y="8" width="1" height="4" style={{ fill: "var(--accent)" }} />
-          <rect className="cc-leg cc-leg-4" x="10" y="8" width="1" height="4" style={{ fill: "var(--accent)" }} />
-        </svg>
-      </span>
-    </span>
-  );
-}
 
 // Decorative type-glyph that sits at the spider chart center.
 // Stylised so each IOC family has a distinct visual signature.
@@ -779,8 +591,6 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
         <span><span className="swatch-line" style={{background: "#fb923c"}}/> threshold 60</span>
         <span><span className="swatch-line" style={{background: "#f43f5e"}}/> threshold 80</span>
       </div>
-      {/* Pixel-art Claude Crab — lives in the panel, roams outside the web */}
-      <ClaudeCrab />
     </div>
   );
 }

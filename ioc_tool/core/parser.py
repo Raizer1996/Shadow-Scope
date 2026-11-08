@@ -11,7 +11,10 @@ def normalize_value(value, ioc_type):
       ``CVE-2024-1234`` share a cache key.
     - ASN: stripped to ``ASxxxxx`` (uppercase, no spaces). Accepts
       ``AS15169``, ``as15169``, ``asn15169``, or bare ``15169``.
-    - Everything else: unchanged (refanging happens in detect_type).
+    - Everything else: refanged + stripped so a defanged input
+      (``1[.]2[.]3[.]4``, ``hxxp://evil[.]com``) is queried and cached in
+      its live form. ``detect_type`` refangs for classification only and
+      returns just the type, so callers that forward the raw string land here.
     """
     if value is None:
         return value
@@ -20,7 +23,7 @@ def normalize_value(value, ioc_type):
     if ioc_type == 'asn':
         digits = re.sub(r'(?i)^as(n)?', '', value.strip())
         return f"AS{digits.lstrip('0') or '0'}"
-    return value
+    return refang(value.strip())
 
 
 def detect_type(value):

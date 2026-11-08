@@ -447,7 +447,9 @@ def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
         certs = data.get("total")
         subs = data.get("subdomain_count")
         if certs:
-            return f"{certs} certs · {subs or 0} subdomains"
+            via = data.get("provider")
+            tail = f" · {via}" if via and via != "crt.sh" else ""
+            return f"{certs} certs · {subs or 0} subdomains{tail}"
     return "—" if score == 0 else ""
 
 
@@ -589,7 +591,7 @@ _CACHED_SOURCES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[int]]:
+def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[tuple[str, int]]]:
     """Reconstruct a ``modules`` dict + per-source scores from SQLite rows.
 
     Shared by ``/show`` and ``/api/ui/recent``. Returns the same shape the
@@ -599,7 +601,7 @@ def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[int]]:
     """
     import json as _json
     modules: dict[str, dict[str, Any]] = {}
-    scores: list[int] = []
+    scores: list[tuple[str, int]] = []
     for source_key, display_name in _CACHED_SOURCES:
         row = database.get_latest_enrichment(ioc_id, source_key)
         if row is None:
@@ -609,7 +611,7 @@ def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[int]]:
         except (TypeError, ValueError):
             data = {}
         modules[display_name] = {"score": row["score"], "data": data}
-        scores.append(row["score"] or 0)
+        scores.append((display_name, row["score"] or 0))  # named → real weight, not the 0.5 default
     return modules, scores
 
 
@@ -626,13 +628,13 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
     {"id": "URLscan",       "env": "URLSCAN_API_KEY",           "types": ["ip", "domain", "url"]},
     {"id": "Pulsedive",     "env": "PULSEDIVE_API_KEY",         "types": ["ip", "domain", "url"], "anonymous_ok": True},
     {"id": "AbstractAPI",   "env": "ABSTRACT_IP_INTELLIGENCE",  "types": ["ip"]},
-    {"id": "URLhaus",       "env": None,                        "types": ["url", "domain", "ip"]},
-    {"id": "ThreatFox",     "env": None,                        "types": ["ip", "domain", "url", "hash"]},
-    {"id": "MalwareBazaar", "env": None,                        "types": ["hash"]},
+    {"id": "URLhaus",       "env": "ABUSECH_AUTH_KEY",                        "types": ["url", "domain", "ip"]},
+    {"id": "ThreatFox",     "env": "ABUSECH_AUTH_KEY",                        "types": ["ip", "domain", "url", "hash"]},
+    {"id": "MalwareBazaar", "env": "ABUSECH_AUTH_KEY",                        "types": ["hash"]},
     {"id": "Feodo",         "env": None,                        "types": ["ip"]},
     {"id": "SSLBL",         "env": None,                        "types": ["hash"]},
     {"id": "WHOIS",         "env": None,                        "types": ["domain"]},
-    {"id": "crt.sh",        "env": None,                        "types": ["domain"]},
+    {"id": "crt.sh",        "env": "CTLOGS_API_KEY",            "types": ["domain"],        "anonymous_ok": True},
     {"id": "Tor",           "env": None,                        "types": ["ip"]},
     {"id": "NVD",           "env": None,                        "types": ["cve"]},
     {"id": "EPSS",          "env": None,                        "types": ["cve"]},
@@ -1050,6 +1052,7 @@ def ui_score_history(
             iso = iso.split(".", 1)[0]
         points.append({
             "score": int(row["score"]),
+            "score_version": row.get("score_version"),  # None == pre-v2 (v1 mean)
             "recorded_at": (iso + "Z") if iso else None,
         })
     return {"ioc": refanged, "count": len(points), "points": points}
@@ -1353,8 +1356,8 @@ def list_sources() -> dict[str, bool]:
     Returns a flat ``{source_name: key_is_set}`` dict. Never returns the
     key itself — that would leak secrets into HTTP responses.
 
-    Sources that need no API key (URLhaus, ThreatFox, MalwareBazaar, Tor,
-    WHOIS) report ``True`` unconditionally.
+    Tor and WHOIS need no key and report ``True`` unconditionally; the
+    abuse.ch trio reports whether ``ABUSECH_AUTH_KEY`` is set.
     """
     return {
         "virustotal": bool(os.getenv("VT_API_KEY")),
@@ -1368,10 +1371,10 @@ def list_sources() -> dict[str, bool]:
         "hybrid_analysis": bool(os.getenv("HYBRID_ANALYSIS_API_KEY")),
         "joe_sandbox": bool(os.getenv("JOE_SANDBOX_CLOUD_API_KEY")),
         "filescan_io": bool(os.getenv("FILE_SCAN_IO")),
-        # No-key-required sources are always available
-        "urlhaus": True,
-        "threatfox": True,
-        "malwarebazaar": True,
+        # abuse.ch query APIs need one shared Auth-Key (free): https://auth.abuse.ch/
+        "urlhaus": bool(os.getenv("ABUSECH_AUTH_KEY")),
+        "threatfox": bool(os.getenv("ABUSECH_AUTH_KEY")),
+        "malwarebazaar": bool(os.getenv("ABUSECH_AUTH_KEY")),
         "tor": True,
         "whois": True,
     }

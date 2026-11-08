@@ -28,6 +28,7 @@ def _stub_all_network(monkeypatch):
         abstract_api,
         abuseipdb,
         crtsh,
+        ctlogs,
         feodo,
         greynoise,
         ip_quality_score,
@@ -46,6 +47,7 @@ def _stub_all_network(monkeypatch):
     monkeypatch.setattr(abstract_api, "enrich_ip", lambda v: None)
     monkeypatch.setattr(abuseipdb, "enrich_ip", lambda v: None)
     monkeypatch.setattr(crtsh, "enrich_domain", lambda v: None)
+    monkeypatch.setattr(ctlogs, "enrich_domain", lambda v: None)
     monkeypatch.setattr(feodo, "enrich_ip", lambda v: None)
     monkeypatch.setattr(greynoise, "enrich_ip", lambda v: None)
     monkeypatch.setattr(ipinfo_mod, "enrich_ip", lambda v: None)

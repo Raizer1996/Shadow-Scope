@@ -81,8 +81,9 @@ def test_abuseipdb_score():
     assert score.calculate_abuseipdb_score(None) == 0
 
 
-def test_final_risk_average():
-    assert score.calculate_final_risk([20, 40, 60]) == 40
+def test_final_risk_v2_strongest_signal():
+    # v2: strongest weighted signal (bare ints → default weight 0.5), not a mean.
+    assert score.calculate_final_risk([20, 40, 60]) == 30
     assert score.calculate_final_risk([]) == 0
 
 
@@ -576,6 +577,7 @@ def _stub_all_network(monkeypatch):
         abuseipdb,
         censys,
         crtsh,
+        ctlogs,
         epss,
         feodo,
         greynoise,
@@ -600,6 +602,7 @@ def _stub_all_network(monkeypatch):
     monkeypatch.setattr(abuseipdb, "enrich_ip", lambda v: None)
     monkeypatch.setattr(censys, "host_lookup", lambda v: {})
     monkeypatch.setattr(crtsh, "enrich_domain", lambda v: None)
+    monkeypatch.setattr(ctlogs, "enrich_domain", lambda v: None)
     monkeypatch.setattr(epss, "enrich_cve", lambda v: None)
     monkeypatch.setattr(feodo, "enrich_ip", lambda v: None)
     monkeypatch.setattr(greynoise, "enrich_ip", lambda v: None)
@@ -679,14 +682,15 @@ def test_enrich_ioc_concurrency_returns_expected_shape(monkeypatch, tmp_path):
 
         result = _enrich_mod.enrich_ioc("1.2.3.4", "ip")
 
-    assert set(result.keys()) == {"ioc", "type", "modules", "final_score"}
+    assert set(result.keys()) == {"ioc", "type", "modules", "final_score", "score_version"}
     assert result["ioc"] == "1.2.3.4"
     assert result["type"] == "ip"
     assert "VirusTotal" in result["modules"]
-    # 5 detections -> 65 (count-based bucket, not share of engines)
+    # 5 detections -> 65 (count-based bucket, not share of engines); every other
+    # source is stubbed, so composite v2 = 65 * VT weight 0.9 = 58.5 -> 59 (half-up)
     assert result["modules"]["VirusTotal"]["score"] == 65
-    # Every other source is stubbed out, so VT is the sole contributor.
-    assert result["final_score"] == 65
+    assert result["final_score"] == 59
+    assert result["score_version"] == 2
 
 
 def test_enrich_ioc_async_can_be_awaited(monkeypatch, tmp_path):

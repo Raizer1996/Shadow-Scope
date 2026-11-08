@@ -759,7 +759,8 @@ class TestThreatFox:
                 "data": [
                     {
                         "id": "98765",
-                        "ioc": "abc123def456",
+                        # ThreatFox echoes the queried IOC; the module now requires an exact match
+                        "ioc": "d3486ae9136e7856bc42212385ea797094475802bcc9b2a8b6f23f5a1f5f4b6c",
                         "ioc_type": "sha256_hash",
                         "threat_type": "payload",
                         "malware": "TrickBot",

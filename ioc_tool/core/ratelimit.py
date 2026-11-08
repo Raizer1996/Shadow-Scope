@@ -143,7 +143,8 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     "epss":         (30, 60),      # FIRST.org — generous
     "asn":          (10, 60),      # RIPE Stat — generous, polite cap
     "ipinfo":       (20, 60),      # free tier ~50k / month
-    "crtsh":        (4, 60),       # public CT search, can be slow
+    "crtsh":        (4, 60),       # public CT search, can be slow (fallback)
+    "ctlogs":       (90, 3600),    # api.ctlogs.dev: 100/h anonymous or free key
     "nvd":          (5, 30),       # NVD: 5 / 30 s unauthenticated
     "pdns":         (5, 60),       # Mnemonic free tier — be polite
     # Sandbox / submission APIs — caps per their published free tiers.

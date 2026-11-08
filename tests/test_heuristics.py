@@ -1,6 +1,6 @@
 """Unit tests for the local heuristics module."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ioc_tool.core import heuristics
 
@@ -15,9 +15,11 @@ def test_nrd_none_when_no_creation_date():
     assert heuristics.nrd_check("not-a-date") is None
 
 
+# NRD treats naive creation dates as UTC (WHOIS convention); fixtures must be
+# aware-UTC or the test is off by one day on any non-UTC machine.
 def test_nrd_fresh_bucket():
     """< 7 days → fresh, score 95."""
-    fresh = datetime.now() - timedelta(days=3)
+    fresh = datetime.now(timezone.utc) - timedelta(days=3)
     result = heuristics.nrd_check(fresh)
     assert result is not None
     assert result["score"] == 95
@@ -27,7 +29,7 @@ def test_nrd_fresh_bucket():
 
 def test_nrd_classic_bucket():
     """7 ≤ age < 30 → nrd, score 75."""
-    nrd_age = datetime.now() - timedelta(days=15)
+    nrd_age = datetime.now(timezone.utc) - timedelta(days=15)
     result = heuristics.nrd_check(nrd_age)
     assert result["score"] == 75
     assert result["bucket"] == "nrd"
@@ -35,7 +37,7 @@ def test_nrd_classic_bucket():
 
 def test_nrd_recent_bucket():
     """30 ≤ age < 90 → recent, score 40."""
-    recent = datetime.now() - timedelta(days=60)
+    recent = datetime.now(timezone.utc) - timedelta(days=60)
     result = heuristics.nrd_check(recent)
     assert result["score"] == 40
     assert result["bucket"] == "recent"
@@ -43,14 +45,14 @@ def test_nrd_recent_bucket():
 
 def test_nrd_mature_bucket():
     """≥ 90 days → mature, score 0."""
-    mature = datetime.now() - timedelta(days=365)
+    mature = datetime.now(timezone.utc) - timedelta(days=365)
     result = heuristics.nrd_check(mature)
     assert result["score"] == 0
     assert result["bucket"] == "mature"
 
 
 def test_nrd_accepts_iso_string():
-    iso = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S")
+    iso = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S")
     result = heuristics.nrd_check(iso)
     assert result is not None
     assert result["bucket"] == "fresh"
@@ -58,14 +60,14 @@ def test_nrd_accepts_iso_string():
 
 def test_nrd_accepts_list_of_dates():
     """Some registrars return [date1, date2] — we use the first."""
-    first = datetime.now() - timedelta(days=2)
-    second = datetime.now() - timedelta(days=200)
+    first = datetime.now(timezone.utc) - timedelta(days=2)
+    second = datetime.now(timezone.utc) - timedelta(days=200)
     result = heuristics.nrd_check([first, second])
     assert result["bucket"] == "fresh"
 
 
 def test_nrd_future_date_returns_none():
-    future = datetime.now() + timedelta(days=10)
+    future = datetime.now(timezone.utc) + timedelta(days=10)
     assert heuristics.nrd_check(future) is None
 
 

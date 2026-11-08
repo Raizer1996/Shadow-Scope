@@ -26,6 +26,8 @@ from typing import Any
 
 import requests
 
+from . import score as _score_mod
+
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "llama3.2"
 DEFAULT_TIMEOUT = 30
@@ -34,30 +36,13 @@ DEFAULT_TEMPERATURE = 0.2
 
 
 # ---------------------------------------------------------------------------
-# Risk tier helper — keep in sync with ioc_tool.core.output._risk_tier
+# Risk tier helper — delegates to core.score.risk_tier (single source of truth)
 # ---------------------------------------------------------------------------
 
 
 def _tier_for_score(score: Any) -> str:
-    """Map a 0-100 final score to a tier label.
-
-    Mirrors the table in ``docs/ARCHITECTURE.md`` (Safe / Low / Medium /
-    High / Critical). Safe-by-default on weird inputs so the prompt never
-    looks malformed.
-    """
-    try:
-        s = int(score)
-    except (TypeError, ValueError):
-        return "Safe"
-    if s >= 80:
-        return "Critical"
-    if s >= 60:
-        return "High"
-    if s >= 40:
-        return "Medium"
-    if s >= 20:
-        return "Low"
-    return "Safe"
+    """Tier label for the prompt; see :func:`ioc_tool.core.score.risk_tier`."""
+    return _score_mod.risk_tier(score)
 
 
 # ---------------------------------------------------------------------------

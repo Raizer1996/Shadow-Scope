@@ -18,6 +18,19 @@ import pytest
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _dummy_abusech_key():
+    """abuse.ch modules skip the request without ABUSECH_AUTH_KEY; the suite
+    mocks the transport, so any value lets the existing tests run."""
+    prev = os.environ.get("ABUSECH_AUTH_KEY")
+    os.environ.setdefault("ABUSECH_AUTH_KEY", "test-auth-key")
+    yield
+    if prev is None:
+        os.environ.pop("ABUSECH_AUTH_KEY", None)
+    else:
+        os.environ["ABUSECH_AUTH_KEY"] = prev
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _disable_rate_limits():
     """Flag every known source as rate-limit-disabled for the test run."""
     keys = (
