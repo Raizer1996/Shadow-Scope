@@ -55,3 +55,46 @@ def test_401_soft_fails(monkeypatch):
     assert threatfox.enrich("evil.test") is None
     assert malwarebazaar.enrich_hash("a" * 64) is None
     assert urlhaus.enrich_host("evil.test") is None
+
+
+# --- ThreatFox exact-match filtering (search_ioc is a substring search) ----
+
+_TF_SUBSTRING_NOISE = {
+    "query_status": "ok",
+    "data": [
+        {"ioc": "rate-limited-proxy-66-249-87-132.google.com", "ioc_type": "domain", "confidence_level": 50, "malware_printable": "php.shin_webshell"},
+        {"ioc": "https://sites.google.com/view/github-launcher", "ioc_type": "url", "confidence_level": 75, "malware_printable": "WARDENStealer"},
+        {"ioc": "https://drive.google.com/uc?export=download&id=1", "ioc_type": "url", "confidence_level": 100, "malware_printable": "IClickFix"},
+    ],
+}
+
+
+def test_threatfox_ignores_substring_matches(monkeypatch):
+    monkeypatch.setenv("ABUSECH_AUTH_KEY", "k")
+    _capture(monkeypatch, _Resp(_TF_SUBSTRING_NOISE))
+    assert threatfox.enrich("google.com") is None
+
+
+def test_threatfox_exact_match_wins_and_counts_related(monkeypatch):
+    monkeypatch.setenv("ABUSECH_AUTH_KEY", "k")
+    payload = {"query_status": "ok", "data": _TF_SUBSTRING_NOISE["data"] + [
+        {"ioc": "evil.example", "ioc_type": "domain", "confidence_level": 60, "malware_printable": "Vidar"},
+        {"ioc": "EVIL.example", "ioc_type": "domain", "confidence_level": 90, "malware_printable": "Vidar"},
+    ]}
+    _capture(monkeypatch, _Resp(payload))
+    out = threatfox.enrich("evil.example")
+    assert out is not None and out["confidence_level"] == 90   # highest-confidence exact
+    assert out["related_hits"] == 3
+
+
+def test_threatfox_ip_port_and_url_forms_count_as_exact(monkeypatch):
+    monkeypatch.setenv("ABUSECH_AUTH_KEY", "k")
+    _capture(monkeypatch, _Resp({"query_status": "ok", "data": [
+        {"ioc": "203.0.113.9:4444", "ioc_type": "ip:port", "confidence_level": 100},
+    ]}))
+    assert threatfox.enrich("203.0.113.9") is not None
+    _capture(monkeypatch, _Resp({"query_status": "ok", "data": [
+        {"ioc": "http://evil.example/p/", "ioc_type": "url", "confidence_level": 100},
+    ]}))
+    assert threatfox.enrich("http://evil.example/p") is not None
+    assert threatfox.enrich("http://evil.example/other") is None

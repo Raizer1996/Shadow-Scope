@@ -68,6 +68,12 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **ThreatFox scored substring matches as hits.** `search_ioc` is a substring
+  search; the module took `data[0]`, so `google.com` inherited a confidence-75
+  `sites.google.com/...` malware URL and scored 80. Only an entry whose IOC
+  equals the query (ip:port → host, URL modulo trailing slash) counts now;
+  the highest-confidence exact match is returned with a `related_hits`
+  count for pivoting.
 - **URLhaus, ThreatFox and MalwareBazaar were silently dead.** abuse.ch's
   query APIs have required an `Auth-Key` header since 2024 and answered
   every ShadowScope request with `401`, which the soft-fail contract
