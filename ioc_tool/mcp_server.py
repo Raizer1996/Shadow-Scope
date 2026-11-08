@@ -80,7 +80,8 @@ def _compact_modules(modules: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(entry, dict):
             continue
         sc = entry.get("score")
-        data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+        raw = entry.get("data")
+        data: dict[str, Any] = raw if isinstance(raw, dict) else {}
         try:
             detail = _ui_detail(name, int(sc or 0), data)
         except Exception:  # detail is best-effort; never fail the tool over it
