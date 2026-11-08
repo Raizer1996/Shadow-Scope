@@ -20,7 +20,11 @@ def _isolated_db(monkeypatch, tmp_path):
 
 def _stub_enrich(monkeypatch):
     async def fake_async(value, ioc_type, *, no_cache=False):
-        return {"ioc": value, "type": ioc_type, "modules": {}, "final_score": 65}
+        big = {"last_analysis_stats": {"malicious": 5, "harmless": 60}, "blob": "x" * 50_000}
+        return {
+            "ioc": value, "type": ioc_type, "final_score": 65,
+            "modules": {"VirusTotal": {"score": 7, "data": big}},
+        }
 
     async def fake_many(iocs, *, no_cache=False):
         return [await fake_async(v, t) for v, t in iocs]
@@ -88,3 +92,17 @@ def test_list_sources_shape(monkeypatch):
     assert out["VirusTotal"]["configured"] is False
     assert out["KEV"]["configured"] is True
     assert "cve" in out["KEV"]["types"]
+
+
+def test_enrich_ioc_is_compact_by_default(monkeypatch):
+    _stub_enrich(monkeypatch)
+    out = asyncio.run(mcp_server.enrich_ioc("8.8.8.8"))
+    vt = out["modules"]["VirusTotal"]
+    assert vt["score"] == 7 and "detail" in vt and "data" not in vt
+    assert len(str(out)) < 2_000
+
+
+def test_enrich_ioc_verbose_returns_raw_data(monkeypatch):
+    _stub_enrich(monkeypatch)
+    out = asyncio.run(mcp_server.enrich_ioc("8.8.8.8", verbose=True))
+    assert "blob" in out["modules"]["VirusTotal"]["data"]

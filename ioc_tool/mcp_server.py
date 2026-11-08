@@ -66,10 +66,39 @@ def _classify(ioc: str) -> tuple[str, str] | dict[str, Any]:
     return parser.normalize_value(raw, ioc_type), ioc_type
 
 
-def _shape(result: dict[str, Any], *, defang_output: bool) -> dict[str, Any]:
-    """Add the tier label and optionally defang the ``ioc`` field."""
+def _compact_modules(modules: dict[str, Any]) -> dict[str, Any]:
+    """Per-source ``{score, detail}`` one-liners instead of raw provider payloads.
+
+    A single IP can carry >100 KB of raw Shodan / Censys / OTX JSON; that is
+    far more than an agent needs to judge an IOC and blows past most clients'
+    tool-result limits. ``verbose=true`` returns the raw ``data`` instead.
+    """
+    from ioc_tool.web.api import _ui_detail  # lazy: pulls in FastAPI
+
+    out: dict[str, Any] = {}
+    for name, entry in (modules or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        sc = entry.get("score")
+        data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+        try:
+            detail = _ui_detail(name, int(sc or 0), data)
+        except Exception:  # detail is best-effort; never fail the tool over it
+            detail = ""
+        item: dict[str, Any] = {"score": sc, "detail": detail}
+        for flag in ("rate_limited", "fallback_used"):
+            if data.get(flag):
+                item[flag] = data[flag]
+        out[name] = item
+    return out
+
+
+def _shape(result: dict[str, Any], *, defang_output: bool, verbose: bool = False) -> dict[str, Any]:
+    """Add the tier label, compact the modules unless ``verbose``, optionally defang ``ioc``."""
     out = dict(result)
     out["risk_tier"] = score.risk_tier(out.get("final_score"))
+    if not verbose:
+        out["modules"] = _compact_modules(out.get("modules") or {})
     if defang_output and isinstance(out.get("ioc"), str):
         out["ioc"] = defang.defang(out["ioc"])
     return out
@@ -81,12 +110,14 @@ async def enrich_ioc(
     no_cache: bool = False,
     summary: bool = False,
     defang_output: bool = False,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """Enrich one IOC (IP / domain / URL / hash / CVE / ASN) across every applicable source.
 
-    Returns ``{ioc, type, modules: {Source: {score, data}}, final_score, risk_tier}``.
-    ``summary=true`` appends an ``llm_summary`` verdict from local Ollama when reachable.
-    ``defang_output=true`` defangs the returned ``ioc`` so it is safe to paste.
+    Returns ``{ioc, type, modules: {Source: {score, detail}}, final_score, risk_tier}``.
+    ``verbose=true`` swaps each source's one-line ``detail`` for its raw provider ``data``
+    (can be >100 KB for an IP). ``summary=true`` appends an ``llm_summary`` verdict from
+    local Ollama when reachable. ``defang_output=true`` defangs the returned ``ioc``.
     """
     classified = _classify(ioc)
     if isinstance(classified, dict):
@@ -97,7 +128,7 @@ async def enrich_ioc(
         verdict = await asyncio.to_thread(llm.summarize, result)
         if verdict:
             result["llm_summary"] = verdict
-    return _shape(result, defang_output=defang_output)
+    return _shape(result, defang_output=defang_output, verbose=verbose)
 
 
 @server.tool()
@@ -105,8 +136,12 @@ async def enrich_many(
     iocs: list[str],
     no_cache: bool = False,
     defang_output: bool = False,
+    verbose: bool = False,
 ) -> dict[str, Any]:
-    """Enrich up to 50 IOCs concurrently. Returns ``{results: [...], skipped: [{ioc, reason}]}``."""
+    """Enrich up to 50 IOCs concurrently. Returns ``{results: [...], skipped: [{ioc, reason}]}``.
+
+    Results are compact (per-source ``{score, detail}``) unless ``verbose=true``.
+    """
     if len(iocs) > _MAX_BULK:
         return {"error": f"too many IOCs ({len(iocs)}); max {_MAX_BULK} per call"}
     typed: list[tuple[str, str]] = []
@@ -123,7 +158,7 @@ async def enrich_many(
         typed.append(classified)
     results = await enrich.enrich_many_async(typed, no_cache=no_cache) if typed else []
     return {
-        "results": [_shape(r, defang_output=defang_output) for r in results],
+        "results": [_shape(r, defang_output=defang_output, verbose=verbose) for r in results],
         "skipped": skipped,
     }
 
@@ -134,6 +169,7 @@ async def extract_and_enrich(
     enrich_found: bool = True,
     no_cache: bool = False,
     defang_output: bool = False,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """Pull IOCs out of free text (log lines, a report, an email) and optionally enrich them.
 
@@ -146,7 +182,9 @@ async def extract_and_enrich(
     if not enrich_found:
         return out
     flat = [v for t, vals in found.items() if t in _SUPPORTED_TYPES for v in vals]
-    bulk = await enrich_many(flat[:_MAX_BULK], no_cache=no_cache, defang_output=defang_output)
+    bulk = await enrich_many(
+        flat[:_MAX_BULK], no_cache=no_cache, defang_output=defang_output, verbose=verbose
+    )
     out.update(bulk)
     if len(flat) > _MAX_BULK:
         out["truncated"] = len(flat) - _MAX_BULK
