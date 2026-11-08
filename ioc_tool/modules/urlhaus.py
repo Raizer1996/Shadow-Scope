@@ -17,6 +17,7 @@ and never raise. A successful HTTP 200 with ``query_status != "ok"``
 from __future__ import annotations
 
 from ..core import http
+from . import _abusech
 
 BASE_URL = "https://urlhaus-api.abuse.ch/v1"
 TIMEOUT = 10  # seconds — preserve original tuned override
@@ -31,10 +32,13 @@ def enrich_url(value: str) -> dict | None:
     Returns the parsed response dict on a hit (``query_status == "ok"``),
     or ``None`` on no-hit / network error / non-200 status.
     """
+    if not _abusech.configured():
+        return None  # abuse.ch answers 401 without an Auth-Key; skip the round-trip
     response = http.post(
         _SOURCE,
         f"{BASE_URL}/url/",
         data={"url": value},
+        headers=_abusech.auth_headers(),
         timeout=TIMEOUT,
     )
     if response is None:
@@ -61,10 +65,13 @@ def enrich_host(value: str) -> dict | None:
     ``urls`` array of historical malicious URLs) on a hit, or ``None``
     on no-hit / error.
     """
+    if not _abusech.configured():
+        return None  # abuse.ch answers 401 without an Auth-Key; skip the round-trip
     response = http.post(
         _SOURCE,
         f"{BASE_URL}/host/",
         data={"host": value},
+        headers=_abusech.auth_headers(),
         timeout=TIMEOUT,
     )
     if response is None:

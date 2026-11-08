@@ -22,6 +22,7 @@ consistent with the other enrichment modules.
 from __future__ import annotations
 
 from ..core import http
+from . import _abusech
 
 BASE_URL = "https://threatfox-api.abuse.ch/api/v1/"
 TIMEOUT = 10  # seconds — preserve original tuned override
@@ -37,10 +38,13 @@ def enrich(value: str) -> dict | None:
     (``query_status == "ok"``), or ``None`` on no-hit / network
     error / non-200 status / malformed payload.
     """
+    if not _abusech.configured():
+        return None  # abuse.ch answers 401 without an Auth-Key; skip the round-trip
     response = http.post(
         _SOURCE,
         BASE_URL,
         json={"query": "search_ioc", "search_term": value},
+        headers=_abusech.auth_headers(),
         timeout=TIMEOUT,
     )
     if response is None:

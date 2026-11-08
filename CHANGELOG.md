@@ -58,6 +58,13 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **URLhaus, ThreatFox and MalwareBazaar were silently dead.** abuse.ch's
+  query APIs have required an `Auth-Key` header since 2024 and answered
+  every ShadowScope request with `401`, which the soft-fail contract
+  turned into "no data". New `ABUSECH_AUTH_KEY` (one free key from
+  auth.abuse.ch covers all three) is sent on every call; without it the
+  three sources are skipped and `/sources` reports them as not configured
+  instead of always-on.
 - **CLI enriched the defanged string.** `enrich 1[.]2[.]3[.]4` classified
   the input correctly but queried every source (and keyed the cache) with
   the literal `1[.]2[.]3[.]4`, so defanged IOCs always came back "Safe".
