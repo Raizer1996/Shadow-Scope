@@ -39,6 +39,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **One version string.** `ioc_tool.__version__` (1.1.0) is the single
+  source: `pyproject` reads it dynamically, `/` and `/health` return it, and
+  `/ui` injects it as `window.SHADOWSCOPE_VERSION` so the dashboard badge no
+  longer hard-codes `v0.9.2`.
+- **CI hardening.** `permissions: contents: read`; actions pinned to commit
+  SHAs; matrix adds Python 3.13 and 3.14; new `install-smoke` job
+  (`pip install ".[mcp]"`, console scripts, version parity) and an advisory
+  `pip-audit` job. `.github/dependabot.yml` for pip + GitHub Actions.
 - **Composite score v2 — strongest weighted signal + corroboration** replaces
   the weighted mean (`core/score.py::calculate_final_risk`). v1 let "no data"
   zeros and weak sources drag confirmed hits down: a Tor exit with AbuseIPDB

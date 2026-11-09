@@ -95,7 +95,8 @@ def test_health_returns_ok(client):
     """GET /health returns {'status': 'ok'}."""
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+    assert "version" in response.json()
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +360,8 @@ def test_health_skips_auth_even_when_token_set(monkeypatch):
     with TestClient(app) as c:
         response = c.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+    assert "version" in response.json()
 
 
 # ---------------------------------------------------------------------------
