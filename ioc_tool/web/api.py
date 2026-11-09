@@ -522,6 +522,8 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
         "enriched_at": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "agreement": output.consensus_summary(result),
         "modules": modules_ui,
+        "degraded": bool(result.get("degraded")),
+        "unavailable": result.get("unavailable") or {},
     }
     # Look up the case_name attached to this IOC (if any). The CaseChip
     # + Cases tab consume this. Skip when the IOC isn't in the DB yet —

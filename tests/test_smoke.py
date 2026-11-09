@@ -682,7 +682,8 @@ def test_enrich_ioc_concurrency_returns_expected_shape(monkeypatch, tmp_path):
 
         result = _enrich_mod.enrich_ioc("1.2.3.4", "ip")
 
-    assert set(result.keys()) == {"ioc", "type", "modules", "final_score", "score_version"}
+    assert set(result.keys()) == {"ioc", "type", "modules", "final_score", "score_version", "degraded", "unavailable"}
+    assert result["degraded"] is False and result["unavailable"] == {}
     assert result["ioc"] == "1.2.3.4"
     assert result["type"] == "ip"
     assert "VirusTotal" in result["modules"]

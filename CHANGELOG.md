@@ -39,6 +39,18 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Tri-state source results.** Timeout, connection error, 429, 5xx, 401/403
+  and local rate-limit refusals used to collapse into "no data" — the IOC
+  was scored from whatever answered and that score was persisted, so a
+  throttled VT free tier produced fake "score dropped" alerts in `watch`.
+  `core/http.py` now records a per-task failure ledger, `_run_source`
+  returns an `Unavailable` marker instead of `None` for sources that never
+  answered (incl. fetcher exceptions), and every result carries
+  `degraded: bool` + `unavailable: {source: reason}`. When an opinion
+  source is unavailable the composite is returned but **not** written to
+  `last_score` / `score_history`; `watch` skips the delta; the CLI prints a
+  warning; `/api/ui/*` and the SSE `skipped` frame expose the reason.
+  WHOIS "no match" stays a no-hit; other WHOIS exceptions count as failures.
 - **Composite score v2 — strongest weighted signal + corroboration** replaces
   the weighted mean (`core/score.py::calculate_final_risk`). v1 let "no data"
   zeros and weak sources drag confirmed hits down: a Tor exit with AbuseIPDB

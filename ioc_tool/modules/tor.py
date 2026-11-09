@@ -72,6 +72,14 @@ def update_tor_list() -> bool:
     return False
 
 
+def cache_present() -> bool:
+    """True when an exit-node list exists on disk (fresh or stale)."""
+    try:
+        return os.path.getsize(CACHE_FILE) > 0
+    except OSError:
+        return False
+
+
 def is_tor_node(ip: str) -> bool:
     """Return True if ``ip`` is a known Tor exit relay.
 
