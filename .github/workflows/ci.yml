@@ -38,3 +38,93 @@ jobs:
 
       - name: Run pytest
         run: pytest -q
+
+  windows:
+    name: windows — test + installer
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: pytest -q
+
+      - name: Installer dry-run changes nothing
+        shell: pwsh
+        run: |
+          ./scripts/install-windows.ps1 -DryRun
+          if (Test-Path "$env:LOCALAPPDATA\ShadowScope") { throw "dry-run created files" }
+
+      - name: Install from checkout
+        shell: pwsh
+        run: ./scripts/install-windows.ps1
+
+      - name: Installed CLI + dashboard assets work
+        shell: pwsh
+        run: |
+          $home_ = "$env:LOCALAPPDATA\ShadowScope"
+          $exe = "$home_\bin\shadowscope.exe"
+          & $exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "shadowscope --help failed" }
+          if (-not (Test-Path "$home_\.env")) { throw ".env not created" }
+          if (Select-String -Path "$home_\.env" -Pattern '=your_.*_here' -Quiet) { throw ".env kept placeholder values" }
+          # PowerShell 5.1-style UTF-16 IOC list must parse (allowlisted so no network)
+          "10.0.0.1" | Out-File -Encoding unicode iocs.txt
+          $env:ALLOWLIST_CIDRS = "10.0.0.0/8"
+          $out = & $exe enrich -f iocs.txt --json | Out-String
+          if ($out -notmatch '10\.0\.0\.1') { throw "UTF-16 IOC file not parsed: $out" }
+          $p = Start-Process -FilePath $exe -ArgumentList 'serve','--port','8765' -PassThru -NoNewWindow
+          try {
+            $ok = $false
+            foreach ($i in 1..30) {
+              try { Invoke-WebRequest http://127.0.0.1:8765/health -UseBasicParsing | Out-Null; $ok = $true; break } catch { Start-Sleep 1 }
+            }
+            if (-not $ok) { throw "server did not start" }
+            foreach ($u in '/ui', '/static/brutal/app.jsx', '/static/shared/data.js') {
+              $r = Invoke-WebRequest "http://127.0.0.1:8765$u" -UseBasicParsing
+              if ($r.StatusCode -ne 200) { throw "$u -> $($r.StatusCode)" }
+            }
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            # venv python.exe must be gone before the uninstall step deletes the venv
+            Get-Process python -ErrorAction SilentlyContinue |
+              Where-Object { $_.Path -like "$home_\venv\*" } | Stop-Process -Force
+          }
+
+      - name: Uninstall keeps data, purge removes it
+        shell: pwsh
+        run: |
+          ./scripts/install-windows.ps1 -Uninstall
+          if (Test-Path "$env:LOCALAPPDATA\ShadowScope\venv") { throw "venv not removed" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\ShadowScope\.env")) { throw ".env removed without -Purge" }
+          ./scripts/install-windows.ps1 -Uninstall -Purge
+          if (Test-Path "$env:LOCALAPPDATA\ShadowScope\.env") { throw ".env survived -Purge" }
+
+  package:
+    name: wheel ships dashboard assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel and check contents
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+          for f in ioc_tool/web/static/index.html ioc_tool/web/static/brutal/app.jsx \
+                   ioc_tool/web/static/shared/data.js ioc_tool/.env.example; do
+            unzip -l dist/*.whl | grep -q "$f" || { echo "missing from wheel: $f"; exit 1; }
+          done

@@ -62,7 +62,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 
 | Path | Purpose |
 |------|---------|
-| `ioc_tool/main.py` | Entry point: loads `.env`, hands off to `ui.cli.main()` |
+| `ioc_tool/main.py` | Entry point: loads `.env` (location from `core/paths.py`), forces UTF-8 stdio on Windows, hands off to `ui.cli.main()` |
 | `ioc_tool/ui/cli.py` | Interactive menu + arg-flag shortcuts (`-1/-2/-3`) |
 | `ioc_tool/ui/banner.py` | "Sniper Scope" ASCII art + colors |
 | `ioc_tool/core/parser.py` | Detect IOC type from string |
@@ -70,6 +70,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/core/extractor.py` | Extract IOCs from arbitrary text blobs |
 | `ioc_tool/core/enrich.py` | Orchestrate per-source enrichment + cache lookups |
 | `ioc_tool/core/database.py` | SQLite wrapper (IOCs + enrichments tables) |
+| `ioc_tool/core/paths.py` | Resolves the `.env` file + `data/` dir: package dir in a checkout / Docker, per-user dir when installed from a wheel, `SHADOWSCOPE_HOME` overrides |
 | `ioc_tool/core/score.py` | Per-source scoring + composite risk avg |
 | `ioc_tool/core/output.py` | JSON/CSV serializers for results |
 | `ioc_tool/core/llm.py` | LLM-generated natural-language verdict via local Ollama (optional, `--summary` / `?summary=true`) |
@@ -99,6 +100,7 @@ Per-source exceptions are caught at the gather layer (`return_exceptions=True`) 
 | `ioc_tool/data/cisa_kev.json` | CISA KEV catalog snapshot (gitignored cache, refreshed daily) |
 | `ioc_tool/mcp_server.py` | MCP server (`shadowscope-mcp`, stdio) — in-process tools `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` for agents such as Claude Code. Needs the `mcp` extra. |
 | `ioc_tool/web/__init__.py` | REST API package marker |
+| `scripts/install-windows.ps1` | Per-user Windows installer (venv + launcher + user PATH + `.env`), `-DryRun` / `-Uninstall [-Purge]`; `install-windows.cmd` wraps it for cmd.exe / double-click |
 | `ioc_tool/web/api.py` | FastAPI app + routes — thin HTTP layer over `enrich_ioc_async` |
 | `ioc_tool/web/static/index.html` | Dashboard shell (terminal-dark theme, no framework) |
 | `ioc_tool/web/static/styles.css` | Dashboard CSS (vanilla, dark palette + monospace) |
@@ -123,21 +125,21 @@ Per-source raw scores → weighted → **strongest signal + corroboration** → 
 
 | Source | Formula |
 |--------|---------|
-| VirusTotal | `malicious_count / total_engines * 100` |
+| VirusTotal | detection **count** (`malicious` + `0.5 × suspicious`): `>=20 → 95`, `>=6 → 85`, `>=3 → 65`, `>=1 → 35`, clean → `0` |
 | AbuseIPDB  | `abuseConfidenceScore` (already 0–100) |
 | IPQS       | `fraud_score` (already 0–100) |
 | Tor        | `100` if on exit-node list else `0` |
-| WHOIS age  | `<30d → 90`, `30–180d → 60`, `>180d → 10`, unknown → `50` |
+| WHOIS age  | `<30d → 90`, `30–180d → 60`, `>180d → 10`, unknown → `50`. Offset-aware and naive dates both accepted (naive assumed UTC) |
 | URLhaus    | `95` if online hit, `70` if offline hit, `80` otherwise hit, `0` if no data |
 | ThreatFox  | hit & `confidence_level >= 75 → 95`, `>= 50 → 80`, other hit → `60`, no data → `0` |
 | MalwareBazaar | `95` on any hit (sample known to abuse.ch), `0` if no data |
 | GreyNoise  | `malicious=90`, `benign/riot=0`, `unknown=0`, none=`0` |
-| OTX        | pulses 1–2 → `50`, 3–9 → `75`, ≥10 → `90`; `reputation < 0` adds `+10` (cap `100`); no pulses + `reputation >= 0` → `0` |
+| OTX        | gated on strength: `reputation < -2` or a named adversary → `90`; `reputation < 0` with ≥3 pulses → `75`, ≥1 pulse → `50`; pulse count alone caps at `35` (≥10), `25` (≥3), `10` (≥1); curator `false_positive` → `0` |
 | URLscan    | any result with malicious verdict → `90`; history exists, no malicious verdict → `30`; `total == 0` or no data → `0` |
 | Shodan     | `0` (informational only — tags/ports/vulns shown but not scored) |
 | IPinfo     | `0` (informational only — ASN/org/geo shown) |
 | NVD        | `int(round(CVSS v3.1 baseScore * 10))` — 0 if no v3.1 metric |
-| EPSS       | `int(round(epss * 100))`; floor at `70` when `percentile >= 0.99` |
+| EPSS       | `max(round(epss * 100), percentile_bucket)` where the bucket is `>=0.99 → 90`, `>=0.95 → 75`, `>=0.90 → 60`, `>=0.70 → 35` |
 | KEV        | `100` if listed in CISA KEV catalog, else `0` |
 
 Composite (`core/score.py::calculate_final_risk`, score v2):
@@ -149,6 +151,12 @@ final      = max(weighted_i) + 10 if ≥ 2 sources have weighted_i ≥ 50 else 0
 ```
 
 Why not a mean: v1 averaged every source that returned anything, so "looked, found nothing" was a 0 vote at full weight — a Tor exit with AbuseIPDB 100 + Pulsedive 95 came out 57 "Medium" and a Feodo-listed C2 next to seven quiet sources scored 14 "Safe". Threat intel is evidentiary: one confirmed blocklist hit is enough, and independent agreement should push higher, never lower. v2 is monotone (more evidence never lowers the score), zeros/missing sources are neutral, a lone tier-4 source cannot exceed Medium, and two independent strong sources reach Critical. Info-only sources (Shodan, IPinfo, Censys, rDNS, PDNS, ASN) are excluded before this step. `final_score` values written before v2 are not comparable with v2 values — compare `score_version` when diffing history.
+
+**Local heuristics** (domain IOCs) are bundled into a single `Heuristics`
+entry whose score is the **strongest** sub-signal (NRD / DGA / typosquat /
+suspicious TLD / IDN homograph), not their mean — the checks are independent
+detectors, so a sub-check with nothing to report must not cancel out a real
+detection.
 
 Tiers:
 
@@ -185,7 +193,19 @@ The feature is purely additive — disable it by omitting the flag/query param, 
 
 ## Configuration
 
-All secrets in `ioc_tool/.env` (gitignored). Template: `ioc_tool/.env.example`. See [`API_KEYS.md`](API_KEYS.md) for provider details.
+All secrets in `.env` (gitignored). Template: `ioc_tool/.env.example` (also shipped in the wheel). See [`API_KEYS.md`](API_KEYS.md) for provider details.
+
+### Config + data location (`core/paths.py`)
+
+| Layout | `.env` | `data/` (SQLite, feed mirrors) |
+|--------|--------|--------------------------------|
+| Source checkout / Docker | `ioc_tool/.env` | `ioc_tool/data/` |
+| Installed wheel (pip / pipx / Windows installer) — Windows | `%LOCALAPPDATA%\ShadowScope\.env` | `%LOCALAPPDATA%\ShadowScope\data\` |
+| Installed wheel — macOS | `~/Library/Application Support/ShadowScope/.env` | `…/ShadowScope/data/` |
+| Installed wheel — Linux | `${XDG_DATA_HOME:-~/.local/share}/shadowscope/.env` | `…/shadowscope/data/` |
+| `SHADOWSCOPE_HOME=<dir>` set in the process env | `<dir>/.env` | `<dir>/data/` |
+
+"Installed" means the package directory sits under `site-packages` / `dist-packages`. `SHADOWSCOPE_HOME` must come from the real environment — it decides where `.env` is, so it can't live inside it. The `.env` file is read as `utf-8-sig` so a Notepad BOM doesn't swallow the first key.
 
 ### Behavioural env vars (no key required)
 

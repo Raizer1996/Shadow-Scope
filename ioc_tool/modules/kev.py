@@ -32,15 +32,13 @@ import json
 import os
 import time
 
-from ..core import http
+from ..core import http, paths
 
 CATALOG_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/"
     "known_exploited_vulnerabilities.json"
 )
-CACHE_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "data", "cisa_kev.json"
-)
+CACHE_FILE = os.path.join(paths.DATA_DIR, "cisa_kev.json")
 REFRESH_SECONDS = 24 * 60 * 60  # 24 hours
 TIMEOUT = 10  # seconds — preserve the original tuned override
 
