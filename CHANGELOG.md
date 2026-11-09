@@ -43,6 +43,9 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
   source: `pyproject` reads it dynamically, `/` and `/health` return it, and
   `/ui` injects it as `window.SHADOWSCOPE_VERSION` so the dashboard badge no
   longer hard-codes `v0.9.2`.
+- **Dependency pins**: `requests` 2.32.5 → 2.33.0 (PYSEC-2026-2275),
+  `python-dotenv` 1.2.1 → 1.2.2 (PYSEC-2026-2270) — both surfaced by the new
+  `pip-audit` job; `pytest` 9.0.2 → 9.0.3.
 - **CI hardening.** `permissions: contents: read`; actions pinned to commit
   SHAs; matrix adds Python 3.13 and 3.14; new `install-smoke` job
   (`pip install ".[mcp]"`, console scripts, version parity) and an advisory
