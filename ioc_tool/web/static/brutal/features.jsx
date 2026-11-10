@@ -871,7 +871,9 @@ function PivotPanel({ ioc, results, setResults, setActiveIocId, onEnrich, fmt })
                         title={(r.cached ? "open (from cache, free)" : "not enriched yet — click to enrich now") + (r.why ? " · " + r.why : "") + " · " + shown}
                         onClick={() => (r.cached ? openCached(r.ioc) : onEnrich && onEnrich(r.ioc))}>
                   {r.cached
-                    ? <span className="pr-score" style={{ color: s.fg, borderColor: s.fg }}>{r.score ?? "—"}</span>
+                    ? (r.score == null
+                        ? <span className="pr-score" title="in cache, no stored score" style={{ color: "var(--ink-3)", borderColor: "var(--line-2)" }}>—</span>
+                        : <span className="pr-score" style={{ color: s.fg, borderColor: s.fg }}>{r.score}</span>)
                     : <span className="pr-score" style={{ color: "var(--ink-3)", borderColor: "var(--line-2)", fontSize: 9 }}>NEW</span>}
                   <span className="pr-type">{r.type}</span>
                   <span className="pr-ioc">{shown}</span>
