@@ -7,6 +7,11 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Wide-screen Enrich layout (>= 1600 px).** The source attribution table
+  moves into the hero's right column: spider and map sit side by side with
+  the table directly beneath (beside the spider for non-IP types), so the
+  verdict evidence is visible without scrolling. Below 1600 px nothing
+  changes. Static asset version bumped to `?v=121`.
 - **Retry failed sources** button on the degraded banner. A plain re-enrich
   serves sources that answered from the 24 h cache and refetches only the
   unavailable ones, so no quota is spent twice; the MCP `enrich_ioc` docstring

@@ -2139,3 +2139,33 @@ body.patterns .ti-score::after {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+
+/* ─── Wide screens: source table lives in the hero's right column ───────────
+   At >= 1600 px the hero's right side was a spider chart above a map with a
+   third of the screen empty, and the attribution table below the fold. The
+   JSX moves the table into .hero-right.wide; this lays it out. */
+@media (min-width: 1600px) {
+  .hero-right.wide {
+    display: grid;
+    grid-auto-rows: min-content;
+    align-content: start;
+    gap: 0;
+    padding: 0;
+  }
+  .hero-right.wide.has-geo { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .hero-right.wide:not(.has-geo) { grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.6fr); }
+  .hero-right.wide > .spider,
+  .hero-right.wide > .net-geo-panel { padding: 14px 16px; border-right: 1px solid var(--line-2); }
+  .hero-right.wide.has-geo > .net-geo-panel { border-right: none; }
+  .hero-right.wide .spider > svg { max-height: 340px; }
+  .hero-right.wide > .sources-block {
+    border: none;
+    background: transparent;
+    padding: 12px 16px 16px;
+    min-width: 0;
+  }
+  .hero-right.wide.has-geo > .sources-block { grid-column: 1 / -1; border-top: 1px solid var(--line-2); }
+  .enrich-split.solo { grid-template-columns: 1fr; }
+  .enrich-split.solo > .pivot-panel { position: static; }
+}
