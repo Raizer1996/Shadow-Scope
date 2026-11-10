@@ -318,7 +318,7 @@ function App() {
       <InputBar onEnrich={onEnrich} defang={defang} setDefang={setDefang} llm={llm} setLlm={setLlm} enriching={enriching} />
 
       <main className="main">
-        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} pendingIoc={pendingIoc} streamProgress={streamProgress} />}
+        {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} onEnrich={onEnrich} enriching={enriching} clearRecentStrip={clearRecentStrip} pendingIoc={pendingIoc} streamProgress={streamProgress} />}
         {tab === "batch"  && <BatchView results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} fmt={fmt} />}
         {tab === "watch"  && <WatchView fmt={fmt} results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}

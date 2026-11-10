@@ -5,6 +5,13 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Retry failed sources** button on the degraded banner. A plain re-enrich
+  serves sources that answered from the 24 h cache and refetches only the
+  unavailable ones, so no quota is spent twice; the MCP `enrich_ioc` docstring
+  tells agents the same.
+
 ### Fixed
 
 - **Dashboard showed things the API did not say.** Degraded results now carry

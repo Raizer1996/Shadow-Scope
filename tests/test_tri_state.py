@@ -151,3 +151,35 @@ def test_stream_emits_reason_on_skipped_and_degraded_final(monkeypatch, tmp_path
     final = next(e for e in events if e["event"] == "final")["result"]
     assert final["degraded"] is True and final["unavailable"] == {"VirusTotal": "timeout"}
     assert final["final_score"] == 45
+
+
+# --- retry: a second pass refetches only what did not answer ----------------
+
+def test_retry_refetches_only_unavailable_sources(monkeypatch, tmp_path):
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
+    _db.init_db()
+    ioc_id = _db.add_or_update_ioc("203.0.113.60", "ip")
+    calls = {"ok": 0, "flaky": 0}
+
+    def ok():
+        calls["ok"] += 1
+        return {"abuseConfidenceScore": 80}
+
+    def flaky():
+        calls["flaky"] += 1
+        if calls["flaky"] == 1:
+            http.mark_failure("virustotal", "timeout")
+            return None
+        return {"last_analysis_stats": {"malicious": 7}}
+
+    def one_pass():
+        return (
+            enrich._run_source(ioc_id, "abuseipdb", "AbuseIPDB", ok, lambda d: 80),
+            enrich._run_source(ioc_id, "virustotal", "VirusTotal", flaky, lambda d: 85),
+        )
+
+    first = _with_ledgers(one_pass)
+    assert isinstance(first[1], enrich.Unavailable)
+    second = _with_ledgers(one_pass)                 # fresh ledgers = a new enrich call
+    assert not isinstance(second[1], enrich.Unavailable) and second[1][2] == 85
+    assert calls == {"ok": 1, "flaky": 2}            # answered source came from cache
