@@ -107,18 +107,28 @@ def _write_ioc_file(tmp_path, values: list[str]) -> str:
 def test_webhook_bulk_parallel_faster_than_serial(
     monkeypatch, _isolated_db, tmp_path, capsys
 ):
-    """Concurrent POSTs must finish faster than a strict serial dispatch.
+    """Concurrent dispatch must actually overlap POSTs; serial must not.
 
-    We measure both modes back-to-back with the same per-call sleep and
-    require concurrent < serial / 2 (so an off-by-one or accidental
-    serialisation regression shows up cleanly).
+    Measured as the peak number of in-flight ``post_webhook`` calls rather
+    than wall-clock time: timing the whole ``handle_enrich`` run on a shared
+    CI runner compares ~0.5 s of enrichment overhead plus noise and failed
+    at random (serial=0.59 s vs concurrent=0.41 s is "parallel", but not
+    "twice as fast").
     """
     _stub_all_network(monkeypatch)
 
-    per_call_delay = 0.05  # 50ms
+    per_call_delay = 0.05  # long enough for the pool to overlap calls
+    lock = threading.Lock()
+    state = {"in_flight": 0, "peak": 0, "calls": 0}
 
     def _slow_post_webhook(url, payload, **_):
+        with lock:
+            state["in_flight"] += 1
+            state["calls"] += 1
+            state["peak"] = max(state["peak"], state["in_flight"])
         time.sleep(per_call_delay)
+        with lock:
+            state["in_flight"] -= 1
         return True
 
     monkeypatch.setattr(core_http, "post_webhook", _slow_post_webhook)
@@ -126,41 +136,24 @@ def test_webhook_bulk_parallel_faster_than_serial(
     ioc_values = [f"8.8.8.{i}" for i in range(10)]
     ioc_file = _write_ioc_file(tmp_path, ioc_values)
 
-    # Serial baseline.
-    ns_serial = _make_enrich_ns(
-        file=ioc_file,
-        webhook="https://siem.test/hook",
-        webhook_concurrent=1,
-    )
-    start = time.perf_counter()
-    cli.handle_enrich(ns_serial)
-    serial_elapsed = time.perf_counter() - start
+    # Serial: never more than one POST in flight.
+    cli.handle_enrich(_make_enrich_ns(
+        file=ioc_file, webhook="https://siem.test/hook", webhook_concurrent=1,
+    ))
+    assert state["calls"] == 10
+    assert state["peak"] == 1, f"serial mode overlapped POSTs (peak={state['peak']})"
 
-    # Concurrent run (default pool = 8).
-    ns_par = _make_enrich_ns(
-        file=ioc_file,
-        webhook="https://siem.test/hook",
-        webhook_concurrent=8,
-    )
-    start = time.perf_counter()
-    cli.handle_enrich(ns_par)
-    par_elapsed = time.perf_counter() - start
+    # Concurrent (pool of 8): POSTs must overlap.
+    state.update(in_flight=0, peak=0, calls=0)
+    cli.handle_enrich(_make_enrich_ns(
+        file=ioc_file, webhook="https://siem.test/hook", webhook_concurrent=8,
+    ))
+    assert state["calls"] == 10
+    assert state["peak"] >= 2, f"webhook fan-out wasn't parallel (peak={state['peak']})"
 
-    # Both should have posted all 10 IOCs.
     captured = capsys.readouterr()
-    assert "webhook: 10 posted, 0 failed" in captured.err
+    assert captured.err.count("webhook: 10 posted, 0 failed") == 2
 
-    # Concurrent must be at most half of serial — a generous bound that
-    # still catches accidental serialisation.
-    assert par_elapsed < serial_elapsed / 2, (
-        f"webhook fan-out wasn't parallel: serial={serial_elapsed:.3f}s "
-        f"concurrent={par_elapsed:.3f}s"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Ordering — stdout MUST land before POSTs complete
-# ---------------------------------------------------------------------------
 
 
 def test_webhook_bulk_stdout_emitted_before_posts(
