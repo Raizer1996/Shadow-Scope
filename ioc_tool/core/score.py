@@ -184,6 +184,7 @@ def calculate_greynoise_score(data: dict | None) -> int:
 
     Mapping:
     - ``classification == 'malicious'`` -> 90 (known-bad scanner / actor)
+    - ``classification == 'suspicious'`` -> 50 (scanning seen, intent unconfirmed)
     - ``classification == 'benign'`` (noise=True or riot=True) -> 0
       (intentional false-positive dampener: known benign scanners +
       Real Internet Observation Trust services pull the average down)
@@ -195,6 +196,10 @@ def calculate_greynoise_score(data: dict | None) -> int:
     classification = data.get("classification")
     if classification == "malicious":
         return 90
+    if classification == "suspicious":
+        # GreyNoise added this class for IPs seen scanning without a confirmed
+        # malicious tag. It used to fall through to 0 and vanish.
+        return 50
     return 0
 
 

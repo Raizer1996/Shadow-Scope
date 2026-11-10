@@ -104,7 +104,7 @@ def test_enrich_view_renders_sparkline_component(client):
     assert "ScoreHistorySparkline" in body
     # The empty state — analyst-facing copy when the cache has no
     # snapshots yet.
-    assert "No score history" in body
+    assert "no snapshots yet" in body
     # SVG-only — no chart library imports.
     assert "<svg " in body
     assert "<polyline" not in body or "<path" in body  # path is acceptable

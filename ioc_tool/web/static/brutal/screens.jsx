@@ -1,6 +1,18 @@
 // Cinematic Ops — Batch / Watch / Cases / Diff / Sources / Tweaks views.
 
-function BatchView({ results, setActiveIocId, setTab, fmt }) {
+function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, fmt }) {
+  // The strip only holds the newest few; this tab lists every cached IOC.
+  const [cached, setCached] = useState([]);
+  React.useEffect(() => {
+    let dead = false;
+    window.shadowscopeRecent(500).then(rows => { if (!dead && Array.isArray(rows)) setCached(rows); }).catch(() => {});
+    return () => { dead = true; };
+  }, [stripResults.length]);
+  const results = useMemo(() => {
+    const byId = new Map(cached.map(r => [r.id, r]));
+    stripResults.forEach(r => byId.set(r.id, r));      // live strip rows win
+    return Array.from(byId.values());
+  }, [cached, stripResults]);
   const [sortKey, setSortKey] = useState("score");
   const [filterTier, setFilterTier] = useState("all");
   const [filterType, setFilterType] = useState("all");
@@ -75,7 +87,7 @@ function BatchView({ results, setActiveIocId, setTab, fmt }) {
             if (heur.idn?.mixed_script) heurChips.push("IDN");
             const delta = r.final_score - r.prev_score;
             return (
-              <tr key={r.id} className="batch-row" onClick={() => { setActiveIocId(r.id); setTab("enrich"); }}>
+              <tr key={r.id} className="batch-row" onClick={() => { if (setResults && !stripResults.find(x => x.id === r.id)) setResults(prev => [r, ...prev]); setActiveIocId(r.id); setTab("enrich"); }}>
                 <td className="bt-score" style={{color: s.fg, borderLeft: `3px solid ${s.fg}`}}>{r.final_score}</td>
                 <td><span className="tier-mini" style={{color: s.fg, borderColor: s.fg + "55"}}>{s.label}</span></td>
                 <td className="mono dim">{r.type}</td>
@@ -177,7 +189,7 @@ function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
   // prev_score → final_score; "reason" synthesises a one-liner from
   // the agreement summary + dominant flagging source.
   const toEvent = (r) => {
-    const ts = (r.enriched_at || "").slice(11, 19) || "—";
+    const ts = window.SS_STAMP(r.enriched_at);
     const delta = r.final_score - (r.prev_score ?? r.final_score);
     const top = Object.entries(r.modules || {})
       .filter(([_, m]) => (m.score || 0) > 0)
@@ -417,13 +429,14 @@ function CaseGraph({ iocs }) {
 // ─────────── Diff ───────────
 
 function DiffView({ results, diffPair, setDiffPair, fmt }) {
-  const [a, b] = diffPair.map(id => results.find(r => r.id === id));
+  const a = results.find(r => r.id === diffPair[0]) || results[0];
+  const b = results.find(r => r.id === diffPair[1] && r !== a) || results.find(r => r !== a);
   if (!a || !b) {
     return (
       <div className="diff-view">
         <div className="batch-toolbar">
           <span className="bt-title">DIFF · side-by-side</span>
-          <span className="dim small">// need two enrichments on the strip — enrich some IOCs first</span>
+          <span className="dim small">// need two enriched IOCs to compare — enrich another one</span>
         </div>
       </div>
     );
@@ -435,13 +448,13 @@ function DiffView({ results, diffPair, setDiffPair, fmt }) {
         <span className="bt-title">DIFF · side-by-side</span>
         <div className="bt-group">
           <span className="bt-label">left</span>
-          <select className="bt-select" value={diffPair[0]} onChange={e => setDiffPair([e.target.value, diffPair[1]])}>
+          <select className="bt-select" value={a.id} onChange={e => setDiffPair([e.target.value, b.id])}>
             {results.map(r => <option key={r.id} value={r.id}>{r.ioc}</option>)}
           </select>
         </div>
         <div className="bt-group">
           <span className="bt-label">right</span>
-          <select className="bt-select" value={diffPair[1]} onChange={e => setDiffPair([diffPair[0], e.target.value])}>
+          <select className="bt-select" value={b.id} onChange={e => setDiffPair([a.id, e.target.value])}>
             {results.map(r => <option key={r.id} value={r.id}>{r.ioc}</option>)}
           </select>
         </div>

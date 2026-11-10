@@ -197,9 +197,17 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
             </div>
 
             <div className="hero-meta">
+              {ioc.degraded && (
+                <div className="chip" style={{ borderColor: "var(--med)", color: "var(--med)", display: "block", lineHeight: 1.5 }}
+                     title="These sources timed out, were rate-limited or errored. The score uses only the sources that answered and was not written to history. Re-enrich to retry.">
+                  <b>⚠ DEGRADED</b> · no answer from{" "}
+                  {Object.entries(ioc.unavailable || {}).map(([k, v]) => `${k} (${String(v).replace(/_/g, " ")})`).join(", ") || "one or more sources"}
+                  <span className="dim"> · score may be understated · not recorded in history</span>
+                </div>
+              )}
               <ConsensusChip a={ioc.agreement} ioc={ioc} />
               <NamedThreatStrip ioc={ioc} compact />
-              {ioc.prev_score !== undefined && <DeltaChip prev={ioc.prev_score} curr={ioc.final_score} ioc={ioc} />}
+              {ioc.prev_score !== undefined && ioc.prev_score !== ioc.final_score && <DeltaChip prev={ioc.prev_score} curr={ioc.final_score} ioc={ioc} />}
               {ioc.case && <CaseChip caseId={ioc.case} />}
               <CaseAssignBar ioc={ioc} />
               {ioc.type === "domain" && (
@@ -254,7 +262,7 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
         <section className="sources-block">
           <div className="sec-head">
             <span className="sec-title glitch" data-text="SOURCE ATTRIBUTION">SOURCE ATTRIBUTION</span>
-            <span className="sec-meta">{modules.length} sources queried · ordered by score</span>
+            <span className="sec-meta">{modules.length} answered{Object.keys(ioc.unavailable || {}).length > 0 ? ` · ${Object.keys(ioc.unavailable).length} unavailable` : ""} · ordered by score</span>
             <span className="sec-meta dim">click row → toggle inclusion</span>
           </div>
           <SourceTable
@@ -374,7 +382,8 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
       // (cache miss without a hit, or the source returned None). Render as
       // a 0-score axis with a distinctive marker.
       const missed = !mod;
-      return [name, mod || { score: 0, data: {}, missed: true }, missed];
+      const down = missed && !!(ioc.unavailable || {})[name];
+      return [name, mod || { score: 0, data: {}, missed: true, down }, missed];
     });
   } else {
     entries = Object.entries(ioc.modules)
@@ -579,9 +588,9 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
             <g key={"t"+i} style={{ opacity: off ? 0.35 : (missed ? 0.55 : 1), textDecoration: off ? "line-through" : "none" }}>
               <text x={labelP.x} y={labelP.y + dy - 6} fill="#a8a8a8" fontFamily="JetBrains Mono" fontSize="9" letterSpacing="0.04em" textAnchor={anchor}>{name}</text>
               <text x={labelP.x} y={labelP.y + dy + 6}
-                fill={missed ? "#5a5a5a" : sevOf(m.score).fg}
+                fill={m.down ? "var(--med)" : missed ? "#5a5a5a" : sevOf(m.score).fg}
                 fontFamily="JetBrains Mono" fontSize="11" fontWeight="800" textAnchor={anchor}>
-                {missed ? "no hit" : String(m.score).padStart(2, "0")}
+                {m.down ? "n/a" : missed ? "no hit" : String(m.score).padStart(2, "0")}
               </text>
             </g>
           );
@@ -597,7 +606,7 @@ function SpiderChart({ ioc, sev, disabledSources = new Set() }) {
 
 function ConsensusChip({ a, ioc }) {
   const colorMap = { high: "var(--safe)", medium: "var(--med)", low: "var(--high)", none: "var(--ink-3)" };
-  const explain = `Consensus measures source agreement. ${a.sources_flagged} of ${a.sources_total} sources returned a non-zero score. Each square is colored by that source's severity tier.`;
+  const explain = `Consensus measures source agreement. ${a.sources_flagged} of ${a.sources_total} verdict sources scored ${a.flag_threshold || 40}+ (context-only sources such as Shodan, IPinfo, Censys, rDNS and PDNS are not counted). Each square is colored by that source's severity tier.`;
 
   // Per-square data: take top N source scores, pad with zeros so the
   // strip always has a.sources_total squares. Each square colored by
@@ -638,25 +647,6 @@ function ConsensusChip({ a, ioc }) {
   );
 }
 
-// Synthesize a 7-day score trajectory ending at `curr`, starting at
-// `prev` (24h ago). Intermediate days are pseudo-random but
-// deterministic per IOC so the line doesn't jitter between renders.
-function synthSparkline(ioc, prev, curr) {
-  const seed = (ioc?.id || ioc?.ioc || "x")
-    .split("")
-    .reduce((h, c) => ((h * 31 + c.charCodeAt(0)) >>> 0), 17);
-  let s = seed;
-  const rand = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-  const pts = [];
-  const base = prev;
-  for (let i = 0; i < 5; i++) {
-    const drift = (rand() - 0.5) * 18;
-    pts.push(Math.max(0, Math.min(100, base + drift)));
-  }
-  pts.push(prev);
-  pts.push(curr);
-  return pts;
-}
 
 function Sparkline({ values, color = "var(--ink-2)", width = 64, height = 18 }) {
   if (!values || values.length < 2) return null;
@@ -691,13 +681,11 @@ function DeltaChip({ prev, curr, ioc }) {
   if (delta === 0 && prev === 0) return null;
   const sign = delta >= 0 ? "+" : "−";
   const color = delta > 0 ? "var(--high)" : delta < 0 ? "var(--safe)" : "var(--ink-3)";
-  const explain = `Change in composite score over the last 24 hours. Previous score was ${prev}/100; current is ${curr}/100. The sparkline shows the last 7 days. Use to spot indicators trending up or decaying.`;
-  const series = synthSparkline(ioc, prev, curr);
+  const explain = `Change against the previously stored composite. Previous score was ${prev}/100; current is ${curr}/100. The real timeline is in SCORE HISTORY below.`;
   return (
     <div className="chip chip-delta" title={explain}>
-      <span className="chip-label">SCORE Δ · 24h</span>
+      <span className="chip-label">SCORE Δ · vs previous</span>
       <span className="chip-val" style={{ color, fontWeight: 800 }}>{sign}{Math.abs(delta)}</span>
-      <span className="chip-spark"><Sparkline values={series} color={color} /></span>
       <span className="chip-meta"><span className="dim">prev</span> {prev} <span className="dim">→</span> {curr}</span>
       <span className="chip-help" title={explain}>?</span>
     </div>
@@ -857,7 +845,7 @@ function SourceTable({ modules, disabledSources, toggleSource, ioc, onPivot }) {
         {sorted.map(([name, mod]) => {
           const s = sevOf(mod.score);
           const off = disabledSources.has(name);
-          const f = window.FRESHNESS(name, ioc.id);
+          const f = window.FRESHNESS(mod);
           const open = expanded.has(name);
           return (
             <React.Fragment key={name}>
@@ -871,7 +859,8 @@ function SourceTable({ modules, disabledSources, toggleSource, ioc, onPivot }) {
                   <span className="src-score-bar"><span style={{ width: `${mod.score}%`, background: off ? "var(--line-2)" : s.fg }} /></span>
                 </td>
                 <td className="src-detail" onClick={() => toggleSource(name)}>{renderSourceDetail(mod.detail, mod, onPivot)}</td>
-                <td className={`src-fresh ${f.stale ? "stale" : ""}`} onClick={() => toggleSource(name)}>{f.minutes < 60 ? `${f.minutes}m` : `${Math.floor(f.minutes/60)}h`}</td>
+                <td className={`src-fresh ${f && f.stale ? "stale" : ""}`} onClick={() => toggleSource(name)}
+                    title={f ? `fetched ${mod.fetched_at}` : "computed locally, not cached"}>{f ? f.label : "—"}</td>
                 <td className="src-expand-cell">
                   <button
                     type="button"
@@ -1416,7 +1405,9 @@ function ScoreHistorySparkline({ ioc }) {
         </span>
       </div>
       {data !== null && points.length === 0 && !err && (
-        <div className="dim small" style={{ padding: "8px 0" }}>// No score history</div>
+        <div className="dim small" style={{ padding: "8px 0" }}>
+          // no snapshots yet{ioc.degraded ? " — degraded runs are not recorded (a missing source would fake a score change)" : " — recorded on each complete enrichment"}
+        </div>
       )}
       {points.length > 0 && (
         <div ref={wrapRef}

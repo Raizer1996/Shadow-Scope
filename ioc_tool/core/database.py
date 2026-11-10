@@ -576,6 +576,19 @@ def update_last_score(ioc_id: int, score: int, score_version: int | None = None)
             pass
 
 
+def get_latest_fetch_times(ioc_id: int) -> dict[str, str]:
+    """``{source_key: newest enrichment timestamp}`` for one IOC (single query)."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            'SELECT source, MAX(timestamp) AS ts FROM enrichments WHERE ioc_id = ? GROUP BY source',
+            (ioc_id,),
+        ).fetchall()
+        return {r["source"]: str(r["ts"]) for r in rows if r["ts"] is not None}
+    finally:
+        conn.close()
+
+
 def get_score_history(ioc_id: int, *, limit: int = 200) -> list[dict]:
     """Return chronological score snapshots for an IOC (oldest first).
 

@@ -135,12 +135,26 @@ window.PIVOT_KINDS = {
   asn:        { glyph: "▦", color: "#60a5fa", label: "ASN" }
 };
 
-// Source freshness — synthetic "last fetched" minutes ago.
-window.FRESHNESS = (sourceName, iocId) => {
-  let h = 0; const s = sourceName + iocId;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  const minutes = h % 240; // 0–240
-  return { minutes, stale: minutes > 120 };
+// Source freshness from the real per-source cache timestamp the API sends
+// (`modules[name].fetched_at`, naive local time written by the server).
+// Returns null when the source has no cache row (TOR, Heuristics).
+window.FRESHNESS = (mod) => {
+  const raw = mod && mod.fetched_at;
+  if (!raw) return null;
+  const t = new Date(String(raw).replace(/Z$/, ""));   // stored as server-local time
+  if (isNaN(t)) return null;
+  const minutes = Math.max(0, Math.round((Date.now() - t.getTime()) / 60000));
+  const label = minutes < 1 ? "now" : minutes < 60 ? `${minutes}m`
+    : minutes < 2880 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1440)}d`;
+  return { minutes, label, stale: minutes > 1440 };      // older than the 24 h cache TTL
+};
+
+// "HH:MM:SS" for today, "MM-DD HH:MM" otherwise — a bare clock time made
+// yesterday's rows look newer than today's in the Watch list.
+window.SS_STAMP = (iso) => {
+  if (!iso) return "—";
+  const today = new Date().toISOString().slice(0, 10);
+  return iso.slice(0, 10) === today ? iso.slice(11, 19) : `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
 };
 
 window.RISK_TIER = (s) => {
