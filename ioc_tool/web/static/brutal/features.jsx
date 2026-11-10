@@ -796,124 +796,99 @@ function AlertTicker({ results, setActiveIoc, setTab, fmt }) {
 
 // ─────────── Pivot panel: related IOCs ───────────
 
-function PivotPanel({ ioc, results, setResults, setActiveIocId }) {
-  // Find related IOCs. First pull whatever is already on the recent
-  // strip (instant render, free), then query /api/ui/pivot in the
-  // background to widen the corpus across the whole cache. Backend
-  // hits get merged in, dedup'd by id, and clicking one adds it to
-  // the strip so the score panels can render it.
-  const corpus = (results || []).filter(r => r.id !== ioc.id);
-  const family = Object.values(ioc.modules).find(m => m.data?.malware)?.data?.malware ||
-                 Object.values(ioc.modules).find(m => m.data?.family)?.data?.family;
-  const registrar = ioc.modules.WHOIS?.data?.registrar;
-  const stripCase       = ioc.case ? corpus.filter(r => r.case === ioc.case) : [];
-  const stripFamily     = family ? corpus.filter(r =>
-    Object.values(r.modules).some(m => m.data?.malware === family || m.data?.family === family)
-  ) : [];
-  const stripRegistrar  = registrar ? corpus.filter(r =>
-    r.modules.WHOIS?.data?.registrar === registrar
-  ) : [];
-
-  const [cacheFamily, setCacheFamily] = React.useState([]);
-  const [cacheRegistrar, setCacheRegistrar] = React.useState([]);
-  const [loading, setLoading] = React.useState(false);
+function PivotPanel({ ioc, results, setResults, setActiveIocId, onEnrich, fmt }) {
+  // Everything comes from /api/ui/related, which reads the local cache only.
+  // Two kinds of row: indicators already enriched (score shown, click opens
+  // them, free) and hosts only *named* in this indicator's data (marked NEW,
+  // click enriches them — that one does call the sources).
+  const [groups, setGroups] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  const [open, setOpen] = React.useState({});
 
   React.useEffect(() => {
-    if (!window.shadowscopePivot) return;
-    const tasks = [];
-    if (family) {
-      tasks.push(window.shadowscopePivot("malware", family, { exclude: ioc.ioc, limit: 12 })
-        .then(rows => setCacheFamily(rows || []))
-        .catch(() => setCacheFamily([])));
-    } else {
-      setCacheFamily([]);
-    }
-    if (registrar) {
-      tasks.push(window.shadowscopePivot("registrar", registrar, { exclude: ioc.ioc, limit: 12 })
-        .then(rows => setCacheRegistrar(rows || []))
-        .catch(() => setCacheRegistrar([])));
-    } else {
-      setCacheRegistrar([]);
-    }
-    if (tasks.length) {
-      setLoading(true);
-      Promise.allSettled(tasks).finally(() => setLoading(false));
-    }
-  }, [ioc.id, family, registrar]);
+    let live = true;
+    setGroups(null); setErr(null); setOpen({});
+    window.ssApi("GET", "/api/ui/related?limit=40&ioc=" + encodeURIComponent(ioc.ioc))
+      .then(r => { if (live) setGroups(r.groups || []); })
+      .catch(e => { if (live) { setGroups([]); setErr(String(e.message || e)); } });
+    return () => { live = false; };
+  }, [ioc.id, ioc.enriched_at, ioc.case]);
 
-  // Dedup helper — backend hits take precedence over strip-only matches
-  // because they carry the full module shape from cache.
-  const mergeUnique = (a, b) => {
-    const seen = new Set();
-    const out = [];
-    for (const r of [...b, ...a]) {
-      if (seen.has(r.id) || r.id === ioc.id) continue;
-      seen.add(r.id);
-      out.push(r);
-    }
-    return out;
+  const openCached = (value) => {
+    const want = value.toLowerCase();
+    const inStrip = (results || []).find(r => r.ioc.toLowerCase() === want);
+    if (inStrip) { setActiveIocId(inStrip.id); return; }
+    window.shadowscopePivot("ioc", value, { limit: 20 })
+      .then(rows => {
+        const hit = (rows || []).find(r => r.ioc.toLowerCase() === want);
+        if (!hit) { onEnrich && onEnrich(value); return; }
+        if (setResults) setResults(prev => [hit, ...prev.filter(x => x.id !== hit.id)]);
+        setActiveIocId(hit.id);
+      })
+      .catch(() => { onEnrich && onEnrich(value); });
   };
 
-  const sameCase      = stripCase;  // no cache-wide case lookup yet
-  const sameFamily    = mergeUnique(stripFamily, cacheFamily);
-  const sameRegistrar = mergeUnique(stripRegistrar, cacheRegistrar);
+  const head = (meta) => (
+    <div className="sec-head">
+      <span className="sec-title glitch" data-text="RELATED">RELATED</span>
+      <span className="sec-meta dim">{meta}</span>
+    </div>
+  );
 
-  // Clicking a backend hit may target an IOC that isn't on the strip
-  // yet. Prepend it so the rest of the dashboard (score panels,
-  // sources, geo) has a record to render.
-  const navigate = (r) => {
-    if (setResults && !results.find(x => x.id === r.id)) {
-      setResults(prev => [r, ...prev.filter(x => x.id !== r.id)]);
-    }
-    setActiveIocId(r.id);
-  };
-
-  const groups = [
-    sameCase.length      && { title: "SAME CASE",      pivot: ioc.case || "—",        items: sameCase },
-    sameFamily.length    && { title: "SAME FAMILY",    pivot: family,                  items: sameFamily },
-    sameRegistrar.length && { title: "SAME REGISTRAR", pivot: registrar,               items: sameRegistrar }
-  ].filter(Boolean);
-
+  if (groups === null) return <aside className="pivot-panel">{head("scanning cache…")}</aside>;
   if (groups.length === 0) {
     return (
       <aside className="pivot-panel">
-        <div className="sec-head">
-          <span className="sec-title glitch" data-text="RELATED">RELATED</span>
-          <span className="sec-meta dim">{loading ? "scanning cache…" : "no pivots"}</span>
+        {head("no pivots")}
+        <div className="pivot-empty">
+          {err ? "// " + err : <React.Fragment>// nothing else in your cache shares a network,<br/>// domain, family, tag or case with this one</React.Fragment>}
         </div>
-        <div className="pivot-empty">// no related infrastructure found<br/>// in current intel corpus</div>
       </aside>
     );
   }
 
+  const SHOW = 6;
+  const nCached = groups.reduce((n, g) => n + g.items.filter(i => i.cached).length, 0);
+  const nNew = groups.reduce((n, g) => n + g.items.filter(i => !i.cached).length, 0);
   return (
     <aside className="pivot-panel">
-      <div className="sec-head">
-        <span className="sec-title glitch" data-text="RELATED">RELATED</span>
-        <span className="sec-meta">
-          {groups.reduce((n, g) => n + g.items.length, 0)} IOCs across {groups.length} pivots
-          {loading && <span className="dim"> · scanning…</span>}
-        </span>
-      </div>
-      {groups.map(g => (
-        <div key={g.title} className="pivot-group">
-          <div className="pivot-group-head">
-            <span className="pgh-title">{g.title}</span>
-            <span className="pgh-pivot">{g.pivot}</span>
-          </div>
-          {g.items.map(r => {
-            const s = sevOf(r.final_score);
-            return (
-              <button key={r.id} className="pivot-row" onClick={() => navigate(r)}>
-                <span className="pr-score" style={{color: s.fg, borderColor: s.fg}}>{r.final_score}</span>
-                <span className="pr-type">{r.type}</span>
-                <span className="pr-ioc">{r.ioc.length > 28 ? r.ioc.slice(0, 26) + "…" : r.ioc}</span>
-                <span className="pr-arrow">▸</span>
+      {head(`${nCached} in cache · ${nNew} not enriched yet`)}
+      {groups.map(g => {
+        const all = open[g.key];
+        const rows = all ? g.items : g.items.slice(0, SHOW);
+        const hidden = g.total - rows.length;
+        return (
+          <div key={g.key} className="pivot-group">
+            <div className="pivot-group-head">
+              <span className="pgh-title">{g.title} · {g.total}</span>
+              <span className="pgh-pivot" title={g.pivot}>{g.pivot}</span>
+            </div>
+            {rows.map(r => {
+              const s = sevOf(r.score || 0);
+              const shown = fmt ? fmt(r.ioc) : r.ioc;
+              return (
+                <button key={r.ioc} className="pivot-row"
+                        title={(r.cached ? "open (from cache, free)" : "not enriched yet — click to enrich now") + (r.why ? " · " + r.why : "") + " · " + shown}
+                        onClick={() => (r.cached ? openCached(r.ioc) : onEnrich && onEnrich(r.ioc))}>
+                  {r.cached
+                    ? <span className="pr-score" style={{ color: s.fg, borderColor: s.fg }}>{r.score ?? "—"}</span>
+                    : <span className="pr-score" style={{ color: "var(--ink-3)", borderColor: "var(--line-2)", fontSize: 9 }}>NEW</span>}
+                  <span className="pr-type">{r.type}</span>
+                  <span className="pr-ioc">{shown}</span>
+                  <span className="pr-arrow">{r.cached ? "▸" : "enrich ▸"}</span>
+                </button>
+              );
+            })}
+            {(hidden > 0 || all) && g.items.length > SHOW && (
+              <button className="pivot-row" style={{ display: "block", textAlign: "center", color: "var(--ink-3)", fontSize: 10.5 }}
+                      onClick={() => setOpen(o => ({ ...o, [g.key]: !all }))}>
+                {all ? "show fewer" : `+ ${g.items.length - SHOW} more`}{all && g.total > g.items.length ? ` · ${g.total - g.items.length} not listed` : ""}
               </button>
-            );
-          })}
-        </div>
-      ))}
+            )}
+            {!all && g.items.length <= SHOW && hidden > 0 && <div className="pivot-empty">+ {hidden} not listed</div>}
+          </div>
+        );
+      })}
     </aside>
   );
 }

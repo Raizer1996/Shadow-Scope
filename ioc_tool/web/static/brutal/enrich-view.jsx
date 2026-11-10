@@ -288,7 +288,7 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
       <div className={`enrich-split ${wide ? "solo" : ""}`}>
         {!wide && sourcesBlock}
 
-        <PivotPanel ioc={ioc} results={results} setResults={setResults} setActiveIocId={setActiveIocId} />
+        <PivotPanel ioc={ioc} results={results} setResults={setResults} setActiveIocId={setActiveIocId} onEnrich={onEnrich} fmt={fmt} />
       </div>
 
       {llm && <LlmVerdict ioc={ioc} fmt={fmt} sev={sev} />}

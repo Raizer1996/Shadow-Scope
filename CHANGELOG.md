@@ -7,6 +7,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Related panel.** The Enrich view's RELATED box now answers "what else
+  should I look at?" from the local cache alone (`GET /api/ui/related`, no
+  provider calls): same case, same malware family, same network (announced
+  prefix, else /24), same registered domain or URLs hosted on the IP, hosts
+  seen with it (DNS records, reverse DNS, passive DNS), subdomains from
+  certificates, shared tags, same registrar. Indicators already enriched
+  show their score and open for free; hosts only named in the data are
+  marked NEW and enrich on click.
 - **Analyst workflow.** Per indicator: a manual verdict (malicious /
   suspicious / benign / false positive) stored beside the score and never
   altering it, free notes, and a watch switch. **Cases tab**: create, close
