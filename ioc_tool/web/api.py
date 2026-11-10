@@ -1260,6 +1260,79 @@ def ui_related(
     }
 
 
+_SEARCH_VERDICTS = {"any", "none", *database.VERDICTS}
+# Keys a saved filter may carry — the Search tab's own state, nothing else.
+_FILTER_KEYS = ("q", "type", "min_score", "max_score", "verdict", "case",
+                "watched", "has_notes", "since_days", "deep", "sort")
+
+
+@app.get("/api/ui/search", dependencies=[Depends(require_token)])
+def ui_search(
+    q: str | None = Query(None, max_length=500, description="Free text; every word must match somewhere"),
+    type: str | None = Query(None, max_length=80, description="Comma-separated IOC types"),
+    min_score: int | None = Query(None, ge=0, le=100),
+    max_score: int | None = Query(None, ge=0, le=100),
+    verdict: str | None = Query(None, description="A verdict, 'any' or 'none'"),
+    case: str | None = Query(None, max_length=80, description="A case name, 'any' or 'none'"),
+    watched: bool | None = Query(None),
+    has_notes: bool | None = Query(None),
+    since_days: int | None = Query(None, ge=1, le=3650, description="Seen within the last N days"),
+    deep: bool = Query(True, description="Also scan the raw text of cached source answers"),
+    sort: str = Query("score"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """Search everything stored locally. Cache-only — never calls a provider."""
+    from ..core import search as search_mod
+
+    types = [t.strip().lower() for t in (type or "").split(",") if t.strip()]
+    bad = [t for t in types if t not in search_mod.TYPES]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"Unknown type(s): {', '.join(bad)}")
+    if verdict is not None and verdict not in _SEARCH_VERDICTS:
+        raise HTTPException(status_code=422, detail=f"verdict must be one of {sorted(_SEARCH_VERDICTS)}")
+    if sort not in search_mod.SORTS:
+        raise HTTPException(status_code=422, detail=f"sort must be one of {sorted(search_mod.SORTS)}")
+    database.init_db()
+    return search_mod.search(
+        q, types=types, min_score=min_score, max_score=max_score, verdict=verdict, case=case,
+        watched=watched, has_notes=has_notes, since_days=since_days, deep=deep,
+        sort=sort, limit=limit, offset=offset,
+    )
+
+
+class FilterSaveRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/api/ui/filters", dependencies=[Depends(require_token)])
+def ui_filters() -> list[dict[str, Any]]:
+    database.init_db()
+    return database.filter_list()
+
+
+@app.post("/api/ui/filters", dependencies=[Depends(require_token)])
+def ui_filter_save(req: FilterSaveRequest) -> dict[str, Any]:
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Filter name is empty")
+    params: dict[str, Any] = {}
+    for key in _FILTER_KEYS:
+        value = req.params.get(key)
+        if isinstance(value, bool | int) or (isinstance(value, str) and 0 < len(value) <= 500):
+            params[key] = value
+    database.init_db()
+    database.filter_save(name, params)
+    return {"name": name, "params": params}
+
+
+@app.delete("/api/ui/filters/{name}", dependencies=[Depends(require_token)])
+def ui_filter_delete(name: str) -> dict[str, int]:
+    database.init_db()
+    return {"removed": database.filter_delete(name)}
+
+
 class CaseCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     description: str | None = Field(None, max_length=2000)

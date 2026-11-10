@@ -7,6 +7,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Search tab** (`g f`). One box over everything stored locally:
+  indicator values, verdicts, notes, cases, tags, malware families and the
+  full text of cached source answers (`deep`, on by default). Words are
+  ANDed, `"quoted phrases"` stay together, defanged input is understood, and
+  every row says where it matched. Filters: type, minimum score, verdict,
+  case, watched, has notes, last seen; sort; CSV export. Searches can be
+  saved by name. `GET /api/ui/search`, `GET/POST/DELETE /api/ui/filters` —
+  cache-only, no provider calls.
 - **Related panel.** The Enrich view's RELATED box now answers "what else
   should I look at?" from the local cache alone (`GET /api/ui/related`, no
   provider calls): same case, same malware family, same network (announced

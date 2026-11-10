@@ -168,6 +168,15 @@ def init_db():
         )
     ''')
 
+    # Saved searches for the dashboard's Search tab: name -> JSON params.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS saved_filters (
+            name TEXT PRIMARY KEY,
+            params TEXT NOT NULL,
+            created TIMESTAMP NOT NULL
+        )
+    ''')
+
     # Table: score_history — append-only snapshots of the composite
     # score per IOC, written by `update_last_score`. Backs the Watch
     # tab's "score over time" graph (a real series instead of the old
@@ -1336,5 +1345,49 @@ def watch_record(ioc_id: int, score: int, delta: int | None) -> None:
             (datetime.now(), int(score), delta, ioc_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# saved_filters — named searches for the Search tab
+# ---------------------------------------------------------------------------
+
+def filter_save(name: str, params: dict) -> None:
+    """Create or overwrite a saved search."""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'INSERT INTO saved_filters (name, params, created) VALUES (?, ?, ?) '
+            'ON CONFLICT(name) DO UPDATE SET params = excluded.params',
+            (name, json.dumps(params, sort_keys=True), datetime.now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def filter_list() -> list[dict]:
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('SELECT name, params FROM saved_filters ORDER BY LOWER(name)').fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        try:
+            params = json.loads(row["params"])
+        except (TypeError, ValueError):
+            params = {}
+        out.append({"name": row["name"], "params": params if isinstance(params, dict) else {}})
+    return out
+
+
+def filter_delete(name: str) -> int:
+    conn = get_db_connection()
+    try:
+        cur = conn.execute('DELETE FROM saved_filters WHERE name = ?', (name,))
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()

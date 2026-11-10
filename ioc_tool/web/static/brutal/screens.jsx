@@ -221,6 +221,220 @@ function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, 
   );
 }
 
+// ─────────── Search (everything in the local cache) ───────────
+
+const SEARCH_DEFAULTS = { q: "", type: "", min_score: "", verdict: "", case: "", watched: false, has_notes: false, since_days: "", deep: true, sort: "score" };
+const SEARCH_TYPES = ["ip", "domain", "url", "hash", "cve", "asn"];
+
+function searchQueryString(f, extra) {
+  const p = new URLSearchParams();
+  if (f.q.trim()) p.set("q", f.q.trim());
+  if (f.type) p.set("type", f.type);
+  if (f.min_score !== "") p.set("min_score", String(f.min_score));
+  if (f.verdict) p.set("verdict", f.verdict);
+  if (f.case) p.set("case", f.case);
+  if (f.watched) p.set("watched", "true");
+  if (f.has_notes) p.set("has_notes", "true");
+  if (f.since_days !== "") p.set("since_days", String(f.since_days));
+  if (!f.deep) p.set("deep", "false");
+  if (f.sort && f.sort !== "score") p.set("sort", f.sort);
+  Object.entries(extra || {}).forEach(([k, v]) => p.set(k, String(v)));
+  return p.toString();
+}
+
+function SearchView({ results, setResults, setActiveIocId, setTab, onEnrich, fmt }) {
+  const [f, setF] = React.useState(SEARCH_DEFAULTS);
+  const [data, setData] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const [saved, setSaved] = React.useState([]);
+  const [cases, setCases] = React.useState([]);
+  const seq = React.useRef(0);
+  const PAGE = 100;
+
+  const set = (patch) => setF(prev => ({ ...prev, ...patch }));
+  const loadSaved = () => window.ssApi("GET", "/api/ui/filters").then(setSaved).catch(() => {});
+
+  React.useEffect(() => {
+    loadSaved();
+    window.ssApi("GET", "/api/ui/cases").then(cs => setCases((cs || []).map(c => c.id))).catch(() => {});
+  }, []);
+
+  // Re-run on every change; typing is debounced, and a late answer to an
+  // older query is dropped so results never flip back.
+  React.useEffect(() => {
+    const mine = ++seq.current;
+    const timer = setTimeout(() => {
+      setBusy(true);
+      window.ssApi("GET", "/api/ui/search?" + searchQueryString(f, { limit: PAGE }))
+        .then(r => { if (mine === seq.current) { setData(r); setErr(null); } })
+        .catch(e => { if (mine === seq.current) setErr(String(e.message || e)); })
+        .finally(() => { if (mine === seq.current) setBusy(false); });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [f]);
+
+  const more = () => {
+    const mine = seq.current;
+    setBusy(true);
+    window.ssApi("GET", "/api/ui/search?" + searchQueryString(f, { limit: PAGE, offset: data.rows.length }))
+      .then(r => { if (mine === seq.current) setData(d => ({ ...r, rows: d.rows.concat(r.rows) })); })
+      .catch(e => setErr(String(e.message || e)))
+      .finally(() => setBusy(false));
+  };
+
+  const open = (row) => {
+    const want = row.ioc.toLowerCase();
+    const inStrip = (results || []).find(r => r.ioc.toLowerCase() === want);
+    if (inStrip) { setActiveIocId(inStrip.id); setTab("enrich"); return; }
+    window.shadowscopePivot("ioc", row.ioc, { limit: 20 })
+      .then(rows => {
+        const hit = (rows || []).find(r => r.ioc.toLowerCase() === want);
+        if (!hit) { onEnrich && onEnrich(row.ioc); return; }
+        setResults(prev => [hit, ...prev.filter(x => x.id !== hit.id)]);
+        setActiveIocId(hit.id); setTab("enrich");
+      })
+      .catch(() => { onEnrich && onEnrich(row.ioc); });
+  };
+
+  const saveFilter = () => {
+    const name = (prompt("Name for this filter:") || "").trim();
+    if (!name) return;
+    const params = {};
+    Object.keys(SEARCH_DEFAULTS).forEach(k => { if (f[k] !== SEARCH_DEFAULTS[k] && f[k] !== "") params[k] = f[k]; });
+    window.ssApi("POST", "/api/ui/filters", { name, params }).then(loadSaved).catch(e => setErr(String(e.message || e)));
+  };
+  const dropFilter = (name) => window.ssApi("DELETE", "/api/ui/filters/" + encodeURIComponent(name)).then(loadSaved).catch(e => setErr(String(e.message || e)));
+
+  const exportCsv = () => {
+    const esc = (v) => { let s = String(v ?? ""); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
+    const lines = [["ioc", "type", "score", "tier", "verdict", "case", "watched", "notes", "last_seen", "matched_in"].join(",")];
+    data.rows.forEach(r => lines.push([r.ioc, r.type, r.score, r.tier, r.verdict, r.case, r.watched ? "yes" : "no", r.notes, r.last_seen, r.matched.join("; ")].map(esc).join(",")));
+    window.ssDownload(`shadowscope-search-${new Date().toISOString().slice(0, 10)}.csv`, lines.join("\r\n"), "text/csv");
+  };
+
+  const typesOn = f.type ? f.type.split(",") : [];
+  const toggleType = (t) => set({ type: (typesOn.includes(t) ? typesOn.filter(x => x !== t) : typesOn.concat(t)).join(",") });
+  const dirty = JSON.stringify(f) !== JSON.stringify(SEARCH_DEFAULTS);
+  const rows = data ? data.rows : [];
+  const verdictColor = { malicious: "var(--crit, #f43f5e)", suspicious: "var(--med)", benign: "var(--safe)", false_positive: "var(--ink-2)" };
+
+  return (
+    <div className="batch">
+      <div className="batch-toolbar" style={{ flexWrap: "wrap", rowGap: 8 }}>
+        <span className="bt-title">SEARCH · {data ? data.total : "…"} {busy && <span className="dim">· searching</span>}</span>
+        <input className="bt-search" autoFocus value={f.q} onChange={e => set({ q: e.target.value })} style={{ flex: "1 1 320px", maxWidth: "none" }}
+               placeholder={'search everything — indicator, note, case, tag, malware family, any text a source returned · "exact phrase"'} />
+        <button className="btn-outline" onClick={saveFilter} disabled={!dirty} title="Save the current search and filters under a name">SAVE FILTER</button>
+        <button className="btn-outline" onClick={exportCsv} disabled={rows.length === 0}>EXPORT .csv</button>
+        <button className="btn-outline" onClick={() => setF(SEARCH_DEFAULTS)} disabled={!dirty}>RESET</button>
+      </div>
+      <div className="batch-toolbar" style={{ flexWrap: "wrap", rowGap: 8, borderTop: "none" }}>
+        <div className="bt-group">
+          <span className="bt-label">type</span>
+          {SEARCH_TYPES.map(t => <button key={t} className={`pill ${typesOn.includes(t) ? "on" : ""}`} onClick={() => toggleType(t)}>{t}</button>)}
+        </div>
+        <div className="bt-group">
+          <span className="bt-label">score ≥</span>
+          <select className="bt-select" value={f.min_score} onChange={e => set({ min_score: e.target.value === "" ? "" : Number(e.target.value) })}>
+            <option value="">any</option><option value="20">20 · low</option><option value="40">40 · medium</option><option value="60">60 · high</option><option value="80">80 · critical</option>
+          </select>
+        </div>
+        <div className="bt-group">
+          <span className="bt-label">verdict</span>
+          <select className="bt-select" value={f.verdict} onChange={e => set({ verdict: e.target.value })}>
+            <option value="">any</option><option value="any">has a verdict</option><option value="none">no verdict yet</option>
+            <option value="malicious">malicious</option><option value="suspicious">suspicious</option><option value="benign">benign</option><option value="false_positive">false positive</option>
+          </select>
+        </div>
+        <div className="bt-group">
+          <span className="bt-label">case</span>
+          <select className="bt-select" value={f.case} onChange={e => set({ case: e.target.value })}>
+            <option value="">any</option><option value="any">in a case</option><option value="none">not in a case</option>
+            {cases.concat(f.case && !["any", "none"].includes(f.case) && !cases.includes(f.case) ? [f.case] : []).map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="bt-group">
+          <span className="bt-label">seen</span>
+          <select className="bt-select" value={f.since_days} onChange={e => set({ since_days: e.target.value === "" ? "" : Number(e.target.value) })}>
+            <option value="">any time</option><option value="1">last 24 h</option><option value="7">last 7 days</option><option value="30">last 30 days</option>
+          </select>
+        </div>
+        <div className="bt-group">
+          <button className={`pill ${f.watched ? "on" : ""}`} onClick={() => set({ watched: !f.watched })}>★ watched</button>
+          <button className={`pill ${f.has_notes ? "on" : ""}`} onClick={() => set({ has_notes: !f.has_notes })}>✎ has notes</button>
+          <button className={`pill ${f.deep ? "on" : ""}`} onClick={() => set({ deep: !f.deep })}
+                  title="On: also search the full text of every cached source answer (finds org names, hostnames, URLs…). Off: only indicators, notes, cases, tags and families — faster on a big cache.">deep</button>
+        </div>
+        <div className="bt-group">
+          <span className="bt-label">sort</span>
+          <select className="bt-select" value={f.sort} onChange={e => set({ sort: e.target.value })}>
+            <option value="score">score ↓</option><option value="recent">last seen ↓</option><option value="value">indicator a→z</option>
+          </select>
+        </div>
+      </div>
+      {saved.length > 0 && (
+        <div className="batch-toolbar" style={{ flexWrap: "wrap", rowGap: 6, borderTop: "none" }}>
+          <span className="bt-label">saved</span>
+          {saved.map(s => (
+            <span key={s.name} style={{ display: "inline-flex" }}>
+              <button className="pill" title={JSON.stringify(s.params)} onClick={() => setF({ ...SEARCH_DEFAULTS, ...s.params })}>{s.name}</button>
+              <button className="pill" title="delete this saved filter" style={{ borderLeft: "none", padding: "0 6px" }} onClick={() => dropFilter(s.name)}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      {err && <div className="small" style={{ color: "var(--bad,#ff7474)", padding: "8px 12px" }}>// {err}</div>}
+
+      <table className="batch-table">
+        <thead>
+          <tr>
+            <th style={{ width: "6ch" }}>score</th><th style={{ width: "10ch" }}>tier</th><th style={{ width: "8ch" }}>type</th>
+            <th>indicator</th><th style={{ width: "14ch" }}>verdict</th><th style={{ width: "16ch" }}>case</th>
+            <th style={{ width: "8ch" }}>flags</th><th>found in</th><th style={{ width: "12ch" }}>last seen</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const s = sevOf(r.score || 0);
+            const shown = fmt(r.ioc);
+            return (
+              <tr key={r.ioc} className="batch-row" onClick={() => open(r)}>
+                {r.score == null
+                  ? <td className="bt-score dim" style={{ borderLeft: "3px solid var(--line-2)" }} title="in cache, no stored score">—</td>
+                  : <td className="bt-score" style={{ color: s.fg, borderLeft: `3px solid ${s.fg}` }}>{r.score}</td>}
+                <td>{r.tier ? <span className="tier-mini" style={{ color: s.fg, borderColor: s.fg + "55" }}>{s.label}</span> : <span className="dim">—</span>}</td>
+                <td className="mono dim">{r.type}</td>
+                <td className="bt-ioc"><Copyable text={shown}>{shown.length > 60 ? shown.slice(0, 56) + "…" : shown}</Copyable></td>
+                <td className="small" style={{ color: verdictColor[r.verdict] || "var(--ink-3)" }}>{r.verdict ? r.verdict.replace("_", " ") : "—"}</td>
+                <td className="small">{r.case || <span className="dim">—</span>}</td>
+                <td className="small">{r.watched && <span title="on the watchlist">★ </span>}{r.notes > 0 && <span title={r.notes + " note(s)"}>✎{r.notes}</span>}</td>
+                <td className="dim small">{r.matched.join(" · ")}</td>
+                <td className="dim small">{r.last_seen ? window.SS_STAMP(String(r.last_seen).replace(" ", "T")) : "—"}</td>
+                <td className="bt-arrow">▸</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {data && rows.length < data.total && (
+        <div style={{ padding: 10, textAlign: "center" }}>
+          <button className="btn-outline" onClick={more} disabled={busy}>SHOW MORE · {rows.length} of {data.total}</button>
+        </div>
+      )}
+      {data && data.total === 0 && (
+        <div className="tab-empty">
+          <div className="tab-empty-title">// nothing matches</div>
+          <div className="tab-empty-desc">
+            {dirty ? "Every word has to match somewhere, and all filters apply together. Remove a word or a filter." : "The cache is empty — enrich an indicator first."}
+            {f.q.trim() && !f.q.trim().includes(" ") && <React.Fragment> Not looked up yet? <button className="tab-empty-link" onClick={() => onEnrich && onEnrich(f.q.trim())}>ENRICH {f.q.trim()}</button></React.Fragment>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─────────── Watch (live stream) ───────────
 
 function WatchlistPanel({ fmt }) {
