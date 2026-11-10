@@ -539,6 +539,11 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
         # Real "fetched" time per source (newest cache row), replacing the
         # dashboard's old hash-derived placeholder. Sources that are computed
         # locally and never persisted (TOR, Heuristics) simply have none.
+        if "degraded" not in result:
+            stored = database.get_last_unavailable(ioc_id)
+            shaped["degraded"] = bool(stored)
+            shaped["unavailable"] = stored
+            shaped["agreement"]["sources_unavailable"] = len(stored)
         fetched = database.get_latest_fetch_times(ioc_id)
         key_by_display = {display: key for key, display in _CACHED_SOURCES}
         for source, entry in modules_ui.items():

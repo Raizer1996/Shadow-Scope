@@ -53,3 +53,15 @@ def test_ui_shape_carries_real_fetch_time_and_degraded(monkeypatch, tmp_path):
 def test_nvd_reports_key_state(monkeypatch):
     entry = next(s for s in api._SOURCE_REGISTRY if s["id"] == "NVD")
     assert entry["env"] == "NVD_API_KEY" and entry.get("anonymous_ok") is True
+
+
+def test_degraded_state_survives_into_cache_derived_rows(monkeypatch, tmp_path):
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
+    _db.init_db()
+    ioc_id = _db.add_or_update_ioc("203.0.113.51", "ip")
+    _db.set_last_unavailable(ioc_id, {"OTX": "timeout"})
+    cached_row = {"ioc": "203.0.113.51", "type": "ip", "final_score": 90, "modules": {}}   # no 'degraded' key
+    shaped = api._to_ui_shape(cached_row, prev_score=None)
+    assert shaped["degraded"] is True and shaped["unavailable"] == {"OTX": "timeout"}
+    _db.set_last_unavailable(ioc_id, {})                                                   # clean run clears it
+    assert api._to_ui_shape(cached_row, prev_score=None)["degraded"] is False
