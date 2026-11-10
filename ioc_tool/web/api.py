@@ -40,16 +40,17 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .. import __version__
 from ..core import database, enrich, extractor, output, parser
 from ..core import defang as defang_mod
 from ..core import llm as llm_mod
 from . import _synthesis, eventbus
 
-API_VERSION = "0.9.0"
+API_VERSION = __version__  # single source: ioc_tool/__init__.py
 
 # Static assets for the dashboard UI. The directory holds index.html,
 # styles.css, app.js — all served verbatim, no build step.
@@ -162,6 +163,7 @@ class CacheClearResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    version: str
 
 
 class ServiceInfoResponse(BaseModel):
@@ -321,20 +323,23 @@ def root() -> ServiceInfoResponseWithUI:
 
 
 @app.get("/ui", include_in_schema=False)
-def ui() -> FileResponse:
+def ui() -> HTMLResponse:
     """Serve the brutalist dashboard (default).
 
     The HTML itself is harmless — the JSON data behind it is auth-gated by
     the ``require_token`` dependency on each fetch the JS makes. The route
     intentionally has **no** auth dependency so an unauthenticated browser
-    can still load the shell and prompt the user for a token.
+    can still load the shell.
 
-    The current build is a React+Babel-standalone prototype using mock data
-    from ``shared/data.js``. Backend wiring lands in a follow-up.
+    The shell is served from disk with one injection: ``window.SHADOWSCOPE_VERSION``
+    so the UI badge always shows the running package version instead of a
+    hard-coded string.
     """
-    return FileResponse(
-        STATIC_DIR / "index.html",
-        media_type="text/html",
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    inject = f'<script>window.SHADOWSCOPE_VERSION = "{API_VERSION}";</script>\n</head>'
+    html = html.replace("</head>", inject, 1)
+    return HTMLResponse(
+        html,
         headers={"Cache-Control": "no-cache, must-revalidate"},
     )
 
@@ -342,7 +347,7 @@ def ui() -> FileResponse:
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     """Liveness check — always public so healthchecks don't need a token."""
-    return HealthResponse(status="ok")
+    return HealthResponse(status="ok", version=API_VERSION)
 
 
 # ---------------------------------------------------------------------------

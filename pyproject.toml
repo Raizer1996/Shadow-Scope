@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shadowscope"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Terminal-based IOC enrichment + composite risk scoring for SOC / IR / threat-intel work"
 readme = "README.md"
 license = { text = "MIT" }
@@ -53,6 +53,9 @@ Changelog = "https://github.com/Raizer1996/Shadow-Scope/blob/main/CHANGELOG.md"
 [project.scripts]
 shadowscope = "ioc_tool.main:main"
 shadowscope-mcp = "ioc_tool.mcp_server:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "ioc_tool.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["ioc_tool*"]

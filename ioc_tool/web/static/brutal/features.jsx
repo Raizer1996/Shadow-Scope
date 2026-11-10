@@ -1620,7 +1620,7 @@ function BootScreen({ onDone }) {
 
   useEffect(() => {
     const seq = [
-      { t: 50,   text: "[boot] shadowscope v0.9.2 · ioc enrichment", cls: "" },
+      { t: 50,   text: "[boot] shadowscope " + ("v" + (window.SHADOWSCOPE_VERSION || "dev")) + " · ioc enrichment", cls: "" },
       { t: 150,  text: "[boot] loading config /etc/shadowscope.yml …  ok", cls: "" },
       { t: 250,  text: "[boot] initializing heuristics engine …       ok", cls: "" },
       { t: 350,  text: "[probe] VirusTotal           api.virustotal.com   ok  412ms", cls: "ok" },

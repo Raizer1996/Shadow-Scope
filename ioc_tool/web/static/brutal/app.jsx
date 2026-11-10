@@ -462,7 +462,7 @@ function TopBar({ tab, setTab, setSourcesOpen, setHelpOpen }) {
         <div className="brand-text">
           <div className="brand-row1">
             <span className="brand-name">SHADOWSCOPE</span>
-            <span className="brand-ver">v0.9.2</span>
+            <span className="brand-ver">{"v" + (window.SHADOWSCOPE_VERSION || "dev")}</span>
           </div>
           <span className="brand-tag">// indicator of compromise · enrichment</span>
         </div>
