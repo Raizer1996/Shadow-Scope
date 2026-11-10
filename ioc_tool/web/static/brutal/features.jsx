@@ -895,6 +895,83 @@ function PivotPanel({ ioc, results, setResults, setActiveIocId, onEnrich, fmt })
   );
 }
 
+// ─────────── Timeline: every dated fact about one indicator ───────────
+
+const TIMELINE_KINDS = {
+  source:  { tag: "SOURCE",  color: "var(--ink-2)",  title: "reported by a threat-intel source" },
+  score:   { tag: "SCORE",   color: "var(--accent)", title: "the composite score changed here" },
+  analyst: { tag: "YOU",     color: "var(--safe)",   title: "something you did" },
+  local:   { tag: "LOCAL",   color: "var(--ink-3)",  title: "recorded by this ShadowScope install" },
+};
+
+function IocTimeline({ ioc }) {
+  const [events, setEvents] = React.useState(null);
+  const [all, setAll] = React.useState(false);
+  const [hide, setHide] = React.useState({});
+  const stamp = JSON.stringify([ioc.verdict, (ioc.notes || []).length, ioc.watch, ioc.case]);
+
+  React.useEffect(() => {
+    let live = true;
+    window.ssApi("GET", "/api/ui/timeline?ioc=" + encodeURIComponent(ioc.ioc))
+      .then(r => { if (live) setEvents(r.events || []); })
+      .catch(() => { if (live) setEvents([]); });
+    return () => { live = false; };
+  }, [ioc.id, ioc.enriched_at, stamp]);
+  React.useEffect(() => { setAll(false); }, [ioc.id]);
+
+  if (!events || events.length === 0) return null;
+  const SHOW = 10;
+  const kinds = Object.keys(TIMELINE_KINDS).filter(k => events.some(e => e.kind === k));
+  const visible = events.filter(e => !hide[e.kind]);
+  const rows = all ? visible : visible.slice(0, SHOW);
+  const oldest = events[events.length - 1];
+  let lastYear = null;
+
+  return (
+    <section className="whois-block">
+      <div className="sec-head">
+        <span className="sec-title glitch" data-text="TIMELINE">TIMELINE</span>
+        <span className="sec-meta">{events.length} dated events · since <b>{oldest.at.slice(0, 10)}</b></span>
+        <span className="sec-meta" style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          {kinds.map(k => (
+            <button key={k} className={`pill ${hide[k] ? "" : "on"}`} title={(hide[k] ? "show: " : "hide: ") + TIMELINE_KINDS[k].title}
+                    onClick={() => setHide(h => ({ ...h, [k]: !h[k] }))}>{TIMELINE_KINDS[k].tag}</button>
+          ))}
+        </span>
+      </div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, borderLeft: "1px solid var(--line-2)", marginLeft: 6 }}>
+        {rows.map((e, i) => {
+          const k = TIMELINE_KINDS[e.kind] || TIMELINE_KINDS.local;
+          const year = e.at.slice(0, 4);
+          const yearRow = year !== lastYear;
+          lastYear = year;
+          return (
+            <React.Fragment key={i}>
+              {yearRow && <div className="dim" style={{ padding: "6px 0 2px 12px", letterSpacing: "0.18em", fontSize: 10 }}>{year}</div>}
+              <div style={{ display: "grid", gridTemplateColumns: "17ch 8ch 1fr", gap: 10, padding: "3px 0 3px 12px", alignItems: "baseline", opacity: e.future ? 0.7 : 1 }}>
+                <span className="dim" title={e.at + " UTC"}>{e.at.slice(5, 10)}{e.date_only ? "" : " " + e.at.slice(11, 16)}{e.future ? " ⟶" : ""}</span>
+                <span title={k.title} style={{ color: k.color, fontSize: 9.5, letterSpacing: "0.12em", fontWeight: 800 }}>{k.tag}</span>
+                <span style={{ overflowWrap: "anywhere" }}>
+                  <b style={{ fontWeight: e.kind === "source" ? 500 : 700 }}>{e.label}</b>
+                  {e.future && <span className="dim"> · upcoming</span>}
+                  {e.detail && <span className="dim"> · {e.detail}</span>}
+                  {e.source && <span className="dim"> · {e.source}</span>}
+                </span>
+              </div>
+            </React.Fragment>
+          );
+        })}
+        {visible.length === 0 && <div className="dim" style={{ padding: "6px 12px" }}>// every kind is hidden — switch one back on</div>}
+      </div>
+      {visible.length > SHOW && (
+        <button className="pill" style={{ marginTop: 8 }} onClick={() => setAll(a => !a)}>
+          {all ? "show latest " + SHOW : `show all ${visible.length}`}
+        </button>
+      )}
+    </section>
+  );
+}
+
 // ─────────── Drill-down chip ───────────
 
 function DrillChip({ kind, value, onPivot, inline }) {

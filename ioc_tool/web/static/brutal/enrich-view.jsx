@@ -283,6 +283,7 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
       <MitreStrip ioc={ioc} onPivot={onPivot} />
       <ScoreHistorySparkline ioc={ioc} />
       <WhoisTimeline ioc={ioc} fmt={fmt} />
+      <IocTimeline ioc={ioc} />
       <CrtshBlock ioc={ioc} fmt={fmt} />
 
       <div className={`enrich-split ${wide ? "solo" : ""}`}>

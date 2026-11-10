@@ -1260,6 +1260,21 @@ def ui_related(
     }
 
 
+@app.get("/api/ui/timeline", dependencies=[Depends(require_token)])
+def ui_timeline(
+    ioc: str = Query(..., min_length=1, description="Cached IOC to build the timeline for"),
+) -> dict[str, Any]:
+    """Every dated fact about one cached IOC, newest first. Cache-only.
+
+    Mixes what sources reported (registration, sightings, listings) with
+    what happened here (score changes, verdicts, notes, cases, watchlist).
+    """
+    from ..core import timeline as timeline_mod
+
+    ioc_id, value = _require_ioc_id(ioc)
+    return {"ioc": value, "events": timeline_mod.timeline_for(ioc_id)}
+
+
 _SEARCH_VERDICTS = {"any", "none", *database.VERDICTS}
 # Keys a saved filter may carry — the Search tab's own state, nothing else.
 _FILTER_KEYS = ("q", "type", "min_score", "max_score", "verdict", "case",

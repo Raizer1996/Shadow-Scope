@@ -7,6 +7,13 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Timeline per indicator.** The Enrich view gains a TIMELINE block: one
+  newest-first list mixing what sources reported (registered, first/last
+  seen, listed, certificate issued, CVE published, KEV added, upcoming
+  expiry) with what happened locally (first enriched, each score change,
+  verdicts, notes, case/tag assignments, watchlist). Kinds can be toggled;
+  two sources reporting the same fact on the same day are one row.
+  `GET /api/ui/timeline` — cache-only.
 - **Search tab** (`g f`). One box over everything stored locally:
   indicator values, verdicts, notes, cases, tags, malware families and the
   full text of cached source answers (`deep`, on by default). Words are
