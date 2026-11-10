@@ -58,6 +58,44 @@ rate_limited_ctx: ContextVar[set[str] | None] = ContextVar(
 )
 
 
+# Per-task failure ledger — the tri-state companion to ``rate_limited_ctx``.
+# Every way a source can fail to *answer* (bucket refusal, timeout,
+# connection error, 429 after retry, 5xx, 401/403) is recorded here keyed
+# by ``source_key`` with a short machine-readable reason. Modules keep
+# returning ``None`` exactly as before; the orchestrator consults this
+# ledger to tell "answered: no hit" from "never answered" and marks the
+# result ``degraded`` instead of silently scoring without the source.
+failures_ctx: ContextVar[dict[str, str] | None] = ContextVar(
+    "failures_ctx", default=None
+)
+
+
+def mark_failure(source_key: str, reason: str) -> None:
+    """Record that ``source_key`` failed to answer (first reason wins)."""
+    ledger = failures_ctx.get()
+    if ledger is not None:
+        ledger.setdefault(source_key, reason)
+
+
+def failure_reason(source_key: str) -> str | None:
+    """Reason recorded for ``source_key`` in the active ledger, or ``None``."""
+    ledger = failures_ctx.get()
+    if ledger is None:
+        return None
+    return ledger.get(source_key)
+
+
+def _classify_response(source_key: str, response: requests.Response) -> None:
+    """Record upstream answers that are failures, not data."""
+    code = response.status_code
+    if code == 429:
+        mark_failure(source_key, "rate_limited")
+    elif code >= 500:
+        mark_failure(source_key, f"upstream_error_{code}")
+    elif code in (401, 403):
+        mark_failure(source_key, f"auth_error_{code}")
+
+
 def _mark_rate_limited(source_key: str) -> None:
     """Record that ``source_key`` was rate-limited in the active ledger."""
     ledger = rate_limited_ctx.get()
@@ -106,14 +144,20 @@ def request(
         # the upstream, so record it in the ledger for the orchestrator's
         # failover hook.
         _mark_rate_limited(source_key)
+        mark_failure(source_key, "rate_limited")
         return None
     if timeout is None:
         timeout = _DEFAULT_TIMEOUT_S
     try:
         response = requests.request(method, url, timeout=timeout, **kwargs)
+    except requests.Timeout:
+        mark_failure(source_key, "timeout")
+        return None
     except requests.RequestException:
+        mark_failure(source_key, "connection_error")
         return None
     if response.status_code != 429:
+        _classify_response(source_key, response)
         return response
 
     # One retry after honouring Retry-After.
@@ -140,15 +184,21 @@ def request(
         # leak the upstream's error body downstream and break the
         # "soft-fail to None" contract callers rely on.
         _mark_rate_limited(source_key)
+        mark_failure(source_key, "rate_limited")
         return None
     try:
         retry_response = requests.request(method, url, timeout=timeout, **kwargs)
+    except requests.Timeout:
+        mark_failure(source_key, "timeout")
+        return None
     except requests.RequestException:
+        mark_failure(source_key, "connection_error")
         return None
     if retry_response.status_code == 429:
         # Even the retry got throttled — flag the source so the
         # orchestrator can transparently fall back to a sibling provider.
         _mark_rate_limited(source_key)
+    _classify_response(source_key, retry_response)
     return retry_response
 
 

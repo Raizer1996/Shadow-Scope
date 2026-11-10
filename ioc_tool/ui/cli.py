@@ -816,6 +816,13 @@ def handle_enrich(args: argparse.Namespace) -> None:
         print(output_mod.to_markdown(results, include_summaries=summaries if want_summary else None))
     else:
         print_aggregated_table(results, should_defang=getattr(args, 'defang', False))
+        for res in results:
+            if res.get('degraded'):
+                missing = ', '.join(f"{k} ({v})" for k, v in (res.get('unavailable') or {}).items())
+                console.print(
+                    f"[yellow]⚠ {res.get('ioc')}: degraded — no answer from {missing}. "
+                    "Score uses the remaining sources; history not updated.[/yellow]"
+                )
         if want_summary:
             for idx, res in enumerate(results):
                 verdict = summaries.get(idx)
@@ -1495,6 +1502,12 @@ def handle_watch(args: argparse.Namespace) -> None:
             result = enrich.enrich_ioc(value, ioc_type, no_cache=True)
         except Exception as exc:
             err_console.print(f"[red]watch: {value} crashed — {exc}[/red]")
+            continue
+        if result.get('degraded'):
+            # A throttled / timed-out opinion source makes the new composite
+            # incomparable with the stored one — never alert on it.
+            missing = ', '.join((result.get('unavailable') or {}).keys())
+            err_console.print(f"[yellow]watch: {value} degraded ({missing}) — delta skipped[/yellow]")
             continue
         new = int(result.get('final_score') or 0)
         prev_int = int(prev) if prev is not None else 0
