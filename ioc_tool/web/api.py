@@ -98,6 +98,12 @@ class BulkEnrichRequest(BaseModel):
     )
 
 
+class UiExtractRequest(BaseModel):
+    """Request body for ``POST /api/ui/extract`` (Batch tab paste box)."""
+
+    text: str = Field(..., max_length=256_000, description="Pasted list, log excerpt or report")
+
+
 class ExtractRequest(BaseModel):
     """Request body for ``POST /extract``."""
 
@@ -844,6 +850,54 @@ async def ui_enrich_stream(
             "Connection": "keep-alive",
         },
     )
+
+
+_UI_EXTRACT_MAX = 200
+_UI_EXTRACT_TYPES = ("ip", "domain", "url", "hash", "cve", "asn")
+
+
+@app.post("/api/ui/extract", dependencies=[Depends(require_token)])
+async def ui_extract(payload: UiExtractRequest) -> dict[str, Any]:
+    """Pull indicators out of pasted text **without enriching them**.
+
+    The Batch tab calls this once, then enriches each indicator through
+    ``/api/ui/enrich`` so it can show per-item progress and stop on demand.
+    Extraction runs off the event loop; the body is capped at 256 KB and the
+    result at 200 indicators. Each line is also tried as a single indicator,
+    which is how CVE ids and ``AS12345`` (not covered by the free-text
+    extractor) get in.
+    """
+    text = payload.text or ""
+    found = await asyncio.to_thread(extractor.extract_iocs, text)
+    seen: set[str] = set()
+    iocs: list[dict[str, str]] = []
+    skipped = 0
+
+    def add(raw: str) -> None:
+        nonlocal skipped
+        ioc_type = parser.detect_type(raw)
+        if ioc_type not in _UI_EXTRACT_TYPES:
+            skipped += 1
+            return
+        value = parser.normalize_value(raw, ioc_type)
+        key = value.lower()
+        if key not in seen:
+            seen.add(key)
+            iocs.append({"value": value, "type": ioc_type})
+
+    for line in text.splitlines():
+        token = line.strip().strip(",;")
+        if token and not token.startswith("#") and " " not in token:
+            add(token)
+    for bucket in found.values():
+        for raw in bucket:
+            add(raw)
+    return {
+        "iocs": iocs[:_UI_EXTRACT_MAX],
+        "count": min(len(iocs), _UI_EXTRACT_MAX),
+        "truncated": max(0, len(iocs) - _UI_EXTRACT_MAX),
+        "skipped": skipped,
+    }
 
 
 @app.get("/api/ui/recent", dependencies=[Depends(require_token)])

@@ -123,11 +123,11 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     # source_key: (capacity, period_seconds)
     "virustotal":   (4, 60),       # 4 req/min
     "abuseipdb":    (40, 60),      # 1000 / day ~ 40 / hour, smoothed
-    "ipqs":         (4, 60),       # cautious — free tier is monthly
+    "ipqs":         (20, 60),      # 5k / month free; a 10-IOC batch must not starve
     "shodan":       (1, 1),        # 1 req/sec
-    "otx":          (10, 60),
-    "urlscan":      (2, 60),       # very tight free tier
-    "pulsedive":    (10, 60),
+    "otx":          (30, 60),      # 10k / hour with a key
+    "urlscan":      (30, 60),      # search API: 120 / min, 1k / hour on the free tier
+    "pulsedive":    (25, 60),      # free tier 30 / min
     "greynoise":    (10, 60),
     "abstract":     (10, 60),
     "censys":       (10, 60),
@@ -137,8 +137,8 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     "kev":          (4, 3600),     # 4 / hour — CISA catalog is daily
     "feodo":        (4, 3600),     # 4 / hour — abuse.ch blocklist
     "sslbl":        (4, 3600),     # 4 / hour — abuse.ch blocklist
-    "urlhaus":      (4, 3600),     # 4 / hour — abuse.ch blocklist
-    "threatfox":    (4, 3600),     # 4 / hour — abuse.ch blocklist
+    "urlhaus":      (30, 60),      # per-IOC query API (was mis-set as a daily list fetch)
+    "threatfox":    (30, 60),      # per-IOC query API (was mis-set as a daily list fetch)
     # Per-IOC enrichment APIs — public, no-auth, no published quota.
     "epss":         (30, 60),      # FIRST.org — generous
     "asn":          (10, 60),      # RIPE Stat — generous, polite cap
@@ -146,10 +146,10 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     "crtsh":        (4, 60),       # public CT search, can be slow (fallback)
     "ctlogs":       (90, 3600),    # api.ctlogs.dev: 100/h anonymous or free key
     "nvd":          (5, 30),       # NVD: 5 / 30 s unauthenticated
-    "pdns":         (5, 60),       # Mnemonic free tier — be polite
+    "pdns":         (15, 60),      # Mnemonic free tier: 1k / day
     # Sandbox / submission APIs — caps per their published free tiers.
     "hybrid_analysis": (5, 60),    # public-key tier ~200 / hour
-    "malwarebazaar": (10, 60),     # abuse.ch — generous
+    "malwarebazaar": (30, 60),     # abuse.ch — generous
     "filescan_io":  (5, 60),       # community tier
     "joe_sandbox":  (4, 60),       # Joe Cloud free is very tight
     # Outbound webhook receivers (SIEM / ticketing / IR platforms). Most are

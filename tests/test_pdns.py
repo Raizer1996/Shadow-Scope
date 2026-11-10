@@ -258,7 +258,7 @@ def test_pdns_rate_limit_bucket_registered():
 
     assert "pdns" in ratelimit._DEFAULT_BUCKETS
     capacity, period = ratelimit._DEFAULT_BUCKETS["pdns"]
-    assert capacity == 5
+    assert capacity == 15   # raised from 5: a 10-IP batch must fit in one window
     assert period == 60
 
 

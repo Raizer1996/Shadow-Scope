@@ -7,6 +7,13 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Batch tab: paste or drop a list.** `+ ADD INDICATORS` opens a box that
+  takes one indicator per line or any text (log, email, report) and a
+  dropped/selected file. New `POST /api/ui/extract` pulls the indicators out
+  (off the event loop, 256 KB / 200-indicator caps, CVE ids and AS numbers
+  included) and the tab enriches them three at a time with a progress bar,
+  a STOP button and failed/degraded counts. Degraded rows get a marker.
+  `EXPORT .csv` now works (it had no handler) and neutralises formula cells.
 - **Wide-screen Enrich layout (>= 1600 px).** The source attribution table
   moves into the hero's right column: spider and map sit side by side with
   the table directly beneath (beside the spider for non-IP types), so the
@@ -19,6 +26,10 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Rate limits starved small batches.** URLhaus and ThreatFox were
+  configured as daily list downloads (4 / hour) although they are per-IOC
+  query APIs, and URLscan, IPQS, OTX, Pulsedive, PDNS and MalwareBazaar were
+  set well under their free tiers — a 10-IP run marked them unavailable.
 - **Dashboard showed things the API did not say.** Degraded results now carry
   a visible banner naming each unavailable source and its reason, the spider
   marks those axes `n/a` instead of "no hit", and the attribution header
