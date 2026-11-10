@@ -230,6 +230,38 @@ _SourceResult = tuple[str, dict, int, bool]
 # (display_name, data, score, contributes_to_composite)
 
 
+class Unavailable:
+    """A source that did not *answer* — as opposed to answering "no hit".
+
+    Produced by :func:`_run_source` when the fetcher returned ``None`` but
+    the HTTP failure ledger (``core.http.failures_ctx``) shows the source
+    timed out, was rate-limited, errored upstream or rejected our key, or
+    when the fetcher itself raised. The composite is still computed from
+    the sources that did answer, but the result is flagged ``degraded`` and
+    — when an opinion source is missing — the score is **not** persisted as
+    the IOC's new ``last_score`` / history point, so a throttled bulk run
+    can never produce a fake "score dropped to 0" alert.
+    """
+
+    __slots__ = ("display_name", "reason", "contributes")
+
+    def __init__(self, display_name: str, reason: str, contributes: bool = True):
+        self.display_name = display_name
+        self.reason = reason
+        self.contributes = contributes
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"Unavailable({self.display_name!r}, {self.reason!r})"
+
+
+def _failure_for(keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        reason = http.failure_reason(key)
+        if reason:
+            return reason
+    return None
+
+
 def _run_source(
     ioc_id: int,
     source_key: str,
@@ -241,7 +273,8 @@ def _run_source(
     cache_filter: Callable[[dict], dict | None] | None = None,
     post_process: Callable[[dict], tuple[dict, int]] | None = None,
     no_cache: bool = False,
-) -> _SourceResult | None:
+    http_keys: tuple[str, ...] | None = None,
+) -> _SourceResult | Unavailable | None:
     """Run a single enrichment source: cache → fetch → score → persist.
 
     Parameters mirror the historical per-source blocks in :func:`enrich_ioc`:
@@ -264,10 +297,19 @@ def _run_source(
             data = json.loads(cached['data'])
             return (display_name, data, cached['score'], not info_only)
 
-    data = fetcher()
+    try:
+        data = fetcher()
+    except Exception as exc:  # never-crash contract, but don't pretend it was "no hit"
+        return Unavailable(display_name, f"exception:{type(exc).__name__}", not info_only)
     if cache_filter is not None and data is not None:
         data = cache_filter(data)
     if data is None:
+        # Tri-state: did the source answer "nothing", or not answer at all?
+        # ``http_keys`` lets a DB source key differ from the module's HTTP
+        # bucket key (asn_bgpview → asn) or name a fallback chain (crt.sh).
+        reason = _failure_for(http_keys or (source_key,))
+        if reason:
+            return Unavailable(display_name, reason, not info_only)
         return None
 
     if post_process is not None:
@@ -392,15 +434,19 @@ def _whois_post_process(data: dict) -> tuple[dict, int]:
 # ---------------------------------------------------------------------------
 
 
-def _tor_check(value: str) -> _SourceResult | None:
+def _tor_check(value: str) -> _SourceResult | Unavailable | None:
     """Tor exit-node check. Local file lookup, kept on the thread pool for
     parity with the other sources (cheap, but predictable scheduling).
     """
     try:
         is_tor = tor.is_tor_node(value)
-    except Exception:
-        return None
+    except Exception as exc:
+        return Unavailable('TOR', f"exception:{type(exc).__name__}")
     if not is_tor:
+        # A miss is only trustworthy if the exit-node list could be refreshed.
+        reason = http.failure_reason(tor._SOURCE)
+        if reason and not tor.cache_present():
+            return Unavailable('TOR', reason)
         return None
     return ('TOR', {'is_tor': True}, 100, True)
 
@@ -458,7 +504,7 @@ def _apply_vt_otx_failover(
             )
         except Exception:
             otx_result = None
-        if otx_result is not None:
+        if otx_result is not None and not isinstance(otx_result, Unavailable):
             display_name, data, src_score, contributes = otx_result
             results[display_name] = {'score': src_score, 'data': data}
             if contributes:
@@ -513,10 +559,12 @@ async def enrich_ioc_async(
     # via core.http will record its source key here; the failover hook
     # in _enrich_ioc_inner reads the ledger after gather.
     ledger_token = http.rate_limited_ctx.set(set())
+    failures_token = http.failures_ctx.set({})
     try:
         return await _enrich_ioc_inner(value, ioc_type)
     finally:
         http.rate_limited_ctx.reset(ledger_token)
+        http.failures_ctx.reset(failures_token)
         if no_cache_token is not None:
             no_cache_ctx.reset(no_cache_token)
 
@@ -547,8 +595,10 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     raw_results = await asyncio.gather(
         *(coro for _, coro in tasks), return_exceptions=True,
     )
-    results, scores = _collect_raw_results(raw_results)
-    return _finalize_enrich(value, ioc_type, ioc_id, results, scores, planned_sources)
+    results, scores, unavailable = _collect_raw_results(raw_results)
+    return _finalize_enrich(
+        value, ioc_type, ioc_id, results, scores, planned_sources, unavailable=unavailable,
+    )
 
 
 def _build_enrich_tasks(
@@ -747,6 +797,7 @@ def _build_enrich_tasks(
             _run_source, ioc_id, 'crtsh', 'crt.sh',
             lambda: _ct_fetch(value),
             score.calculate_crtsh_score,
+            http_keys=('crtsh',),
         ))
 
     # --- WHOIS — domain only (datetime serialisation hook) ---
@@ -765,6 +816,7 @@ def _build_enrich_tasks(
             lambda: asn_mod.enrich(value),
             score.calculate_asn_score,
             info_only=True,
+            http_keys=('asn',),
         ))
 
     # --- CVE enrichment fan-out: NVD + EPSS + CISA KEV ---
@@ -794,25 +846,30 @@ def _build_enrich_tasks(
 
 def _collect_raw_results(
     raw_results: list,
-) -> tuple[dict[str, Any], list[tuple[str, int]]]:
-    """Reduce ``asyncio.gather(return_exceptions=True)`` output to (results, scores).
+) -> tuple[dict[str, Any], list[tuple[str, int]], list[Unavailable]]:
+    """Reduce ``asyncio.gather(return_exceptions=True)`` output to
+    ``(results, scores, unavailable)``.
 
-    A source that crashed or returned ``None`` is dropped per the never-crash
-    contract. The streaming variant builds the same accumulators incrementally
-    rather than via this helper.
+    ``None`` = the source answered "no hit" and is dropped. An
+    :class:`Unavailable` = the source never answered; it is collected so the
+    result can be flagged ``degraded``. A bare exception here can only come
+    from the task machinery itself (the fetcher's own exceptions are already
+    converted by ``_run_source``) and is dropped.
     """
     results: dict[str, Any] = {}
     scores: list[tuple[str, int]] = []
+    unavailable: list[Unavailable] = []
     for item in raw_results:
-        if isinstance(item, BaseException):
+        if isinstance(item, BaseException) or item is None:
             continue
-        if item is None:
+        if isinstance(item, Unavailable):
+            unavailable.append(item)
             continue
         display_name, data, src_score, contributes = item
         results[display_name] = {'score': src_score, 'data': data}
         if contributes:
             scores.append((display_name, src_score))
-    return results, scores
+    return results, scores, unavailable
 
 
 def _finalize_enrich(
@@ -822,8 +879,14 @@ def _finalize_enrich(
     results: dict[str, Any],
     scores: list[tuple[str, int]],
     planned_sources: set[str],
+    unavailable: list[Unavailable] | None = None,
 ) -> dict:
     """Apply VT→OTX failover + heuristics + composite score; return final shape.
+
+    ``unavailable`` lists sources that never answered (see :class:`Unavailable`).
+    They surface as ``degraded: true`` + ``unavailable: {name: reason}`` on the
+    result; when any of them is an opinion source the composite is returned
+    but **not** written to ``last_score`` / ``score_history``.
 
     Shared by ``_enrich_ioc_inner`` and ``enrich_ioc_stream`` so the two
     code paths produce identical output. Side-effect: stamps ``last_score``
@@ -885,14 +948,19 @@ def _finalize_enrich(
             scores.append(('Heuristics', composite))
 
     final_score = score.calculate_final_risk(scores)
-    with contextlib.suppress(Exception):
-        database.update_last_score(ioc_id, final_score, score.SCORE_VERSION)
+    unavailable = unavailable or []
+    opinion_missing = any(u.contributes for u in unavailable)
+    if not opinion_missing:
+        with contextlib.suppress(Exception):
+            database.update_last_score(ioc_id, final_score, score.SCORE_VERSION)
     return {
         'ioc': value,
         'type': ioc_type,
         'modules': results,
         'final_score': final_score,
         'score_version': score.SCORE_VERSION,
+        'degraded': bool(unavailable),
+        'unavailable': {u.display_name: u.reason for u in unavailable},
     }
 
 
@@ -920,6 +988,7 @@ async def enrich_ioc_stream(
     maybe_auto_prune()
     no_cache_token = no_cache_ctx.set(no_cache) if no_cache else None
     ledger_token = http.rate_limited_ctx.set(set())
+    failures_token = http.failures_ctx.set({})
     try:
         value = parser.normalize_value(value, ioc_type)
 
@@ -948,6 +1017,7 @@ async def enrich_ioc_stream(
 
         results: dict[str, Any] = {}
         scores: list[tuple[str, int]] = []
+        unavailable: list[Unavailable] = []
         # Wrap each task so the source's display name survives a soft-fail
         # (``_run_source`` returns ``None`` when an API key is missing or
         # the upstream has no data). Without the wrapper, ``as_completed``
@@ -965,6 +1035,12 @@ async def enrich_ioc_stream(
         try:
             for fut in asyncio.as_completed(futures):
                 name, item = await fut
+                if isinstance(item, Unavailable):
+                    # Never answered — same ``skipped`` frame (so the
+                    # landed/total counter keeps working) plus the reason.
+                    unavailable.append(item)
+                    yield {'event': 'skipped', 'name': name, 'reason': item.reason}
+                    continue
                 if item is None:
                     # Soft-fail or crash — emit a ``skipped`` event so the
                     # dashboard counts it toward landed/total instead of
@@ -983,10 +1059,13 @@ async def enrich_ioc_stream(
                 if not f.done():
                     f.cancel()
 
-        shaped = _finalize_enrich(value, ioc_type, ioc_id, results, scores, planned_sources)
+        shaped = _finalize_enrich(
+            value, ioc_type, ioc_id, results, scores, planned_sources, unavailable=unavailable,
+        )
         yield {'event': 'final', 'result': shaped}
     finally:
         http.rate_limited_ctx.reset(ledger_token)
+        http.failures_ctx.reset(failures_token)
         if no_cache_token is not None:
             no_cache_ctx.reset(no_cache_token)
 
