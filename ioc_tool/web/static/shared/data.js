@@ -275,6 +275,21 @@ window.shadowscopeFetchStream = async function (ioc, opts, handlers) {
 // records in the same shape window.shadowscopeFetch produces, sorted
 // newest-first. Empty list = no enrichments cached yet — caller should
 // render an empty-state prompt instead of falling back to fake data.
+// Batch tab: turn pasted text into a de-duplicated indicator list (no enrichment).
+window.shadowscopeExtract = async function (text) {
+  const headers = { "Content-Type": "application/json" };
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const r = await fetch("/api/ui/extract", { method: "POST", headers, body: JSON.stringify({ text }) });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error(r.status === 422 ? "text too long (max 256 KB)" : "HTTP " + r.status + " " + body.slice(0, 120));
+  }
+  return await r.json();
+};
+
 window.shadowscopeRecent = async function (limit) {
   const n = Number.isFinite(limit) ? limit : 8;
   const headers = {};

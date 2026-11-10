@@ -14,6 +14,62 @@ function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, 
     return Array.from(byId.values());
   }, [cached, stripResults]);
   const [sortKey, setSortKey] = useState("score");
+  // ── Paste / drop a list ────────────────────────────────────────────────
+  const [addOpen, setAddOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [run, setRun] = useState(null);          // {total, done, failed, degraded, note}
+  const cancelRef = React.useRef(false);
+  const busy = !!(run && run.done < run.total && !run.stopped);
+
+  const loadFile = (file) => {
+    if (!file) return;
+    if (file.size > 256000) { setRun({ total: 0, done: 0, failed: 0, degraded: 0, note: "file too large (max 256 KB)" }); return; }
+    const rd = new FileReader();
+    rd.onload = () => { setPasteText(String(rd.result || "")); setAddOpen(true); };
+    rd.readAsText(file);
+  };
+
+  const startRun = async () => {
+    if (busy || !pasteText.trim()) return;
+    cancelRef.current = false;
+    let ex;
+    try { ex = await window.shadowscopeExtract(pasteText); }
+    catch (e) { setRun({ total: 0, done: 0, failed: 0, degraded: 0, note: String(e.message || e) }); return; }
+    const queue = ex.iocs.slice();
+    const note = [ex.truncated ? `${ex.truncated} over the 200 limit dropped` : "", ex.skipped ? `${ex.skipped} lines not recognised` : ""].filter(Boolean).join(" · ");
+    if (queue.length === 0) { setRun({ total: 0, done: 0, failed: 0, degraded: 0, note: note || "no indicators found in that text" }); return; }
+    const st = { total: queue.length, done: 0, failed: 0, degraded: 0, note };
+    setRun({ ...st });
+    // Three at a time: enough to be quick, low enough that per-source rate
+    // limits are not tripped by our own fan-out.
+    const worker = async () => {
+      while (queue.length && !cancelRef.current) {
+        const item = queue.shift();
+        try {
+          const rec = await window.shadowscopeFetch(item.value);
+          if (rec.degraded) st.degraded += 1;
+          if (setResults) setResults(prev => [rec, ...prev.filter(x => x.id !== rec.id)]);
+        } catch (e) { st.failed += 1; }
+        st.done += 1;
+        setRun({ ...st, stopped: cancelRef.current });
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    setRun({ ...st, total: cancelRef.current ? st.done : st.total, stopped: cancelRef.current });
+    if (!cancelRef.current) setPasteText("");
+  };
+
+  const exportCsv = (rows) => {
+    const esc = (v) => { let s = String(v ?? ""); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
+    const lines = [["ioc", "type", "score", "tier", "flagged", "sources", "degraded", "enriched_at"].join(",")];
+    rows.forEach(r => lines.push([r.ioc, r.type, r.final_score, window.RISK_TIER(r.final_score).tier,
+      r.agreement.sources_flagged, r.agreement.sources_total, r.degraded ? "yes" : "no", r.enriched_at].map(esc).join(",")));
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([lines.join("\r\n")], { type: "text/csv" }));
+    a.download = `shadowscope-batch-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
   const [filterTier, setFilterTier] = useState("all");
   const [filterType, setFilterType] = useState("all");
   const [q, setQ] = useState("");
@@ -59,8 +115,47 @@ function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, 
           </select>
         </div>
         <input className="bt-search" value={q} onChange={e => setQ(e.target.value)} placeholder="grep ioc…" />
-        <button className="btn-outline">EXPORT .csv</button>
+        <button className="btn-outline" onClick={() => exportCsv(sorted)} disabled={sorted.length === 0}>EXPORT .csv</button>
+        <button className="btn-outline" onClick={() => setAddOpen(o => !o)} style={{ borderColor: "var(--accent)", color: "var(--accent)" }}>
+          {addOpen ? "× CLOSE" : "+ ADD INDICATORS"}
+        </button>
       </div>
+
+      {addOpen && (
+        <div className="batch-add"
+             onDragOver={e => e.preventDefault()}
+             onDrop={e => { e.preventDefault(); loadFile(e.dataTransfer.files && e.dataTransfer.files[0]); }}
+             style={{ border: "1px dashed var(--line-2)", background: "var(--bg-2)", padding: 12, margin: "8px 0", display: "grid", gap: 8 }}>
+          <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} disabled={busy} rows={6} spellCheck={false}
+                    placeholder={"paste indicators, one per line — or any text (log lines, an email, a report): IPs, domains, URLs, hashes, CVE ids and AS numbers are picked out.\ndefanged forms like 1[.]2[.]3[.]4 or hxxp:// are fine. you can also drop a .txt / .csv / .log file here."}
+                    style={{ width: "100%", background: "var(--bg)", color: "var(--ink)", border: "1px solid var(--line-2)", font: "inherit", padding: 8, resize: "vertical" }} />
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button className="btn-outline" onClick={startRun} disabled={busy || !pasteText.trim()}>{busy ? "RUNNING…" : "EXTRACT & ENRICH"}</button>
+            {busy && <button className="btn-outline" onClick={() => { cancelRef.current = true; }}>STOP</button>}
+            <label className="dim small" style={{ cursor: "pointer" }}>
+              or choose a file <input type="file" accept=".txt,.csv,.log,.json,.md,text/*" style={{ display: "none" }} onChange={e => loadFile(e.target.files && e.target.files[0])} />
+              <span style={{ textDecoration: "underline" }}>browse</span>
+            </label>
+            <span className="dim small">max 200 indicators · 256 KB · already-cached ones cost no quota</span>
+          </div>
+          {run && (
+            <div className="small" role="status">
+              {run.total > 0 && (
+                <div style={{ height: 6, background: "var(--line)", marginBottom: 4 }}>
+                  <div style={{ height: "100%", width: `${Math.round(100 * run.done / run.total)}%`, background: run.failed ? "var(--med)" : "var(--accent)" }} />
+                </div>
+              )}
+              <span>
+                {run.total > 0 ? `${run.done}/${run.total} enriched` : ""}
+                {run.stopped ? " · stopped" : ""}
+                {run.failed ? ` · ${run.failed} failed` : ""}
+                {run.degraded ? ` · ${run.degraded} degraded (some sources did not answer)` : ""}
+                {run.note ? `${run.total > 0 ? " · " : ""}${run.note}` : ""}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       <table className="batch-table">
         <thead>
@@ -91,7 +186,7 @@ function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, 
                 <td className="bt-score" style={{color: s.fg, borderLeft: `3px solid ${s.fg}`}}>{r.final_score}</td>
                 <td><span className="tier-mini" style={{color: s.fg, borderColor: s.fg + "55"}}>{s.label}</span></td>
                 <td className="mono dim">{r.type}</td>
-                <td className="bt-ioc"><Copyable text={fmt(r.ioc)}>{fmt(r.ioc).length > 60 ? fmt(r.ioc).slice(0, 56) + "…" : fmt(r.ioc)}</Copyable></td>
+                <td className="bt-ioc"><Copyable text={fmt(r.ioc)}>{fmt(r.ioc).length > 60 ? fmt(r.ioc).slice(0, 56) + "…" : fmt(r.ioc)}</Copyable>{r.degraded && <span title={"no answer from " + Object.keys(r.unavailable || {}).join(", ")} style={{ color: "var(--med)", marginLeft: 6 }}>⚠</span>}</td>
                 <td>
                   <span className="agree-bar-mini">
                     {Array.from({length: r.agreement.sources_total}).map((_, i) => (
