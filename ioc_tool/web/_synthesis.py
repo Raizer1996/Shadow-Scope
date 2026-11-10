@@ -111,6 +111,25 @@ def _detect_vpn_brand(*needles: str | None) -> str:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _names(items: Any, *, prefer: str = "display_name") -> list[str]:
+    """Flatten an OTX list to plain strings.
+
+    OTX returns ``malware_families`` and ``attack_ids`` as objects
+    (``{"id", "display_name", "target"}`` / ``{"id", "name", "display_name"}``)
+    on some pulses and as bare strings on others. The dashboard renders each
+    entry as text, and React refuses to render an object — one such pulse
+    blanked the whole page. De-duplicated, order kept.
+    """
+    out: list[str] = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict):
+            item = next((item[k] for k in (prefer, "display_name", "name", "id", "target")
+                         if isinstance(item.get(k), str) and item[k]), None)
+        if isinstance(item, str) and item and item not in out:
+            out.append(item)
+    return out
+
+
 def _data(modules_raw: dict[str, Any], source: str) -> dict[str, Any]:
     """Safe accessor: ``modules_raw[source].data`` or ``{}``."""
     entry = modules_raw.get(source) or {}
@@ -516,8 +535,8 @@ def synth_core_domain(modules_raw: dict[str, Any]) -> dict[str, Any] | None:
         campaigns.append({
             "name": p.get("name") or "",
             "adversary": p.get("adversary") or "",
-            "malware_families": p.get("malware_families") or [],
-            "attack_ids": p.get("attack_ids") or [],
+            "malware_families": _names(p.get("malware_families")),
+            "attack_ids": _names(p.get("attack_ids"), prefer="id"),
             "tags": (p.get("tags") or [])[:6],
         })
 
@@ -621,8 +640,8 @@ def synth_core_hash(modules_raw: dict[str, Any]) -> dict[str, Any] | None:
         campaigns.append({
             "name": p.get("name") or "",
             "adversary": p.get("adversary") or "",
-            "malware_families": p.get("malware_families") or [],
-            "attack_ids": p.get("attack_ids") or [],
+            "malware_families": _names(p.get("malware_families")),
+            "attack_ids": _names(p.get("attack_ids"), prefer="id"),
         })
 
     tags = sorted(set((mb.get("tags") or []) + (tfox.get("all_tags") or [])))
