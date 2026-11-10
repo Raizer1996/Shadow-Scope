@@ -5,6 +5,24 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dashboard showed things the API did not say.** Degraded results now carry
+  a visible banner naming each unavailable source and its reason, the spider
+  marks those axes `n/a` instead of "no hit", and the attribution header
+  counts answered vs unavailable. The "fetched" column uses the real cache
+  timestamp per source (new `modules[*].fetched_at`) instead of a string
+  hash. The score-delta chip only appears on an actual change and no longer
+  draws an invented 7-day sparkline; the empty history state explains why
+  degraded runs are not recorded.
+- **Consensus contradicted the score.** Context-only sources (Censys, rDNS,
+  PDNS, ASN joined Shodan/IPinfo/crt.sh) left the denominator and a source
+  now "flags" at 40+ rather than at any non-zero score.
+- **GreyNoise `suspicious`** scored 0; now 50.
+- **Diff tab** never rendered (defaulted to two ids that do not exist).
+- **Batch tab** listed only the 8-row recent strip; it now lists the cache.
+- **Watch tab** timestamps had no date. NVD showed "anonymous" with a key set.
+
 ## [1.1.0] — 2026-11-10
 
 ### Added

@@ -950,6 +950,8 @@ def _finalize_enrich(
     final_score = score.calculate_final_risk(scores)
     unavailable = unavailable or []
     opinion_missing = any(u.contributes for u in unavailable)
+    with contextlib.suppress(Exception):
+        database.set_last_unavailable(ioc_id, {u.display_name: u.reason for u in unavailable})
     if not opinion_missing:
         with contextlib.suppress(Exception):
             database.update_last_score(ioc_id, final_score, score.SCORE_VERSION)

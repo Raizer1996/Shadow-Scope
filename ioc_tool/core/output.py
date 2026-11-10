@@ -553,7 +553,16 @@ def _md_heuristics_block(modules: dict[str, Any]) -> str:
 
 # Modules that are info-only / not opinion sources. Score is incidental
 # (or zero by design) and shouldn't push the agreement numerator either way.
-_NON_OPINION_MODULES = frozenset({"Shodan", "IPinfo", "Allowlist", "Heuristics", "crt.sh"})
+# Context-only sources: they describe the indicator (hosting, ports, DNS, certs)
+# but never give a verdict, so they must not sit in the agreement denominator.
+_NON_OPINION_MODULES = frozenset({
+    "Shodan", "IPinfo", "Censys", "rDNS", "PDNS", "ASN", "crt.sh", "Allowlist", "Heuristics",
+})
+
+# A source "flags" an IOC when its own score reaches the Medium tier. Using
+# ``> 0`` counted URLscan's "history exists" (30) and other faint context as a
+# malicious vote and made the chip disagree with the composite.
+CONSENSUS_FLAG_THRESHOLD = 40
 
 
 def consensus_summary(result: dict[str, Any]) -> dict[str, Any]:
@@ -562,7 +571,7 @@ def consensus_summary(result: dict[str, Any]) -> dict[str, Any]:
     Returns:
         {
             "sources_total": int,           # opinion sources that returned data
-            "sources_flagged": int,         # of those, how many scored > 0
+            "sources_flagged": int,         # of those, how many scored >= 40 (Medium+)
             "sources_missed": int,          # sources_total - sources_flagged
             "consensus": "none"|"low"|"medium"|"high",
             "rows": [{"source": name, "score": int, "flagged": bool}, ...]
@@ -579,7 +588,7 @@ def consensus_summary(result: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(entry, dict):
             continue
         score = int(entry.get("score") or 0)
-        rows.append({"source": name, "score": score, "flagged": score > 0})
+        rows.append({"source": name, "score": score, "flagged": score >= CONSENSUS_FLAG_THRESHOLD})
 
     total = len(rows)
     flagged = sum(1 for r in rows if r["flagged"])
@@ -601,6 +610,8 @@ def consensus_summary(result: dict[str, Any]) -> dict[str, Any]:
         "sources_flagged": flagged,
         "sources_missed": total - flagged,
         "consensus": consensus,
+        "flag_threshold": CONSENSUS_FLAG_THRESHOLD,
+        "sources_unavailable": len((result or {}).get("unavailable") or {}),
         "rows": rows,
     }
 

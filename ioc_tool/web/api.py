@@ -536,6 +536,20 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
     # this reshaper, but we stay defensive.
     ioc_id = database.get_ioc_id(ioc)
     if ioc_id is not None:
+        # Real "fetched" time per source (newest cache row), replacing the
+        # dashboard's old hash-derived placeholder. Sources that are computed
+        # locally and never persisted (TOR, Heuristics) simply have none.
+        if "degraded" not in result:
+            stored = database.get_last_unavailable(ioc_id)
+            shaped["degraded"] = bool(stored)
+            shaped["unavailable"] = stored
+            shaped["agreement"]["sources_unavailable"] = len(stored)
+        fetched = database.get_latest_fetch_times(ioc_id)
+        key_by_display = {display: key for key, display in _CACHED_SOURCES}
+        for source, entry in modules_ui.items():
+            ts = fetched.get(key_by_display.get(source, ""))
+            if ts:
+                entry["fetched_at"] = ts.replace(" ", "T")[:19] + "Z" if "T" not in ts else ts[:19] + "Z"
         tags = database.get_tags_for_ioc(ioc_id)
         case_name = next((t["case_name"] for t in tags if t.get("case_name")), None)
         if case_name:
@@ -643,7 +657,7 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
     {"id": "WHOIS",         "env": None,                        "types": ["domain"]},
     {"id": "crt.sh",        "env": "CTLOGS_API_KEY",            "types": ["domain"],        "anonymous_ok": True},
     {"id": "Tor",           "env": None,                        "types": ["ip"]},
-    {"id": "NVD",           "env": None,                        "types": ["cve"]},
+    {"id": "NVD",           "env": "NVD_API_KEY",               "types": ["cve"],           "anonymous_ok": True},
     {"id": "EPSS",          "env": None,                        "types": ["cve"]},
     {"id": "KEV",           "env": None,                        "types": ["cve"]},
     {"id": "ASN",           "env": None,                        "types": ["asn"]},

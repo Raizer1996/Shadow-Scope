@@ -25,7 +25,7 @@ function App() {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [results, setResults] = useState([]);
   const [activeIocId, setActiveIocId] = useState(null);
-  const [diffPair, setDiffPair] = useState(["ioc_01", "ioc_03"]);
+  const [diffPair, setDiffPair] = useState([null, null]);
   const [enriching, setEnriching] = useState(false);
   // Pending IOC string for the in-flight enrich call. Drives the skeleton
   // card so the user sees instant feedback instead of the stale active row.
@@ -319,7 +319,7 @@ function App() {
 
       <main className="main">
         {tab === "enrich" && <EnrichView ioc={activeIoc} fmt={fmt} llm={llm} results={results} setResults={setResults} setActiveIocId={setActiveIocId} disabledSources={disabledSources} setDisabledSources={setDisabledSources} onPivot={onPivot} clearRecentStrip={clearRecentStrip} pendingIoc={pendingIoc} streamProgress={streamProgress} />}
-        {tab === "batch"  && <BatchView results={results} setActiveIocId={setActiveIocId} setTab={setTab} fmt={fmt} />}
+        {tab === "batch"  && <BatchView results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} fmt={fmt} />}
         {tab === "watch"  && <WatchView fmt={fmt} results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "diff"   && <DiffView results={results} diffPair={diffPair} setDiffPair={setDiffPair} fmt={fmt} />}

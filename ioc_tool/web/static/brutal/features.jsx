@@ -92,7 +92,7 @@ function WhoisTimeline({ ioc, fmt }) {
           <div className="ws-card">
             <div className="ws-k">REGISTRAR</div>
             <div className="ws-v">{whois.registrar || "—"}</div>
-            <div className="ws-sub dim">whois lookup · {window.FRESHNESS("WHOIS", ioc.id).minutes}m ago</div>
+            <div className="ws-sub dim">whois lookup · {(window.FRESHNESS(ioc.modules && ioc.modules.WHOIS) || {}).label || "—"} ago</div>
           </div>
           <div className="ws-card">
             <div className="ws-k">NRD STATUS</div>

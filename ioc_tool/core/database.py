@@ -93,6 +93,10 @@ def init_db():
     # Migration for pre-watch-mode DBs that already exist without the column.
     with contextlib.suppress(sqlite3.OperationalError):
         cursor.execute('ALTER TABLE iocs ADD COLUMN last_score INTEGER')
+    # JSON {source: reason} of sources that did not answer on the latest run,
+    # so cache-derived views (/show, recent strip) can still say "degraded".
+    with contextlib.suppress(sqlite3.OperationalError):
+        cursor.execute('ALTER TABLE iocs ADD COLUMN last_unavailable TEXT')
 
     # Table: enrichments
     cursor.execute('''
@@ -574,6 +578,47 @@ def update_last_score(ioc_id: int, score: int, score_version: int | None = None)
         except Exception:
             # Eventbus is best-effort — never let it block the enrich path.
             pass
+
+
+def set_last_unavailable(ioc_id: int, unavailable: dict[str, str]) -> None:
+    """Remember which sources did not answer on the latest run (``{}`` clears)."""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'UPDATE iocs SET last_unavailable = ? WHERE id = ?',
+            (json.dumps(unavailable) if unavailable else None, ioc_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_last_unavailable(ioc_id: int) -> dict[str, str]:
+    conn = get_db_connection()
+    try:
+        row = conn.execute('SELECT last_unavailable FROM iocs WHERE id = ?', (ioc_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row["last_unavailable"]:
+        return {}
+    try:
+        data = json.loads(row["last_unavailable"])
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def get_latest_fetch_times(ioc_id: int) -> dict[str, str]:
+    """``{source_key: newest enrichment timestamp}`` for one IOC (single query)."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            'SELECT source, MAX(timestamp) AS ts FROM enrichments WHERE ioc_id = ? GROUP BY source',
+            (ioc_id,),
+        ).fetchall()
+        return {r["source"]: str(r["ts"]) for r in rows if r["ts"] is not None}
+    finally:
+        conn.close()
 
 
 def get_score_history(ioc_id: int, *, limit: int = 200) -> list[dict]:
