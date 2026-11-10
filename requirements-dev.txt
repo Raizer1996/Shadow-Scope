@@ -1,6 +1,6 @@
-pytest==9.0.3
-ruff==0.15.13
-mypy==2.1.0
+pytest==9.2.0
+ruff==0.17.4
+mypy==2.4.1
 types-requests
-responses==0.26.0
+responses==0.26.3
 httpx==0.28.1
