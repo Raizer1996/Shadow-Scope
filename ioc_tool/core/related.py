@@ -33,6 +33,13 @@ _COMPOUND_SUFFIXES = frozenset({
 # Top-level keys, across all sources, whose values name other hosts.
 _HOST_KEYS = ("ptr", "hostname", "hostnames", "top_rrnames", "domains", "aliases")
 _NETWORK_SCAN_CAP = 20000
+# What a source says about *this* indicator lives at the top level of its
+# payload. Deeper copies of the same keys are other things entirely (tags of
+# every OTX pulse that mentions the indicator, a TLS certificate's
+# ``signature`` blob) and make everything look related to everything.
+_FAMILY_KEYS = ("malware", "malware_printable", "family", "signature")
+_TAG_KEYS = ("tag", "tags")
+_TAG_VERIFY_CAP = 80
 
 
 def registered_domain(host: str) -> str:
@@ -107,14 +114,31 @@ def _group(key: str, title: str, pivot: str, items: list[dict], limit: int) -> d
     return {"key": key, "title": title, "pivot": pivot, "total": len(items), "items": items[:limit]}
 
 
-def _sharing_fields(ioc_id: int, kinds: tuple[str, ...]) -> tuple[list[str], list[dict]]:
-    """Other IOCs indexed under any (kind, value) this IOC is indexed under."""
+def _own_values(payloads: dict[str, dict], keys: tuple[str, ...]) -> list[str]:
+    """Lower-cased top-level string values under ``keys``, first-seen order."""
+    out: dict[str, None] = {}
+    for data in payloads.values():
+        for key in keys:
+            val = data.get(key)
+            for entry in val if isinstance(val, list) else [val]:
+                if isinstance(entry, str) and 3 <= len(entry.strip()) <= 64:
+                    out.setdefault(entry.strip().lower())
+    return list(out)
+
+
+def _sharing_fields(ioc_id: int, kinds: tuple[str, ...], values: list[str] | None = None) -> tuple[list[str], list[dict]]:
+    """Other IOCs indexed under any of ``values`` for the given index kinds.
+
+    ``values`` defaults to everything this IOC is indexed under for ``kinds``.
+    """
     marks = ",".join("?" * len(kinds))
-    mine = _query(
-        f"SELECT DISTINCT LOWER(value) AS v FROM enrichment_fields WHERE ioc_id = ? AND kind IN ({marks})",
-        [ioc_id, *kinds],
-    )
-    values = [r["v"] for r in mine if len(r["v"]) >= 3]
+    if values is None:
+        mine = _query(
+            f"SELECT DISTINCT LOWER(value) AS v FROM enrichment_fields WHERE ioc_id = ? AND kind IN ({marks})",
+            [ioc_id, *kinds],
+        )
+        values = [r["v"] for r in mine if len(r["v"]) >= 3]
+    values = values[:200]
     if not values:
         return [], []
     vmarks = ",".join("?" * len(values))
@@ -217,7 +241,7 @@ def related_for(ioc_id: int, value: str, ioc_type: str, *, limit: int = 12) -> l
         groups.append(_group("case", "SAME CASE", case, [_item(r) for r in rows], limit))
 
     # --- same malware family ---------------------------------------------
-    fams, rows = _sharing_fields(ioc_id, ("malware", "family"))
+    fams, rows = _sharing_fields(ioc_id, ("malware", "family"), _own_values(payloads, _FAMILY_KEYS))
     groups.append(_group("family", "SAME MALWARE", ", ".join(fams[:3]), [_item(r, r["shared"]) for r in rows], limit))
 
     # --- same network ----------------------------------------------------
@@ -259,8 +283,18 @@ def related_for(ioc_id: int, value: str, ioc_type: str, *, limit: int = 12) -> l
     groups.append(_group("certs", "SUBDOMAINS IN CERTIFICATES", "certificate transparency", _resolve(certs), limit))
 
     # --- shared tags / registrar -----------------------------------------
-    tags, rows = _sharing_fields(ioc_id, ("tag",))
-    groups.append(_group("tags", "SHARED TAGS", f"{len(tags)} tags", [_item(r, r["shared"]) for r in rows], limit))
+    # The index also holds nested tags, so confirm each candidate carries the
+    # tag as one of its own before calling it related.
+    tags, rows = _sharing_fields(ioc_id, ("tag",), _own_values(payloads, _TAG_KEYS))
+    mine = set(tags)
+    tagged = []
+    for r in rows[:_TAG_VERIFY_CAP]:
+        shared = [t for t in _own_values(_latest_payloads(r["id"]), _TAG_KEYS) if t in mine]
+        if shared:
+            tagged.append((len(shared), _item(r, ",".join(shared))))
+    tagged.sort(key=lambda pair: -pair[0])
+    pivot = ", ".join(tags[:3]) + (f" +{len(tags) - 3}" if len(tags) > 3 else "")
+    groups.append(_group("tags", "SHARED TAGS", pivot, [item for _, item in tagged], limit))
     regs, rows = _sharing_fields(ioc_id, ("registrar",))
     groups.append(_group("registrar", "SAME REGISTRAR", ", ".join(regs[:1]), [_item(r) for r in rows], limit))
 

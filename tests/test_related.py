@@ -143,6 +143,20 @@ def test_shared_family_tags_case_and_registrar(db):
     assert [i["ioc"] for i in reg["items"]] == ["other.example"]
 
 
+def test_nested_tags_and_signatures_do_not_relate_indicators(db):
+    # OTX returns the tags of every pulse mentioning an indicator, and Shodan
+    # returns TLS certificate signatures. Neither describes the indicator.
+    pulses = {"pulse_info": {"pulses": [{"tags": ["emotet", "log4j"]}]}}
+    cert = {"data": [{"ssl": {"cert": {"signature": "68f151b7e1ff7629"}}}]}
+    db("203.0.113.10", "ip", 80, otx=pulses, shodan=cert, virustotal={"tags": []})
+    db("198.51.100.5", "ip", 60, otx=pulses, shodan=cert, threatfox={"tags": ["emotet"]})
+    g = _groups("203.0.113.10")
+    assert "tags" not in g and "family" not in g
+
+    # The other direction: my own tag, theirs only nested -> still not related.
+    assert "tags" not in _groups("198.51.100.5")
+
+
 def test_limit_caps_items_but_reports_total(db):
     db("203.0.113.1", "ip", 50)
     for n in range(2, 30):
