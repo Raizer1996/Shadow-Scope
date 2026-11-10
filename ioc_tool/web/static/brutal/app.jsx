@@ -150,6 +150,7 @@ function App() {
           if (e2.key === "c") setTab("cases");
           if (e2.key === "d") setTab("diff");
           if (e2.key === "k") setTab("cache");
+          if (e2.key === "f") { e2.preventDefault(); setTab("search"); }
           if (e2.key === "s") setSourcesOpen(v => !v);
           window.removeEventListener("keydown", second);
         };
@@ -334,6 +335,7 @@ function App() {
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "diff"   && <DiffView results={results} diffPair={diffPair} setDiffPair={setDiffPair} fmt={fmt} />}
         {tab === "cache"  && <CacheView />}
+        {tab === "search" && <SearchView results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} onEnrich={onEnrich} fmt={fmt} />}
       </main>
 
       <StatusBar results={results} />
@@ -456,6 +458,8 @@ function TopBar({ tab, setTab, setSourcesOpen, setHelpOpen }) {
       help: "Single-IOC enrichment. Paste an IP / domain / URL / hash / CVE / ASN — every source queries in parallel and aggregates into the composite score." },
     { id: "batch",  label: "BATCH",  kbd: "g b",
       help: "All IOCs you've enriched this session, sorted highest-score first. Click a row to drill into ENRICH for that IOC." },
+    { id: "search", label: "SEARCH", kbd: "g f",
+      help: "Find anything already stored locally: indicators, your notes and verdicts, cases, tags, malware families, or any text a source returned. Filters can be saved. No API calls." },
     { id: "watch",  label: "WATCH",  kbd: "g w",
       help: "Live alert stream — re-enrich daily and surface deltas. Tied to the `shadowscope watch` CLI; backend wiring lands next." },
     { id: "cases",  label: "CASES",  kbd: "g c",
