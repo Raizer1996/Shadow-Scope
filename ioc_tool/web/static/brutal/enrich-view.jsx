@@ -78,7 +78,7 @@ function EnrichSkeleton({ ioc, fmt, landed, skipped, pending }) {
   );
 }
 
-function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, onEnrich, enriching, clearRecentStrip, pendingIoc, streamProgress }) {
+function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, onEnrich, enriching, wide, clearRecentStrip, pendingIoc, streamProgress }) {
   // Instant feedback path: a fetch is in flight for an IOC that isn't the
   // currently active record, OR the active record is the streaming stub
   // (modules dict is being filled in piecewise). Render the skeleton with
@@ -129,6 +129,23 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
     setDisabledSources(next);
   };
   const resetSources = () => setDisabledSources(new Set());
+
+  const sourcesBlock = (
+    <section className="sources-block">
+          <div className="sec-head">
+            <span className="sec-title glitch" data-text="SOURCE ATTRIBUTION">SOURCE ATTRIBUTION</span>
+            <span className="sec-meta">{modules.length} answered{Object.keys(ioc.unavailable || {}).length > 0 ? ` · ${Object.keys(ioc.unavailable).length} unavailable` : ""} · ordered by score</span>
+            <span className="sec-meta dim">click row → toggle inclusion</span>
+          </div>
+          <SourceTable
+            modules={modules}
+            disabledSources={disabledSources}
+            toggleSource={toggleSource}
+            ioc={ioc}
+            onPivot={onPivot}
+          />
+        </section>
+  );
 
   return (
     <div className="enrich-view">
@@ -252,9 +269,10 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
 
         <HeroSplitter />
 
-        <div className={`hero-right ${hasGeo ? "has-geo" : ""}`}>
+        <div className={`hero-right ${hasGeo ? "has-geo" : ""} ${wide ? "wide" : ""}`}>
           <SpiderChart ioc={ioc} sev={sev} disabledSources={disabledSources} />
           {hasGeo && <NetworkGeoPanel ioc={ioc} results={results} setActiveIocId={setActiveIocId} />}
+          {wide && sourcesBlock}
         </div>
       </section>
 
@@ -266,21 +284,8 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
       <WhoisTimeline ioc={ioc} fmt={fmt} />
       <CrtshBlock ioc={ioc} fmt={fmt} />
 
-      <div className="enrich-split">
-        <section className="sources-block">
-          <div className="sec-head">
-            <span className="sec-title glitch" data-text="SOURCE ATTRIBUTION">SOURCE ATTRIBUTION</span>
-            <span className="sec-meta">{modules.length} answered{Object.keys(ioc.unavailable || {}).length > 0 ? ` · ${Object.keys(ioc.unavailable).length} unavailable` : ""} · ordered by score</span>
-            <span className="sec-meta dim">click row → toggle inclusion</span>
-          </div>
-          <SourceTable
-            modules={modules}
-            disabledSources={disabledSources}
-            toggleSource={toggleSource}
-            ioc={ioc}
-            onPivot={onPivot}
-          />
-        </section>
+      <div className={`enrich-split ${wide ? "solo" : ""}`}>
+        {!wide && sourcesBlock}
 
         <PivotPanel ioc={ioc} results={results} setResults={setResults} setActiveIocId={setActiveIocId} />
       </div>
