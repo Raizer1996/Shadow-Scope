@@ -116,6 +116,9 @@ async def enrich_ioc(
     """Enrich one IOC (IP / domain / URL / hash / CVE / ASN) across every applicable source.
 
     Returns ``{ioc, type, modules: {Source: {score, detail}}, final_score, risk_tier}``.
+    When the result says ``degraded: true``, call this again **without** ``no_cache``:
+    sources that answered are served from the 24 h cache and only the ones listed in
+    ``unavailable`` are fetched again.
     ``verbose=true`` swaps each source's one-line ``detail`` for its raw provider ``data``
     (can be >100 KB for an IP). ``summary=true`` appends an ``llm_summary`` verdict from
     local Ollama when reachable. ``defang_output=true`` defangs the returned ``ioc``.

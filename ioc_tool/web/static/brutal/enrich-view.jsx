@@ -78,7 +78,7 @@ function EnrichSkeleton({ ioc, fmt, landed, skipped, pending }) {
   );
 }
 
-function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, clearRecentStrip, pendingIoc, streamProgress }) {
+function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabledSources, setDisabledSources, onPivot, onEnrich, enriching, clearRecentStrip, pendingIoc, streamProgress }) {
   // Instant feedback path: a fetch is in flight for an IOC that isn't the
   // currently active record, OR the active record is the streaming stub
   // (modules dict is being filled in piecewise). Render the skeleton with
@@ -203,6 +203,14 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
                   <b>⚠ DEGRADED</b> · no answer from{" "}
                   {Object.entries(ioc.unavailable || {}).map(([k, v]) => `${k} (${String(v).replace(/_/g, " ")})`).join(", ") || "one or more sources"}
                   <span className="dim"> · score may be understated · not recorded in history</span>
+                  {onEnrich && (
+                    <button type="button" disabled={!!enriching}
+                            onClick={() => onEnrich(ioc.ioc)}
+                            title="Re-run this IOC. Sources that already answered come from the 24 h cache (no quota spent); only the ones that failed are fetched again."
+                            style={{ marginLeft: 10, padding: "1px 8px", background: "transparent", color: "var(--med)", border: "1px solid var(--med)", font: "inherit", cursor: enriching ? "wait" : "pointer" }}>
+                      {enriching ? "retrying…" : "↻ retry failed sources"}
+                    </button>
+                  )}
                 </div>
               )}
               <ConsensusChip a={ioc.agreement} ioc={ioc} />
