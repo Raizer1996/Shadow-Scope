@@ -7,6 +7,13 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Analyst workflow.** Per indicator: a manual verdict (malicious /
+  suspicious / benign / false positive) stored beside the score and never
+  altering it, free notes, and a watch switch. **Cases tab**: create, close
+  / reopen, rename, describe, export as defanged Markdown; empty cases are
+  listed. **Watch tab**: a real watchlist with a per-indicator alert
+  threshold and `CHECK NOW` (fresh re-check one at a time; degraded runs are
+  shown but never compared); the old list is kept below as HISTORY.
 - **Batch tab: paste or drop a list.** `+ ADD INDICATORS` opens a box that
   takes one indicator per line or any text (log, email, report) and a
   dropped/selected file. New `POST /api/ui/extract` pulls the indicators out

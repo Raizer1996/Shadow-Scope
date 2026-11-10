@@ -129,6 +129,45 @@ def init_db():
         )
     ''')
 
+    # ── Analyst workflow (Nov 2026): manual verdict, notes, case metadata,
+    #    watchlist. All additive; older caches open unchanged. ──────────────
+    for ddl in (
+        'ALTER TABLE iocs ADD COLUMN verdict TEXT',
+        'ALTER TABLE iocs ADD COLUMN verdict_note TEXT',
+        'ALTER TABLE iocs ADD COLUMN verdict_at TIMESTAMP',
+    ):
+        with contextlib.suppress(sqlite3.OperationalError):
+            cursor.execute(ddl)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ioc_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ioc_id INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            created TIMESTAMP NOT NULL,
+            FOREIGN KEY (ioc_id) REFERENCES iocs (id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cases (
+            name TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'open',
+            description TEXT,
+            created TIMESTAMP,
+            closed_at TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS watchlist (
+            ioc_id INTEGER PRIMARY KEY,
+            threshold INTEGER NOT NULL DEFAULT 20,
+            added TIMESTAMP NOT NULL,
+            last_checked TIMESTAMP,
+            last_score INTEGER,
+            last_delta INTEGER,
+            FOREIGN KEY (ioc_id) REFERENCES iocs (id)
+        )
+    ''')
+
     # Table: score_history — append-only snapshots of the composite
     # score per IOC, written by `update_last_score`. Backs the Watch
     # tab's "score over time" graph (a real series instead of the old
@@ -351,7 +390,7 @@ def list_iocs_for_case(case: str) -> list[dict]:
     cursor = conn.cursor()
     cursor.execute(
         '''
-        SELECT DISTINCT i.id, i.value, i.type, i.first_seen, i.last_seen
+        SELECT DISTINCT i.id, i.value, i.type, i.first_seen, i.last_seen, i.last_score
         FROM iocs i
         JOIN ioc_tags t ON t.ioc_id = i.id
         WHERE t.case_name = ?
@@ -1092,3 +1131,210 @@ def set_meta(key: str, value: str) -> None:
     )
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Analyst workflow: manual verdict, notes, case metadata, watchlist
+# ---------------------------------------------------------------------------
+
+VERDICTS = ("malicious", "suspicious", "benign", "false_positive")
+
+
+def set_verdict(ioc_id: int, verdict: str | None, note: str | None = None) -> None:
+    """Record the analyst's own call on an IOC (``None`` clears it).
+
+    Stored beside the computed score, never instead of it: the composite
+    stays what the sources say, the verdict is what a person decided.
+    """
+    if verdict is not None and verdict not in VERDICTS:
+        raise ValueError(f"verdict must be one of {VERDICTS} or None")
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'UPDATE iocs SET verdict = ?, verdict_note = ?, verdict_at = ? WHERE id = ?',
+            (verdict, (note or None) if verdict else None, datetime.now() if verdict else None, ioc_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_verdict(ioc_id: int) -> dict | None:
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            'SELECT verdict, verdict_note, verdict_at FROM iocs WHERE id = ?', (ioc_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not row["verdict"]:
+        return None
+    return {"verdict": row["verdict"], "note": row["verdict_note"], "at": str(row["verdict_at"] or "")}
+
+
+def add_note(ioc_id: int, body: str) -> int:
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            'INSERT INTO ioc_notes (ioc_id, body, created) VALUES (?, ?, ?)',
+            (ioc_id, body, datetime.now()),
+        )
+        conn.commit()
+        return int(cur.lastrowid or 0)
+    finally:
+        conn.close()
+
+
+def list_notes(ioc_id: int) -> list[dict]:
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            'SELECT id, body, created FROM ioc_notes WHERE ioc_id = ? ORDER BY created DESC, id DESC',
+            (ioc_id,),
+        ).fetchall()
+        return [{"id": r["id"], "body": r["body"], "created": str(r["created"])} for r in rows]
+    finally:
+        conn.close()
+
+
+def delete_note(note_id: int) -> int:
+    conn = get_db_connection()
+    try:
+        cur = conn.execute('DELETE FROM ioc_notes WHERE id = ?', (note_id,))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def upsert_case(name: str, description: str | None = None) -> None:
+    """Create a case row if missing; update the description when one is given."""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO cases (name, status, description, created) VALUES (?, 'open', ?, ?)",
+            (name, description, datetime.now()),
+        )
+        if description is not None:
+            conn.execute('UPDATE cases SET description = ? WHERE name = ?', (description, name))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_case_status(name: str, status: str) -> None:
+    if status not in ("open", "closed"):
+        raise ValueError("status must be 'open' or 'closed'")
+    upsert_case(name)
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'UPDATE cases SET status = ?, closed_at = ? WHERE name = ?',
+            (status, datetime.now() if status == "closed" else None, name),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def rename_case(old: str, new: str) -> bool:
+    """Rename a case everywhere. ``False`` when ``new`` already exists."""
+    conn = get_db_connection()
+    try:
+        clash = conn.execute(
+            'SELECT 1 FROM cases WHERE name = ? UNION SELECT 1 FROM ioc_tags WHERE case_name = ? LIMIT 1',
+            (new, new),
+        ).fetchone()
+        if clash:
+            return False
+        conn.execute('UPDATE cases SET name = ? WHERE name = ?', (new, old))
+        conn.execute('UPDATE ioc_tags SET case_name = ? WHERE case_name = ?', (new, old))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def delete_case_meta(name: str) -> None:
+    conn = get_db_connection()
+    try:
+        conn.execute('DELETE FROM cases WHERE name = ?', (name,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_case_meta() -> dict[str, dict]:
+    """``{name: {status, description, created, closed_at}}`` for every case row."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('SELECT name, status, description, created, closed_at FROM cases').fetchall()
+        return {
+            r["name"]: {
+                "status": r["status"] or "open",
+                "description": r["description"] or "",
+                "created": str(r["created"] or ""),
+                "closed_at": str(r["closed_at"] or ""),
+            }
+            for r in rows
+        }
+    finally:
+        conn.close()
+
+
+def watch_add(ioc_id: int, threshold: int = 20) -> None:
+    threshold = max(1, min(100, int(threshold)))
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'INSERT INTO watchlist (ioc_id, threshold, added) VALUES (?, ?, ?) '
+            'ON CONFLICT(ioc_id) DO UPDATE SET threshold = excluded.threshold',
+            (ioc_id, threshold, datetime.now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def watch_remove(ioc_id: int) -> int:
+    conn = get_db_connection()
+    try:
+        cur = conn.execute('DELETE FROM watchlist WHERE ioc_id = ?', (ioc_id,))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def watch_get(ioc_id: int) -> dict | None:
+    conn = get_db_connection()
+    try:
+        row = conn.execute('SELECT threshold FROM watchlist WHERE ioc_id = ?', (ioc_id,)).fetchone()
+        return {"threshold": int(row["threshold"])} if row else None
+    finally:
+        conn.close()
+
+
+def watch_list() -> list[dict]:
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            'SELECT i.id AS ioc_id, i.value, i.type, i.last_score AS score, w.threshold, w.added, '
+            'w.last_checked, w.last_score AS checked_score, w.last_delta '
+            'FROM watchlist w JOIN iocs i ON i.id = w.ioc_id ORDER BY w.added DESC'
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def watch_record(ioc_id: int, score: int, delta: int | None) -> None:
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'UPDATE watchlist SET last_checked = ?, last_score = ?, last_delta = ? WHERE ioc_id = ?',
+            (datetime.now(), int(score), delta, ioc_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()

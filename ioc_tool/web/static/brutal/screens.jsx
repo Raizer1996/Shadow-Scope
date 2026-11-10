@@ -223,6 +223,98 @@ function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, 
 
 // ─────────── Watch (live stream) ───────────
 
+function WatchlistPanel({ fmt }) {
+  const [rows, setRows] = React.useState(null);
+  const [ioc, setIoc] = React.useState("");
+  const [thr, setThr] = React.useState(20);
+  const [busy, setBusy] = React.useState(false);
+  const [report, setReport] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+
+  const load = React.useCallback(() => {
+    window.ssApi("GET", "/api/ui/watchlist").then(r => { setRows(r); }).catch(e => setErr(String(e.message || e)));
+  }, []);
+  React.useEffect(() => { load(); }, []);
+
+  const add = () => {
+    const v = ioc.trim();
+    if (!v) return;
+    window.ssApi("POST", "/api/ui/watchlist", { ioc: v, threshold: Number(thr) || 20 })
+      .then(() => { setIoc(""); setErr(null); load(); })
+      .catch(e => setErr(String(e.message || e)));
+  };
+  const remove = (v) => window.ssApi("DELETE", "/api/ui/watchlist?ioc=" + encodeURIComponent(v)).then(load).catch(e => setErr(String(e.message || e)));
+  const setThreshold = (v, t) => window.ssApi("POST", "/api/ui/watchlist", { ioc: v, threshold: t }).then(load).catch(e => setErr(String(e.message || e)));
+  const check = () => {
+    setBusy(true); setReport(null);
+    window.ssApi("POST", "/api/ui/watchlist/check")
+      .then(r => { setReport(r); setErr(null); load(); })
+      .catch(e => setErr(String(e.message || e)))
+      .finally(() => setBusy(false));
+  };
+
+  const n = rows ? rows.length : 0;
+  return (
+    <div style={{ border: "1px solid var(--line-2)", background: "var(--bg-2)", margin: "8px 0", padding: 10 }}>
+      <div className="watch-toolbar" style={{ border: "none", padding: 0 }}>
+        <span className="bt-title">WATCHLIST · {n}</span>
+        <input className="bt-search" style={{ maxWidth: 320 }} value={ioc} onChange={e => setIoc(e.target.value)}
+               onKeyDown={e => { if (e.key === "Enter") add(); }} placeholder="add an enriched indicator…" />
+        <span className="dim small">alert at Δ ≥</span>
+        <input type="number" min="1" max="100" value={thr} onChange={e => setThr(e.target.value)} className="bt-search" style={{ width: 64 }} />
+        <button className="btn-outline" onClick={add} disabled={!ioc.trim()}>+ WATCH</button>
+        <button className="btn-outline" onClick={check} disabled={busy || n === 0}
+                title="Fetch every watched indicator fresh, one at a time, and report score changes">
+          {busy ? "CHECKING…" : "CHECK NOW"}
+        </button>
+      </div>
+      {err && <div className="small" style={{ color: "var(--bad,#ff7474)", padding: "4px 0" }}>// {err}</div>}
+      {report && (
+        <div className="small" style={{ padding: "6px 0" }}>
+          checked {report.checked}/{report.watched}
+          {report.alerts.length === 0 ? " · no score moved past its threshold" : ""}
+          {report.alerts.map(a => (
+            <div key={a.ioc} style={{ color: a.delta > 0 ? "var(--high)" : "var(--safe)" }}>
+              ▲ {fmt ? fmt(a.ioc) : a.ioc}: {a.previous} → {a.score} ({a.delta > 0 ? "+" : ""}{a.delta}, threshold {a.threshold}) · {a.tier}
+            </div>
+          ))}
+          {report.degraded.map(d => (
+            <div key={d.ioc} style={{ color: "var(--med)" }}>
+              ⚠ {fmt ? fmt(d.ioc) : d.ioc}: not compared — no answer from {Object.keys(d.unavailable || {}).join(", ")}
+            </div>
+          ))}
+        </div>
+      )}
+      {rows && n === 0 && <div className="dim small" style={{ padding: "6px 0" }}>// nothing watched yet — add one here or press ☆ WATCH on an indicator in the Enrich tab</div>}
+      {n > 0 && (
+        <table className="batch-table" style={{ marginTop: 6 }}>
+          <thead><tr><th style={{ width: "6ch" }}>score</th><th style={{ width: "8ch" }}>type</th><th>indicator</th><th>alert at Δ ≥</th><th>last check</th><th>last Δ</th><th></th></tr></thead>
+          <tbody>
+            {rows.map(r => {
+              const s = sevOf(r.score || 0);
+              return (
+                <tr key={r.value} className="batch-row" style={{ cursor: "default" }}>
+                  <td className="bt-score" style={{ color: s.fg, borderLeft: `3px solid ${s.fg}` }}>{r.score ?? "—"}</td>
+                  <td className="mono dim">{r.type}</td>
+                  <td className="bt-ioc">{fmt ? fmt(r.value) : r.value}</td>
+                  <td>
+                    <select className="bt-select" value={r.threshold} onChange={e => setThreshold(r.value, Number(e.target.value))}>
+                      {[5, 10, 20, 30, 50].concat([5, 10, 20, 30, 50].includes(r.threshold) ? [] : [r.threshold]).sort((a, b) => a - b).map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </td>
+                  <td className="dim small">{r.last_checked ? window.SS_STAMP(String(r.last_checked).replace(" ", "T")) : "never"}</td>
+                  <td className="small">{r.last_delta == null ? "—" : (r.last_delta > 0 ? "+" : "") + r.last_delta}</td>
+                  <td><button className="pill warn" onClick={() => remove(r.value)}>remove</button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
   // Cache-wide history — every IOC ever enriched, newest first. Seeded
   // from /api/ui/recent (limit bumped to 500 server-side for this view)
@@ -310,7 +402,7 @@ function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
   return (
     <div className="watch-view">
       <div className="watch-toolbar">
-        <span className="bt-title">WATCH · enrichment history</span>
+        <span className="bt-title">HISTORY · every enrichment</span>
         <div className="bt-group">
           <button className={`pill ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>all</button>
           <button className={`pill ${filter === "big" ? "on" : ""}`} onClick={() => setFilter("big")}>|Δ| ≥ 20</button>
@@ -325,6 +417,7 @@ function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
           {loadedAt && ` · ${loadedAt.toTimeString().slice(0, 8)}`}
         </span>
       </div>
+      <WatchlistPanel fmt={fmt} />
       {err && <div className="dim small" style={{ padding: 12, color: "var(--bad,#ff7474)" }}>// {err}</div>}
       {!err && filtered.length === 0 && (
         <div className="dim small" style={{ padding: 12 }}>
@@ -355,6 +448,26 @@ function WatchView({ fmt, setActiveIocId, setTab, setResults, results }) {
 }
 
 // ─────────── Cases (campaign grouping) ───────────
+
+function NewCaseForm({ onCreated }) {
+  const [name, setName] = React.useState("");
+  const [err, setErr] = React.useState(null);
+  const create = () => {
+    const n = name.trim();
+    if (!n) return;
+    window.ssApi("POST", "/api/ui/cases", { name: n })
+      .then(() => { setName(""); setErr(null); onCreated(n); })
+      .catch(e => setErr(String(e.message || e)));
+  };
+  return (
+    <div style={{ display: "flex", gap: 6, padding: "6px 0", flexWrap: "wrap" }}>
+      <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") create(); }}
+             maxLength={80} placeholder="new case name" className="bt-search" style={{ flex: 1, minWidth: 120 }} />
+      <button className="btn-outline" onClick={create} disabled={!name.trim()}>+ CASE</button>
+      {err && <span className="small" style={{ color: "var(--bad,#ff7474)" }}>// {err}</span>}
+    </div>
+  );
+}
 
 function CasesView({ results, fmt, setActiveIocId, setTab }) {
   // Cases load from /api/ui/cases — no more hardcoded fixtures. Each
@@ -390,8 +503,9 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
   if (cases.length === 0) {
     return (
       <div className="cases-view">
-        <div className="dim small" style={{ padding: 20 }}>
-          // no cases yet — assign an IOC to a case from the Enrich tab to start one
+        <div style={{ padding: 20, maxWidth: 520 }}>
+          <div className="dim small">// no cases yet — create one here, then assign indicators to it from the Enrich tab</div>
+          <NewCaseForm onCreated={(n) => { setOpenId(n); reload(); }} />
         </div>
       </div>
     );
@@ -405,6 +519,17 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
     return { value, record: hit || null };
   });
 
+  const caseAction = (body, nextId) => {
+    window.ssApi("PATCH", "/api/ui/cases/" + encodeURIComponent(open.id), body)
+      .then(() => { if (nextId) setOpenId(nextId); reload(); })
+      .catch(e => alert(String(e.message || e)));
+  };
+  const exportCase = () => {
+    window.ssApi("GET", "/api/ui/cases/" + encodeURIComponent(open.id) + "/export")
+      .then(r => window.ssDownload(r.filename, r.markdown, "text/markdown"))
+      .catch(e => alert(String(e.message || e)));
+  };
+
   const deleteCase = () => {
     if (!confirm(`Detach every IOC from case "${open.label}"? The IOCs themselves stay in cache.`)) return;
     window.shadowscopeDeleteCase(open.id)
@@ -416,6 +541,7 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
     <div className="cases-view">
       <aside className="case-list">
         <div className="sec-head"><span className="sec-title">CASES · {cases.length}</span></div>
+        <NewCaseForm onCreated={(n) => { setOpenId(n); reload(); }} />
         {cases.map(c => {
           const s = sevOf(c.severity);
           return (
@@ -424,7 +550,7 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
                 <span className="case-sev" style={{color: s.fg}}>{c.severity}</span>
                 <span className="case-iocs dim">{c.ioc_count} IOC</span>
               </div>
-              <div className="case-label">{c.label}</div>
+              <div className="case-label">{c.label}{c.status === "closed" && <span className="dim small"> · closed</span>}</div>
               <div className="case-meta dim small">opened {c.opened || "—"}</div>
             </button>
           );
@@ -440,9 +566,18 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
             <span className="dim">opened</span> {open.opened || "—"}
             <span className="dim"> · max member score</span>{" "}
             <b style={{color: sevOf(open.severity).fg}}>{open.severity}</b>
-            <button className="pill warn" style={{ marginLeft: 12 }} onClick={deleteCase}>delete case</button>
+            <span className="dim"> · </span><b>{open.status === "closed" ? "closed" : "open"}</b>
+            <button className="pill" style={{ marginLeft: 12 }} onClick={() => caseAction({ status: open.status === "closed" ? "open" : "closed" })}>
+              {open.status === "closed" ? "reopen" : "close case"}
+            </button>
+            <button className="pill" onClick={() => { const n = prompt("New name for this case:", open.label); if (n && n.trim() && n.trim() !== open.label) caseAction({ rename: n.trim() }, n.trim()); }}>rename</button>
+            <button className="pill" onClick={() => { const d = prompt("Case description:", open.description || ""); if (d !== null) caseAction({ description: d }); }}>describe</button>
+            <button className="pill" onClick={exportCase}>export .md</button>
+            <button className="pill warn" onClick={deleteCase}>delete case</button>
           </div>
         </header>
+        {open.description && <div className="small" style={{ padding: "6px 14px", whiteSpace: "pre-wrap" }}>{open.description}</div>}
+        {open.iocs.length === 0 && <div className="dim small" style={{ padding: 14 }}>// empty case — open an indicator in the Enrich tab and type this case name into its CASE box</div>}
         <table className="batch-table">
           <thead><tr><th>score</th><th>type</th><th>indicator</th><th>flagged</th><th></th></tr></thead>
           <tbody>

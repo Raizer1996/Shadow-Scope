@@ -275,6 +275,32 @@ window.shadowscopeFetchStream = async function (ioc, opts, handlers) {
 // records in the same shape window.shadowscopeFetch produces, sorted
 // newest-first. Empty list = no enrichments cached yet — caller should
 // render an empty-state prompt instead of falling back to fake data.
+// Small JSON helper for the analyst-workflow endpoints (verdict, notes,
+// cases, watchlist). Throws Error(detail) on a non-2xx answer.
+window.ssApi = async function (method, path, body) {
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  try {
+    const tok = sessionStorage.getItem("ss_api_token");
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+  } catch (e) {}
+  const r = await fetch(path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+  if (!r.ok) {
+    let detail = "HTTP " + r.status;
+    try { const j = await r.json(); if (j && j.detail) detail = typeof j.detail === "string" ? j.detail : detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  return await r.json();
+};
+
+window.ssDownload = function (filename, text, mime) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: mime || "text/plain" }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
 // Batch tab: turn pasted text into a de-duplicated indicator list (no enrichment).
 window.shadowscopeExtract = async function (text) {
   const headers = { "Content-Type": "application/json" };

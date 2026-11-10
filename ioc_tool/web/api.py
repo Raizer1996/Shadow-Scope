@@ -550,6 +550,9 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
             shaped["degraded"] = bool(stored)
             shaped["unavailable"] = stored
             shaped["agreement"]["sources_unavailable"] = len(stored)
+        shaped["verdict"] = database.get_verdict(ioc_id)
+        shaped["notes"] = database.list_notes(ioc_id)
+        shaped["watch"] = database.watch_get(ioc_id)
         fetched = database.get_latest_fetch_times(ioc_id)
         key_by_display = {display: key for key, display in _CACHED_SOURCES}
         for source, entry in modules_ui.items():
@@ -1146,6 +1149,7 @@ def ui_cases() -> list[dict[str, Any]]:
     """
     database.init_db()
     cases = database.list_cases_with_summary()
+    meta = database.get_case_meta()
     out: list[dict[str, Any]] = []
     for case in cases:
         name = case["case_name"]
@@ -1153,6 +1157,7 @@ def ui_cases() -> list[dict[str, Any]]:
         opened = case.get("opened_at")
         if opened:
             opened = str(opened).split(" ", 1)[0]  # date only
+        info = meta.pop(name, None) or {}
         out.append({
             "id": name,
             "label": name,
@@ -1160,7 +1165,17 @@ def ui_cases() -> list[dict[str, Any]]:
             "ioc_count": int(case["ioc_count"]),
             "severity": int(case["severity"]),
             "opened": opened,
+            "status": info.get("status", "open"),
+            "description": info.get("description", ""),
         })
+    # Cases created from the Cases tab that have no members yet.
+    for name, info in meta.items():
+        out.append({
+            "id": name, "label": name, "iocs": [], "ioc_count": 0, "severity": 0,
+            "opened": (info.get("created") or "").split(" ", 1)[0] or None,
+            "status": info.get("status", "open"), "description": info.get("description", ""),
+        })
+    out.sort(key=lambda c: (c["status"] == "closed", -c["severity"], c["label"].lower()))
     return out
 
 
@@ -1203,7 +1218,203 @@ def ui_delete_case(case: str) -> dict[str, Any]:
     """
     database.init_db()
     removed = database.remove_case(case)
+    database.delete_case_meta(case)
     return {"case": case, "removed": int(removed)}
+
+
+# ---------------------------------------------------------------------------
+# Analyst workflow: case management, manual verdict, notes, watchlist
+# ---------------------------------------------------------------------------
+
+
+def _require_ioc_id(raw: str) -> tuple[int, str]:
+    value = defang_mod.refang((raw or "").strip())
+    ioc_type = parser.detect_type(value)
+    value = parser.normalize_value(value, ioc_type) if ioc_type != "unknown" else value
+    database.init_db()
+    ioc_id = database.get_ioc_id(value)
+    if ioc_id is None:
+        raise HTTPException(status_code=404, detail=f"IOC {value!r} not found in cache — enrich first")
+    return ioc_id, value
+
+
+class CaseCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    description: str | None = Field(None, max_length=2000)
+
+
+class CaseUpdateRequest(BaseModel):
+    status: str | None = Field(None, pattern="^(open|closed)$")
+    description: str | None = Field(None, max_length=2000)
+    rename: str | None = Field(None, min_length=1, max_length=80)
+
+
+@app.post("/api/ui/cases", dependencies=[Depends(require_token)])
+def ui_create_case(req: CaseCreateRequest) -> dict[str, Any]:
+    """Create an (empty) case so it can be filled from the Enrich tab."""
+    database.init_db()
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="case name is empty")
+    database.upsert_case(name, req.description)
+    return {"case": name, "status": "open"}
+
+
+@app.patch("/api/ui/cases/{case}", dependencies=[Depends(require_token)])
+def ui_update_case(case: str, req: CaseUpdateRequest) -> dict[str, Any]:
+    """Close/reopen, describe or rename a case."""
+    database.init_db()
+    name = case
+    database.upsert_case(name, req.description)
+    if req.status:
+        database.set_case_status(name, req.status)
+    if req.rename and req.rename.strip() and req.rename.strip() != name:
+        new = req.rename.strip()
+        if not database.rename_case(name, new):
+            raise HTTPException(status_code=409, detail=f"a case named {new!r} already exists")
+        name = new
+    info = database.get_case_meta().get(name, {})
+    return {"case": name, **info}
+
+
+@app.get("/api/ui/cases/{case}/export", dependencies=[Depends(require_token)])
+def ui_export_case(case: str) -> dict[str, Any]:
+    """Markdown write-up of a case: members, scores, analyst verdicts and notes."""
+    database.init_db()
+    info = database.get_case_meta().get(case, {})
+    members = database.list_iocs_for_case(case)
+    if not members and not info:
+        raise HTTPException(status_code=404, detail=f"no case named {case!r}")
+    lines = [
+        f"# Case: {case}",
+        "",
+        f"- Status: **{info.get('status', 'open')}**",
+        f"- Indicators: {len(members)}",
+        f"- Exported: {datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+    ]
+    if info.get("description"):
+        lines += ["", info["description"]]
+    lines += ["", "| Indicator | Type | Score | Tier | Analyst verdict |", "|---|---|---|---|---|"]
+    notes_block: list[str] = []
+    for m in members:
+        ioc_id = database.get_ioc_id(m["value"])
+        score_val = m.get("last_score")
+        verdict = database.get_verdict(ioc_id) if ioc_id else None
+        tier = output._risk_tier(score_val) if score_val is not None else "—"
+        shown = defang_mod.defang(m["value"])
+        lines.append(
+            f"| `{shown}` | {m.get('type', '')} | {score_val if score_val is not None else '—'} | {tier} | "
+            f"{(verdict or {}).get('verdict', '—')} |"
+        )
+        notes = database.list_notes(ioc_id) if ioc_id else []
+        if notes or (verdict and verdict.get("note")):
+            notes_block.append(f"### `{shown}`")
+            if verdict and verdict.get("note"):
+                notes_block.append(f"- verdict note: {verdict['note']}")
+            notes_block += [f"- {n['created'][:16]} — {n['body']}" for n in notes]
+            notes_block.append("")
+    if notes_block:
+        lines += ["", "## Notes", ""] + notes_block
+    return {"case": case, "filename": f"case-{case}.md", "markdown": "\n".join(lines) + "\n"}
+
+
+class VerdictRequest(BaseModel):
+    ioc: str = Field(..., min_length=1, max_length=2100)
+    verdict: str | None = Field(None, pattern="^(malicious|suspicious|benign|false_positive)$")
+    note: str | None = Field(None, max_length=1000)
+
+
+@app.post("/api/ui/verdict", dependencies=[Depends(require_token)])
+def ui_set_verdict(req: VerdictRequest) -> dict[str, Any]:
+    """Set or clear (``verdict: null``) the analyst's own verdict on an IOC."""
+    ioc_id, value = _require_ioc_id(req.ioc)
+    database.set_verdict(ioc_id, req.verdict, req.note)
+    return {"ioc": value, "verdict": database.get_verdict(ioc_id)}
+
+
+class NoteRequest(BaseModel):
+    ioc: str = Field(..., min_length=1, max_length=2100)
+    body: str = Field(..., min_length=1, max_length=2000)
+
+
+@app.post("/api/ui/notes", dependencies=[Depends(require_token)])
+def ui_add_note(req: NoteRequest) -> dict[str, Any]:
+    ioc_id, value = _require_ioc_id(req.ioc)
+    body = req.body.strip()
+    if not body:
+        raise HTTPException(status_code=422, detail="note is empty")
+    database.add_note(ioc_id, body)
+    return {"ioc": value, "notes": database.list_notes(ioc_id)}
+
+
+@app.delete("/api/ui/notes/{note_id}", dependencies=[Depends(require_token)])
+def ui_delete_note(note_id: int) -> dict[str, Any]:
+    database.init_db()
+    return {"removed": int(database.delete_note(note_id))}
+
+
+class WatchRequest(BaseModel):
+    ioc: str = Field(..., min_length=1, max_length=2100)
+    threshold: int = Field(20, ge=1, le=100)
+
+
+@app.get("/api/ui/watchlist", dependencies=[Depends(require_token)])
+def ui_watchlist() -> list[dict[str, Any]]:
+    database.init_db()
+    return [{**r, "added": str(r["added"]), "last_checked": str(r["last_checked"] or "")} for r in database.watch_list()]
+
+
+@app.post("/api/ui/watchlist", dependencies=[Depends(require_token)])
+def ui_watch_add(req: WatchRequest) -> dict[str, Any]:
+    """Add an IOC to the watchlist (or change its alert threshold)."""
+    ioc_id, value = _require_ioc_id(req.ioc)
+    database.watch_add(ioc_id, req.threshold)
+    return {"ioc": value, "watch": database.watch_get(ioc_id)}
+
+
+@app.delete("/api/ui/watchlist", dependencies=[Depends(require_token)])
+def ui_watch_remove(ioc: str = Query(..., description="IOC to stop watching")) -> dict[str, Any]:
+    ioc_id, value = _require_ioc_id(ioc)
+    return {"ioc": value, "removed": int(database.watch_remove(ioc_id))}
+
+
+_WATCH_CHECK_MAX = 50
+
+
+@app.post("/api/ui/watchlist/check", dependencies=[Depends(require_token)])
+async def ui_watch_check() -> dict[str, Any]:
+    """Re-enrich every watched IOC (fresh, no cache) and report score changes.
+
+    One at a time, so the per-source rate limits are respected. A run that
+    came back degraded is reported but never compared: a missing source
+    would look like a score drop. ``alerts`` lists IOCs whose score moved
+    by at least their own threshold since the last complete check.
+    """
+    database.init_db()
+    rows = database.watch_list()[:_WATCH_CHECK_MAX]
+    alerts: list[dict[str, Any]] = []
+    degraded: list[dict[str, Any]] = []
+    checked = 0
+    for row in rows:
+        previous = row["checked_score"] if row["checked_score"] is not None else row["score"]
+        try:
+            result = await enrich.enrich_ioc_async(row["value"], row["type"], no_cache=True)
+        except Exception:  # never let one indicator abort the run
+            degraded.append({"ioc": row["value"], "unavailable": {"enrich": "exception"}})
+            continue
+        if result.get("degraded"):
+            degraded.append({"ioc": row["value"], "unavailable": result.get("unavailable") or {}})
+            continue
+        new = int(result.get("final_score") or 0)
+        delta = None if previous is None else new - int(previous)
+        database.watch_record(row["ioc_id"], new, delta)
+        checked += 1
+        if delta is not None and abs(delta) >= int(row["threshold"]):
+            alerts.append({
+                "ioc": row["value"], "type": row["type"], "previous": int(previous), "score": new,
+                "delta": delta, "threshold": int(row["threshold"]), "tier": output._risk_tier(new),
+            })
+    return {"watched": len(rows), "checked": checked, "alerts": alerts, "degraded": degraded}
 
 
 @app.get("/enrich", dependencies=[Depends(require_token)])

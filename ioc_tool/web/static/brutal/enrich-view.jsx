@@ -235,6 +235,7 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
               {ioc.prev_score !== undefined && ioc.prev_score !== ioc.final_score && <DeltaChip prev={ioc.prev_score} curr={ioc.final_score} ioc={ioc} />}
               {ioc.case && <CaseChip caseId={ioc.case} />}
               <CaseAssignBar ioc={ioc} />
+              <AnalystBar ioc={ioc} setResults={setResults} />
               {ioc.type === "domain" && (
                 <div className="hero-flags">
                   <div className="flags-label">HEURISTICS · local signals</div>
@@ -724,6 +725,101 @@ function CaseChip({ caseId }) {
 // Autocomplete: native <datalist> populated from /api/ui/cases on first
 // focus (lazy — keeps panel render cheap). Cuts typo-driven case sprawl
 // by suggesting the canonical names already in the cache.
+// Analyst's own layer on top of the computed score: a manual verdict, free
+// notes and the watchlist switch. Nothing here changes the composite — the
+// score is what the sources say, the verdict is what a person decided.
+const VERDICT_OPTS = [
+  { k: "malicious",      label: "MALICIOUS",      c: "var(--crit, #f43f5e)" },
+  { k: "suspicious",     label: "SUSPICIOUS",     c: "var(--med)" },
+  { k: "benign",         label: "BENIGN",         c: "var(--safe)" },
+  { k: "false_positive", label: "FALSE POSITIVE", c: "var(--ink-2)" },
+];
+
+function AnalystBar({ ioc, setResults }) {
+  const [verdict, setVerdict] = React.useState(ioc.verdict || null);
+  const [notes, setNotes] = React.useState(ioc.notes || []);
+  const [watch, setWatch] = React.useState(ioc.watch || null);
+  const [draft, setDraft] = React.useState("");
+  const [msg, setMsg] = React.useState(null);
+
+  React.useEffect(() => {
+    setVerdict(ioc.verdict || null); setNotes(ioc.notes || []); setWatch(ioc.watch || null);
+    setDraft(""); setMsg(null);
+  }, [ioc.id]);
+
+  // Keep the strip record in step so switching IOCs and back keeps the state.
+  const sync = (p) => { if (setResults) setResults(prev => prev.map(r => (r.id === ioc.id ? { ...r, ...p } : r))); };
+  const call = (promise, onOk) => promise.then(r => { setMsg(null); onOk(r); }).catch(e => setMsg(String(e.message || e)));
+
+  const pick = (k) => {
+    const next = verdict && verdict.verdict === k ? null : k;
+    call(window.ssApi("POST", "/api/ui/verdict", { ioc: ioc.ioc, verdict: next }),
+      r => { setVerdict(r.verdict); sync({ verdict: r.verdict }); });
+  };
+  const addNote = () => {
+    const body = draft.trim();
+    if (!body) return;
+    call(window.ssApi("POST", "/api/ui/notes", { ioc: ioc.ioc, body }),
+      r => { setNotes(r.notes); sync({ notes: r.notes }); setDraft(""); });
+  };
+  const delNote = (id) => call(window.ssApi("DELETE", "/api/ui/notes/" + id),
+    () => { const n = notes.filter(x => x.id !== id); setNotes(n); sync({ notes: n }); });
+  const toggleWatch = () => {
+    if (watch) {
+      call(window.ssApi("DELETE", "/api/ui/watchlist?ioc=" + encodeURIComponent(ioc.ioc)),
+        () => { setWatch(null); sync({ watch: null }); });
+    } else {
+      call(window.ssApi("POST", "/api/ui/watchlist", { ioc: ioc.ioc, threshold: 20 }),
+        r => { setWatch(r.watch); sync({ watch: r.watch }); });
+    }
+  };
+
+  const v = verdict && verdict.verdict;
+  const clash = (v === "benign" || v === "false_positive") ? ioc.final_score >= 60
+    : v === "malicious" ? ioc.final_score < 40 : false;
+  const btn = (on, color) => ({
+    padding: "2px 8px", font: "inherit", fontSize: 10.5, letterSpacing: "0.08em", cursor: "pointer",
+    background: on ? color : "transparent", color: on ? "var(--bg)" : color,
+    border: "1px solid " + color, fontWeight: on ? 800 : 600,
+  });
+
+  return (
+    <div className="chip" style={{ display: "block", lineHeight: 1.7 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="chip-label" title="Your own call. Stored next to the score; it never changes the score.">ANALYST VERDICT</span>
+        {VERDICT_OPTS.map(o => (
+          <button key={o.k} type="button" style={btn(v === o.k, o.c)} onClick={() => pick(o.k)}
+                  title={v === o.k ? "click again to clear" : "set verdict"}>{o.label}</button>
+        ))}
+        <button type="button" style={{ ...btn(!!watch, "var(--accent)"), marginLeft: "auto" }} onClick={toggleWatch}
+                title={watch ? "Stop watching" : "Add to the watchlist: re-checked from the Watch tab, alerts when the score moves by 20 or more"}>
+          {watch ? "★ WATCHING" : "☆ WATCH"}
+        </button>
+      </div>
+      {clash && (
+        <div className="small" style={{ color: "var(--med)" }}>
+          your verdict disagrees with the sources (score {ioc.final_score}) — add a note saying why
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+        <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addNote(); }}
+               maxLength={2000} placeholder="add a note — what you found, what you did"
+               style={{ flex: 1, minWidth: 0, background: "var(--bg)", color: "var(--ink)", border: "1px solid var(--line-2)", font: "inherit", padding: "2px 6px" }} />
+        <button type="button" style={btn(false, "var(--ink-2)")} onClick={addNote} disabled={!draft.trim()}>ADD NOTE</button>
+      </div>
+      {notes.map(n => (
+        <div key={n.id} className="small" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+          <span className="dim" style={{ whiteSpace: "nowrap" }}>{String(n.created).slice(0, 16)}</span>
+          <span style={{ flex: 1, overflowWrap: "anywhere" }}>{n.body}</span>
+          <button type="button" onClick={() => delNote(n.id)} title="delete note"
+                  style={{ background: "transparent", border: "none", color: "var(--ink-3)", cursor: "pointer", font: "inherit" }}>×</button>
+        </div>
+      ))}
+      {msg && <div className="small" style={{ color: "var(--bad, #ff7474)" }}>// {msg}</div>}
+    </div>
+  );
+}
+
 function CaseAssignBar({ ioc }) {
   const [value, setValue] = React.useState(ioc.case || "");
   const [busy, setBusy] = React.useState(false);
