@@ -66,6 +66,7 @@ Per-source failures are **tri-state** (Nov 2026). A module still returns `None` 
 | `ioc_tool/ui/cli.py` | Interactive menu + arg-flag shortcuts (`-1/-2/-3`) |
 | `ioc_tool/ui/banner.py` | "Sniper Scope" ASCII art + colors |
 | `ioc_tool/core/parser.py` | Detect IOC type from string |
+| `ioc_tool/core/related.py` | Related indicators for one cached IOC (same case / family / network / domain, hosts named in its data, shared tags). Reads SQLite only |
 | `ioc_tool/core/defang.py` | Defang/refang IOC strings |
 | `ioc_tool/core/extractor.py` | Extract IOCs from arbitrary text blobs |
 | `ioc_tool/core/enrich.py` | Orchestrate per-source enrichment + cache lookups |
@@ -264,6 +265,7 @@ All secrets in `.env` (gitignored). Template: `ioc_tool/.env.example` (also ship
 | GET    | `/api/ui/enrich/stream?ioc=<v>[&defang&no_cache]` | SSE stream of per-source progress for one IOC. Events: `meta` (`{ioc, type, pending}`) once at start; `module` (`{name, entry}`) as each source resolves via `asyncio.as_completed`; `skipped` (`{name}`) when a source returns `None` (no data / API key missing); `final` (the same UI-shaped payload `/api/ui/enrich` returns). `module` + `skipped` counts sum to `pending` so the dashboard's landed/total counter doesn't stall on soft-fail sources. Same auth + `?defang` semantics as the blocking endpoint. |
 | GET    | `/api/ui/recent?limit=N` | Newest cached IOCs (default 8, max 50) reshaped for the dashboard's recent strip. Reads `iocs` desc by `last_seen`, rebuilds modules from cache — no API spend. Empty list when the workspace has never been enriched. |
 | GET    | `/api/ui/pivot?kind=<kind>&value=<v>[&limit=N&exclude=<ioc>]` | Cache-wide related-IOC lookup. `kind`: `tag` / `malware` / `family` / `registrar` / `ioc` / `any`. Substring scan over persisted JSON; quoted-literal match for known string-field kinds avoids false positives (`"emotet"` won't match `emotetable`). Powers the dashboard's PivotPanel "RELATED" groups. |
+| GET    | `/api/ui/related?ioc=<v>[&limit=N]` | Related indicators for one cached IOC, grouped by what they share (case, malware family, network, registered domain, hosts named in its DNS / rDNS / PDNS data, certificate subdomains, tags, registrar). Cache-only (`core/related.py`); items carry `cached` true/false. Powers the dashboard's RELATED panel. |
 | GET    | `/api/ui/cases` | List every case in the workspace with member IOC values, count, derived severity (max member `last_score`), and earliest tag creation as `opened`. Backs the Cases tab. |
 | PATCH  | `/api/ui/iocs/{value}/case` | Body `{"case": "<name>" \| null}` — assign or detach. Refangs the path value. 404 when the IOC isn't in the cache (enrich first). An IOC can belong to at most one case at a time; reassigning replaces the prior tag row. |
 | DELETE | `/api/ui/cases/{case}` | Detach every IOC from a case. The underlying IOCs + their enrichments are preserved; only the case relationship is removed. Idempotent: unknown case returns `removed: 0`. |

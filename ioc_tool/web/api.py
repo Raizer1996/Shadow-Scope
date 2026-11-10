@@ -1238,6 +1238,28 @@ def _require_ioc_id(raw: str) -> tuple[int, str]:
     return ioc_id, value
 
 
+@app.get("/api/ui/related", dependencies=[Depends(require_token)])
+def ui_related(
+    ioc: str = Query(..., min_length=1, description="Cached IOC to find relatives of"),
+    limit: int = Query(12, ge=1, le=50, description="Max items per group"),
+) -> dict[str, Any]:
+    """Indicators related to one cached IOC, grouped by what they share.
+
+    Cache-only — never calls a provider. Items carry ``cached``: true for
+    indicators already enriched (with their last score), false for hosts
+    that are only *named* in this IOC's data and could be enriched next.
+    """
+    from ..core import related as related_mod
+
+    ioc_id, value = _require_ioc_id(ioc)
+    ioc_type = parser.detect_type(value)
+    return {
+        "ioc": value,
+        "type": ioc_type,
+        "groups": related_mod.related_for(ioc_id, value, ioc_type, limit=limit),
+    }
+
+
 class CaseCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     description: str | None = Field(None, max_length=2000)
