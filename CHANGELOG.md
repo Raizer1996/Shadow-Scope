@@ -5,17 +5,7 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
-
-- **Scoring calibration.** VirusTotal scores the detection **count**
-  (`>=3 → 65`, `>=6 → 85`, `>=20 → 95`, `suspicious` at half weight)
-  instead of `malicious / total_engines`, which rendered a 5/94 verdict
-  as a 5. EPSS takes `max(probability, percentile_bucket)` — raw EPSS
-  probabilities are tiny by construction, so the 90th percentile used to
-  score 3. The `Heuristics` composite keeps its strongest sub-signal
-  rather than averaging them.
-  **These change existing scores**; `final_score` values stored before
-  this release are not comparable with new ones.
+## [1.1.0] — 2026-11-10
 
 ### Added
 
@@ -38,6 +28,16 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
   `claude mcp add --scope user shadowscope -- shadowscope-mcp`.
 
 ### Changed
+
+- **Scoring calibration.** VirusTotal scores the detection **count**
+  (`>=3 → 65`, `>=6 → 85`, `>=20 → 95`, `suspicious` at half weight)
+  instead of `malicious / total_engines`, which rendered a 5/94 verdict
+  as a 5. EPSS takes `max(probability, percentile_bucket)` — raw EPSS
+  probabilities are tiny by construction, so the 90th percentile used to
+  score 3. The `Heuristics` composite keeps its strongest sub-signal
+  rather than averaging them.
+  **These change existing scores**; `final_score` values stored before
+  this release are not comparable with new ones.
 
 - **One version string.** `ioc_tool.__version__` (1.1.0) is the single
   source: `pyproject` reads it dynamically, `/` and `/health` return it, and
