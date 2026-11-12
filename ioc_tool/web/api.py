@@ -369,6 +369,9 @@ def health() -> HealthResponse:
 def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
     """Return a terse per-source detail summary for the dashboard table."""
     data = data or {}
+    if source == "Blocklist":
+        note = f" · {data['note']}" if data.get("note") else ""
+        return f"on your blocklist via {data.get('match', '?')}{note}"
     if source == "VirusTotal":
         stats = (data.get("last_analysis_stats") or {})
         total = sum(int(v or 0) for v in stats.values())

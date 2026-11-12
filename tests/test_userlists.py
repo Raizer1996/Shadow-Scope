@@ -134,6 +134,7 @@ def test_api_crud_and_live_effect_on_cached_indicators(db):
 
     row = cached()  # no re-enrichment happened
     assert row["final_score"] == 100 and row["modules"]["Blocklist"]["score"] == 100
+    assert row["modules"]["Blocklist"]["detail"] == "on your blocklist via 203.0.113.0/24 · bad range"
     assert row["listed"] == {"id": entry["id"], "list": "block", "pattern": "203.0.113.0/24", "note": "bad range"}
 
     assert client.delete(f"/api/ui/lists/{entry['id']}").json() == {"removed": 1}
