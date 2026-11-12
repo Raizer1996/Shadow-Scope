@@ -1348,6 +1348,34 @@ def ui_filter_delete(name: str) -> dict[str, int]:
     return {"removed": database.filter_delete(name)}
 
 
+class ImportPreviewRequest(BaseModel):
+    text: str = Field(..., max_length=2_000_000, description="STIX JSON, CSV or free text")
+
+
+class ImportApplyRequest(BaseModel):
+    rows: list[dict[str, Any]] = Field(..., max_length=2000)
+    case: str | None = Field(None, max_length=80, description="Case for rows that carry none")
+
+
+@app.post("/api/ui/import/preview", dependencies=[Depends(require_token)])
+async def ui_import_preview(req: ImportPreviewRequest) -> dict[str, Any]:
+    """Parse an import file and show what it holds. Writes nothing."""
+    from ..core import importer
+
+    return await asyncio.to_thread(importer.parse, req.text)
+
+
+@app.post("/api/ui/import/apply", dependencies=[Depends(require_token)])
+async def ui_import_apply(req: ImportApplyRequest) -> dict[str, int]:
+    """Register previewed rows (with case / tags / note / verdict) in the cache.
+
+    Never calls a provider — imported indicators are stored un-enriched.
+    """
+    from ..core import importer
+
+    return await asyncio.to_thread(importer.apply, req.rows, case=req.case)
+
+
 class CaseCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     description: str | None = Field(None, max_length=2000)

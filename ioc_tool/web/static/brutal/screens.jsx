@@ -23,7 +23,7 @@ function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, 
 
   const loadFile = (file) => {
     if (!file) return;
-    if (file.size > 256000) { setRun({ total: 0, done: 0, failed: 0, degraded: 0, note: "file too large (max 256 KB)" }); return; }
+    if (file.size > 2000000) { setRun({ total: 0, done: 0, failed: 0, degraded: 0, note: "file too large (max 2 MB)" }); return; }
     const rd = new FileReader();
     rd.onload = () => { setPasteText(String(rd.result || "")); setAddOpen(true); };
     rd.readAsText(file);
@@ -38,6 +38,45 @@ function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, 
     const queue = ex.iocs.slice();
     const note = [ex.truncated ? `${ex.truncated} over the 200 limit dropped` : "", ex.skipped ? `${ex.skipped} lines not recognised` : ""].filter(Boolean).join(" · ");
     if (queue.length === 0) { setRun({ total: 0, done: 0, failed: 0, degraded: 0, note: note || "no indicators found in that text" }); return; }
+    await runQueue(queue, note);
+  };
+
+  // ── Import with details (STIX / CSV with case, tags, notes, verdict) ────
+  const [imp, setImp] = useState(null);          // preview from /api/ui/import/preview
+  const [impCase, setImpCase] = useState("");
+  const [impBusy, setImpBusy] = useState(false);
+  const fail = (e) => setRun({ total: 0, done: 0, failed: 0, degraded: 0, note: String(e.message || e) });
+
+  const previewImport = () => {
+    if (busy || impBusy || !pasteText.trim()) return;
+    setImpBusy(true);
+    window.ssApi("POST", "/api/ui/import/preview", { text: pasteText })
+      .then(r => { setImp(r); setRun(null); })
+      .catch(fail)
+      .finally(() => setImpBusy(false));
+  };
+  const applyImport = async (thenEnrich) => {
+    if (!imp || impBusy) return;
+    setImpBusy(true);
+    let res;
+    try { res = await window.ssApi("POST", "/api/ui/import/apply", { rows: imp.rows, case: impCase.trim() || null }); }
+    catch (e) { setImpBusy(false); fail(e); return; }
+    setImpBusy(false);
+    const bits = [`${res.imported} imported (${res.new} new)`, res.cases && `${res.cases} put in a case`, res.tags && `${res.tags} tags`,
+      res.notes && `${res.notes} notes`, res.verdicts && `${res.verdicts} verdicts`, res.rejected && `${res.rejected} rejected`].filter(Boolean).join(" · ");
+    const rows = imp.rows;
+    setImp(null); setImpCase("");
+    if (!thenEnrich) {
+      setRun({ total: 0, done: 0, failed: 0, degraded: 0, note: bits + " · not looked up yet — find them in SEARCH" });
+      setPasteText("");
+      return;
+    }
+    const over = Math.max(0, rows.length - 200);
+    await runQueue(rows.slice(0, 200).map(r => ({ value: r.ioc })), bits + (over ? ` · ${over} beyond the first 200 left un-enriched` : ""));
+  };
+
+  const runQueue = async (queue, note) => {
+    cancelRef.current = false;
     const st = { total: queue.length, done: 0, failed: 0, degraded: 0, note };
     setRun({ ...st });
     // Three at a time: enough to be quick, low enough that per-source rate
@@ -130,14 +169,68 @@ function BatchView({ results: stripResults, setResults, setActiveIocId, setTab, 
                     placeholder={"paste indicators, one per line — or any text (log lines, an email, a report): IPs, domains, URLs, hashes, CVE ids and AS numbers are picked out.\ndefanged forms like 1[.]2[.]3[.]4 or hxxp:// are fine. you can also drop a .txt / .csv / .log file here."}
                     style={{ width: "100%", background: "var(--bg)", color: "var(--ink)", border: "1px solid var(--line-2)", font: "inherit", padding: 8, resize: "vertical" }} />
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <button className="btn-outline" onClick={startRun} disabled={busy || !pasteText.trim()}>{busy ? "RUNNING…" : "EXTRACT & ENRICH"}</button>
+            <button className="btn-outline" onClick={startRun} disabled={busy || impBusy || !!imp || !pasteText.trim()}>{busy ? "RUNNING…" : "EXTRACT & ENRICH"}</button>
+            <button className="btn-outline" onClick={previewImport} disabled={busy || impBusy || !pasteText.trim()}
+                    title="For STIX bundles and CSV files that carry a case, tags, notes or verdicts. Shows what was found before anything is saved.">
+              {impBusy && !imp ? "READING…" : "PREVIEW IMPORT"}
+            </button>
             {busy && <button className="btn-outline" onClick={() => { cancelRef.current = true; }}>STOP</button>}
             <label className="dim small" style={{ cursor: "pointer" }}>
               or choose a file <input type="file" accept=".txt,.csv,.log,.json,.md,text/*" style={{ display: "none" }} onChange={e => loadFile(e.target.files && e.target.files[0])} />
               <span style={{ textDecoration: "underline" }}>browse</span>
             </label>
-            <span className="dim small">max 200 indicators · 256 KB · already-cached ones cost no quota</span>
+            <span className="dim small">enrich: max 200 indicators · 256 KB · already-cached ones cost no quota — import: STIX / CSV / text up to 2 MB</span>
           </div>
+          {imp && (() => {
+            const withMeta = imp.rows.filter(r => r.case || r.tags.length || r.note || r.verdict).length;
+            return (
+              <div style={{ border: "1px solid var(--line-2)", padding: 10, display: "grid", gap: 8 }}>
+                <div className="small">
+                  <b style={{ color: "var(--accent)" }}>{imp.format === "stix" ? "STIX" : imp.format === "csv" ? "CSV" : "PLAIN TEXT"}</b>
+                  {" · "}<b>{imp.rows.length}</b> indicators
+                  {imp.known ? ` · ${imp.known} already here` : ""}
+                  {withMeta ? ` · ${withMeta} with case, tags, notes or verdict` : " · no extra details in this file"}
+                  {imp.skipped ? ` · ${imp.skipped} entries not usable` : ""}
+                  {imp.truncated ? ` · ${imp.truncated} over the ${imp.rows.length} limit dropped` : ""}
+                </div>
+                {imp.rows.length > 0 && (
+                  <table className="batch-table">
+                    <thead><tr><th style={{ width: "8ch" }}>type</th><th>indicator</th><th>case</th><th>tags</th><th>note</th><th>verdict</th><th style={{ width: "8ch" }}></th></tr></thead>
+                    <tbody>
+                      {imp.rows.slice(0, 8).map(r => (
+                        <tr key={r.ioc} className="batch-row" style={{ cursor: "default" }}>
+                          <td className="mono dim">{r.type}</td>
+                          <td className="bt-ioc">{fmt(r.ioc).length > 48 ? fmt(r.ioc).slice(0, 44) + "…" : fmt(r.ioc)}</td>
+                          <td className="small">{r.case || <span className="dim">—</span>}</td>
+                          <td className="small">{r.tags.join(", ") || <span className="dim">—</span>}</td>
+                          <td className="small" title={r.note || ""}>{r.note ? (r.note.length > 50 ? r.note.slice(0, 48) + "…" : r.note) : <span className="dim">—</span>}</td>
+                          <td className="small">{r.verdict ? r.verdict.replace("_", " ") : <span className="dim">—</span>}</td>
+                          <td className="dim small">{r.cached ? "here" : "new"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {imp.rows.length > 8 && <div className="dim small">… and {imp.rows.length - 8} more</div>}
+                {imp.rows.length > 0 ? (
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <input className="bt-search" style={{ maxWidth: 260 }} maxLength={80} value={impCase} onChange={e => setImpCase(e.target.value)}
+                           placeholder="put all into case… (optional)" title="Used for rows that do not name a case themselves. Created if it does not exist." />
+                    <button className="btn-outline" onClick={() => applyImport(false)} disabled={impBusy}
+                            title="Save indicators and their details locally. Nothing is looked up, no quota used.">IMPORT ONLY · no lookups</button>
+                    <button className="btn-outline" onClick={() => applyImport(true)} disabled={impBusy} style={{ borderColor: "var(--accent)", color: "var(--accent)" }}
+                            title="Save, then look up the first 200 at the sources">IMPORT + ENRICH{imp.rows.length > 200 ? " first 200" : ""}</button>
+                    <button className="btn-outline" onClick={() => setImp(null)} disabled={impBusy}>CANCEL</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <span className="dim small">// nothing usable found in that text</span>
+                    <button className="btn-outline" onClick={() => setImp(null)}>CLOSE</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {run && (
             <div className="small" role="status">
               {run.total > 0 && (
