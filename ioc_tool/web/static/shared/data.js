@@ -301,6 +301,27 @@ window.ssDownload = function (filename, text, mime) {
   URL.revokeObjectURL(a.href);
 };
 
+// Reports. "md" downloads a Markdown file. "html" opens a clean, printable
+// page in a new tab (its button calls the browser's Print -> Save as PDF);
+// the tab is opened before the request so popup blockers let it through, and
+// if it is blocked anyway the page is downloaded instead.
+window.ssReport = async function (path, format) {
+  const url = path + (path.includes("?") ? "&" : "?") + "format=" + format;
+  if (format !== "html") {
+    const r = await window.ssApi("GET", url);
+    window.ssDownload(r.filename, r.content, "text/markdown");
+    return;
+  }
+  const tab = window.open("about:blank", "_blank");
+  let r;
+  try { r = await window.ssApi("GET", url); }
+  catch (e) { if (tab) tab.close(); throw e; }
+  if (!tab) { window.ssDownload(r.filename, r.content, "text/html"); return; }
+  const blobUrl = URL.createObjectURL(new Blob([r.content], { type: "text/html" }));
+  tab.location.replace(blobUrl);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+};
+
 // Batch tab: turn pasted text into a de-duplicated indicator list (no enrichment).
 window.shadowscopeExtract = async function (text) {
   const headers = { "Content-Type": "application/json" };

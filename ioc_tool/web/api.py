@@ -1348,6 +1348,40 @@ def ui_filter_delete(name: str) -> dict[str, int]:
     return {"removed": database.filter_delete(name)}
 
 
+@app.get("/api/ui/report", dependencies=[Depends(require_token)])
+def ui_report(
+    ioc: str = Query(..., min_length=1, description="Cached IOC to report on"),
+    format: str = Query("md", pattern="^(md|html)$", description="md, or html for a printable page"),
+) -> dict[str, str]:
+    """A shareable report on one cached IOC. Cache-only; indicators defanged.
+
+    ``html`` is a self-contained page for the browser's Print -> Save as PDF.
+    """
+    from ..core import report as report_mod
+
+    ioc_id, value = _require_ioc_id(ioc)
+    title, blocks = report_mod.ioc_report(ioc_id, value, parser.detect_type(value))
+    return {"format": format, "filename": report_mod.filename(value, format),
+            "content": report_mod.render(title, blocks, format)}
+
+
+@app.get("/api/ui/cases/{case}/report", dependencies=[Depends(require_token)])
+def ui_case_report(
+    case: str,
+    format: str = Query("md", pattern="^(md|html)$"),
+) -> dict[str, str]:
+    """A shareable report on a case: summary table plus a section per member."""
+    from ..core import report as report_mod
+
+    database.init_db()
+    built = report_mod.case_report(case)
+    if built is None:
+        raise HTTPException(status_code=404, detail=f"no case named {case!r}")
+    title, blocks = built
+    return {"format": format, "filename": report_mod.filename("case-" + case, format),
+            "content": report_mod.render(title, blocks, format)}
+
+
 class ImportPreviewRequest(BaseModel):
     text: str = Field(..., max_length=2_000_000, description="STIX JSON, CSV or free text")
 

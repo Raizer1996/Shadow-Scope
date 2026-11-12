@@ -831,9 +831,8 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
       .then(() => { if (nextId) setOpenId(nextId); reload(); })
       .catch(e => alert(String(e.message || e)));
   };
-  const exportCase = () => {
-    window.ssApi("GET", "/api/ui/cases/" + encodeURIComponent(open.id) + "/export")
-      .then(r => window.ssDownload(r.filename, r.markdown, "text/markdown"))
+  const exportCase = (format) => {
+    window.ssReport("/api/ui/cases/" + encodeURIComponent(open.id) + "/report", format)
       .catch(e => alert(String(e.message || e)));
   };
 
@@ -879,7 +878,8 @@ function CasesView({ results, fmt, setActiveIocId, setTab }) {
             </button>
             <button className="pill" onClick={() => { const n = prompt("New name for this case:", open.label); if (n && n.trim() && n.trim() !== open.label) caseAction({ rename: n.trim() }, n.trim()); }}>rename</button>
             <button className="pill" onClick={() => { const d = prompt("Case description:", open.description || ""); if (d !== null) caseAction({ description: d }); }}>describe</button>
-            <button className="pill" onClick={exportCase}>export .md</button>
+            <button className="pill" title="Download a Markdown report of this case" onClick={() => exportCase("md")}>report .md</button>
+            <button className="pill" title="Open a printable page — use its button, then choose Save as PDF" onClick={() => exportCase("html")}>print / pdf</button>
             <button className="pill warn" onClick={deleteCase}>delete case</button>
           </div>
         </header>

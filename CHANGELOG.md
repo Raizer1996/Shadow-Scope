@@ -7,6 +7,13 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Reports.** One indicator (Enrich view → REPORT) or a whole case (Cases
+  tab) as Markdown, or as a clean printable page whose button leads to the
+  browser's Save as PDF — no PDF library involved. An indicator report
+  holds score, verdict, case, tags, notes, per-source scores, timeline and
+  related indicators; a case report a summary table plus a section per
+  member. Indicators are always defanged and all source text is escaped.
+  `GET /api/ui/report`, `GET /api/ui/cases/{case}/report` (`format=md|html`).
 - **Import with details.** The Batch tab's add box gains PREVIEW IMPORT for
   STIX 2.x JSON (indicator patterns, observables, vulnerabilities; names and
   descriptions become notes, labels and whatever an indicator `indicates`

@@ -816,6 +816,13 @@ function AnalystBar({ ioc, setResults }) {
                   style={{ background: "transparent", border: "none", color: "var(--ink-3)", cursor: "pointer", font: "inherit" }}>×</button>
         </div>
       ))}
+      <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+        <span className="chip-label" title="Everything known locally about this indicator, defanged, ready to share">REPORT</span>
+        <button type="button" style={btn(false, "var(--ink-2)")} title="Download a Markdown report"
+                onClick={() => call(window.ssReport("/api/ui/report?ioc=" + encodeURIComponent(ioc.ioc), "md"), () => {})}>.md</button>
+        <button type="button" style={btn(false, "var(--ink-2)")} title="Open a printable page — use its button, then choose Save as PDF"
+                onClick={() => call(window.ssReport("/api/ui/report?ioc=" + encodeURIComponent(ioc.ioc), "html"), () => {})}>PRINT / PDF</button>
+      </div>
       {msg && <div className="small" style={{ color: "var(--bad, #ff7474)" }}>// {msg}</div>}
     </div>
   );
