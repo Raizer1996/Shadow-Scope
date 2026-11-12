@@ -148,7 +148,7 @@ pip install "shadowscope[mcp]"
 claude mcp add --scope user shadowscope -- shadowscope-mcp
 ```
 
-Exposes `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` over stdio, running the same pipeline and cache as the CLI (no REST server required).
+Exposes `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` plus the local-only analyst tools `search_cache`, `related_indicators`, `ioc_timeline`, `report`, `set_verdict`, `add_note`, `list_cases`, `assign_case`, `watchlist`, `user_list` over stdio, running the same pipeline and cache as the CLI (no REST server required).
 
 **Interactive mode**
 

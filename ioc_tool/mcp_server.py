@@ -26,7 +26,20 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from ioc_tool.core import database, defang, enrich, extractor, llm, parser, score
+from ioc_tool.core import (
+    database,
+    defang,
+    enrich,
+    extractor,
+    llm,
+    parser,
+    related,
+    score,
+    search,
+    timeline,
+    userlists,
+)
+from ioc_tool.core import report as report_mod
 
 try:
     from mcp.server.mcpserver import MCPServer
@@ -47,7 +60,11 @@ server = MCPServer(
         "Critical) from VirusTotal, AbuseIPDB, OTX, GreyNoise, abuse.ch feeds, "
         "NVD/EPSS/KEV and more. Pass IPs, domains, URLs, hashes, CVE IDs or ASNs; "
         "defanged forms (1[.]2[.]3[.]4, hxxp://) are accepted. Results are cached "
-        "for 24h; set no_cache=true to force a refetch."
+        "for 24h; set no_cache=true to force a refetch. The analyst tools "
+        "(search_cache, related_indicators, ioc_timeline, report, set_verdict, "
+        "add_note, list_cases, assign_case, watchlist, user_list) read and write "
+        "only the local database and never call a provider; most need the IOC to "
+        "have been enriched first."
     ),
 )
 
@@ -256,6 +273,238 @@ def cache_stats() -> dict[str, Any]:
     stats = database.cache_stats()
     stats.pop("db_path", None)
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Analyst tools — local database only, no provider calls
+# ---------------------------------------------------------------------------
+
+def _cached(ioc: str) -> tuple[int, str, str] | dict[str, Any]:
+    """``(ioc_id, value, type)`` for an IOC already in the cache, else an error dict."""
+    classified = _classify(ioc)
+    if isinstance(classified, dict):
+        return classified
+    value, ioc_type = classified
+    ioc_id = database.get_ioc_id(value)
+    if not ioc_id:
+        return {"error": f"{value!r} is not in the local cache — run enrich_ioc first", "ioc": value, "cached": False}
+    return int(ioc_id), value, ioc_type
+
+
+@server.tool()
+def search_cache(
+    query: str = "",
+    types: str = "",
+    min_score: int | None = None,
+    verdict: str = "",
+    case: str = "",
+    watched: bool | None = None,
+    deep: bool = True,
+    limit: int = 25,
+) -> dict[str, Any]:
+    """Search everything stored locally — no network, no API spend.
+
+    ``query`` words must all match somewhere: indicator, verdict, notes, case,
+    tags, malware family, or (``deep``) the raw text sources returned. Use
+    ``"quoted phrases"`` for exact text. ``types`` is comma-separated
+    (ip,domain,url,hash,cve,asn). ``verdict`` / ``case`` take a value, ``any``
+    or ``none``. Each row says where it matched.
+    """
+    wanted = [t.strip().lower() for t in types.split(",") if t.strip()]
+    bad = [t for t in wanted if t not in search.TYPES]
+    if bad:
+        return {"error": f"unknown type(s): {', '.join(bad)}", "supported_types": list(search.TYPES)}
+    if verdict and verdict not in ("any", "none", *database.VERDICTS):
+        return {"error": f"verdict must be one of: any, none, {', '.join(database.VERDICTS)}"}
+    return search.search(
+        query, types=wanted, min_score=min_score, verdict=verdict or None, case=case or None,
+        watched=watched, deep=deep, limit=max(1, min(int(limit), 100)),
+    )
+
+
+@server.tool()
+def related_indicators(ioc: str, limit: int = 8) -> dict[str, Any]:
+    """What else to look at for a cached IOC — from local data only.
+
+    Groups: same case, same malware, same network, same domain, hosts seen
+    with it (DNS / rDNS / passive DNS), certificate subdomains, shared tags,
+    same registrar. Items with ``cached: false`` are only named in the data
+    and have not been enriched yet.
+    """
+    found = _cached(ioc)
+    if isinstance(found, dict):
+        return found
+    ioc_id, value, ioc_type = found
+    return {"ioc": value, "type": ioc_type,
+            "groups": related.related_for(ioc_id, value, ioc_type, limit=max(1, min(int(limit), 30)))}
+
+
+@server.tool()
+def ioc_timeline(ioc: str, limit: int = 40) -> dict[str, Any]:
+    """Every dated fact about a cached IOC, newest first (UTC).
+
+    Mixes what sources reported (registered, first/last seen, listed) with
+    local history (score changes, verdicts, notes, case, watchlist).
+    """
+    found = _cached(ioc)
+    if isinstance(found, dict):
+        return found
+    ioc_id, value, _ = found
+    events = timeline.timeline_for(ioc_id)
+    cap = max(1, min(int(limit), 200))
+    return {"ioc": value, "total": len(events), "events": events[:cap]}
+
+
+@server.tool()
+def report(ioc: str = "", case: str = "") -> dict[str, Any]:
+    """A shareable Markdown report on one cached IOC, or on a whole case.
+
+    Pass exactly one of ``ioc`` / ``case``. Indicators are defanged.
+    """
+    if bool(ioc.strip()) == bool(case.strip()):
+        return {"error": "pass exactly one of ioc or case"}
+    if case.strip():
+        built = report_mod.case_report(case.strip())
+        if built is None:
+            return {"error": f"no case named {case.strip()!r}"}
+        return {"case": case.strip(), "markdown": report_mod.to_markdown(built[1])}
+    found = _cached(ioc)
+    if isinstance(found, dict):
+        return found
+    ioc_id, value, ioc_type = found
+    return {"ioc": value, "markdown": report_mod.to_markdown(report_mod.ioc_report(ioc_id, value, ioc_type)[1])}
+
+
+@server.tool()
+def set_verdict(ioc: str, verdict: str, note: str = "") -> dict[str, Any]:
+    """Record the analyst's own verdict on a cached IOC (stored locally).
+
+    ``verdict``: malicious, suspicious, benign, false_positive — or ``clear``
+    to remove it. The verdict sits beside the computed score; it never
+    changes the score.
+    """
+    found = _cached(ioc)
+    if isinstance(found, dict):
+        return found
+    ioc_id, value, _ = found
+    wanted = verdict.strip().lower().replace(" ", "_")
+    if wanted == "clear":
+        database.set_verdict(ioc_id, None)
+    elif wanted in database.VERDICTS:
+        database.set_verdict(ioc_id, wanted, note.strip()[:1000] or None)
+    else:
+        return {"error": f"verdict must be one of: {', '.join(database.VERDICTS)}, clear"}
+    return {"ioc": value, "verdict": database.get_verdict(ioc_id)}
+
+
+@server.tool()
+def add_note(ioc: str, note: str) -> dict[str, Any]:
+    """Attach a free-text note to a cached IOC (stored locally)."""
+    found = _cached(ioc)
+    if isinstance(found, dict):
+        return found
+    ioc_id, value, _ = found
+    body = note.strip()[:2000]
+    if not body:
+        return {"error": "empty note"}
+    database.add_note(ioc_id, body)
+    return {"ioc": value, "notes": database.list_notes(ioc_id)}
+
+
+@server.tool()
+def list_cases() -> dict[str, Any]:
+    """Every case with its status, description and member indicators."""
+    meta = database.get_case_meta()
+    names = {row["case_name"] for row in database.list_cases_with_summary()} | set(meta)
+    cases = []
+    for name in sorted(names):
+        members = database.list_iocs_for_case(name)
+        scores = [m["last_score"] for m in members if m.get("last_score") is not None]
+        info = meta.get(name, {})
+        cases.append({
+            "case": name, "status": info.get("status", "open"), "description": info.get("description") or None,
+            "max_score": max(scores) if scores else None,
+            "indicators": [{"ioc": m["value"], "type": m["type"], "score": m.get("last_score")} for m in members],
+        })
+    return {"cases": cases}
+
+
+@server.tool()
+def assign_case(ioc: str, case: str) -> dict[str, Any]:
+    """Put a cached IOC into a case (created if new). Empty ``case`` removes it from its case."""
+    found = _cached(ioc)
+    if isinstance(found, dict):
+        return found
+    _, value, _ = found
+    name = " ".join(case.split())[:80]
+    if name:
+        database.upsert_case(name)
+    database.set_ioc_case(value, name or None)
+    return {"ioc": value, "case": name or None}
+
+
+@server.tool()
+def watchlist(action: str = "list", ioc: str = "", threshold: int = 20) -> dict[str, Any]:
+    """The watchlist: indicators re-checked for score changes from the dashboard.
+
+    ``action``: ``list`` (default), ``add`` or ``remove`` (both need ``ioc``).
+    ``threshold`` is the score move that raises an alert. Re-checking itself
+    is done from the dashboard's Watch tab — it spends API quota.
+    """
+    act = action.strip().lower()
+    if act == "list":
+        return {"watched": [
+            {"ioc": r["value"], "type": r["type"], "score": r["score"], "threshold": r["threshold"],
+             "last_checked": str(r["last_checked"])[:16] if r["last_checked"] else None, "last_delta": r["last_delta"]}
+            for r in database.watch_list()
+        ]}
+    if act not in ("add", "remove"):
+        return {"error": "action must be list, add or remove"}
+    found = _cached(ioc)
+    if isinstance(found, dict):
+        return found
+    ioc_id, value, _ = found
+    if act == "add":
+        if not 1 <= int(threshold) <= 100:
+            return {"error": "threshold must be 1-100"}
+        database.watch_add(ioc_id, int(threshold))
+        return {"ioc": value, "watch": database.watch_get(ioc_id)}
+    return {"ioc": value, "removed": database.watch_remove(ioc_id)}
+
+
+@server.tool()
+def user_list(
+    action: str = "list",
+    list_name: str = "",
+    pattern: str = "",
+    note: str = "",
+    entry_id: int | None = None,
+) -> dict[str, Any]:
+    """The user's own blocklist / allowlist (stored locally, applied at once).
+
+    ``action``: ``list`` (default); ``add`` needs ``list_name`` (block|allow)
+    and ``pattern`` (IP, CIDR, domain — covers subdomains —, URL, hash, CVE,
+    ASN); ``remove`` needs ``entry_id``; ``check`` tells which entry, if any,
+    covers ``pattern``. Blocked scores 100; allowed skips all lookups.
+    """
+    act = action.strip().lower()
+    if act == "list":
+        return {"entries": userlists.entries()}
+    if act == "add":
+        try:
+            return {"added": userlists.add(list_name.strip().lower(), pattern, note)}
+        except ValueError as exc:
+            return {"error": str(exc)}
+    if act == "remove":
+        if entry_id is None:
+            return {"error": "remove needs entry_id (see action=list)"}
+        return {"removed": userlists.remove(int(entry_id))}
+    if act == "check":
+        classified = _classify(pattern)
+        if isinstance(classified, dict):
+            return classified
+        return {"ioc": classified[0], "match": userlists.match(classified[0], classified[1])}
+    return {"error": "action must be list, add, remove or check"}
 
 
 def _bootstrap() -> None:
