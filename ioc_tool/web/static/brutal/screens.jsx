@@ -1138,6 +1138,7 @@ function UsageMeter() {
         <span>USAGE</span>
         <span className="dim small">· requests sent by this install · day resets 00:00 UTC</span>
       </div>
+      <div style={{ padding: "2px 16px 8px" }}>
       {data.failed && <div className="dim small" style={{ padding: "4px 0" }}>// could not load usage</div>}
       {data.enabled === false && <div className="dim small" style={{ padding: "4px 0" }}>// counting is switched off (SHADOWSCOPE_USAGE=0)</div>}
       {!data.failed && rows.length === 0 && <div className="dim small" style={{ padding: "4px 0" }}>// nothing sent yet — counts start with the next lookup</div>}
@@ -1169,6 +1170,7 @@ function UsageMeter() {
           Counts only what this install sent — other tools using the same key are not seen.
         </div>
       )}
+      </div>
     </div>
   );
 }
