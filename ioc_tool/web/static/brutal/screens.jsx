@@ -1303,6 +1303,93 @@ function _cacheAuthHeaders() {
   return headers;
 }
 
+function BackupPanel({ onRestored }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);         // {text, bad}
+  const [pending, setPending] = useState(null); // {file, backup, current} after the dry run
+  const fileRef = React.useRef(null);
+  const say = (text, bad) => setMsg({ text, bad: !!bad });
+  const detailOf = async (r) => { try { const j = await r.json(); return (j && typeof j.detail === "string" && j.detail) || ("HTTP " + r.status); } catch (e) { return "HTTP " + r.status; } };
+  const line = (c) => `${c.iocs || 0} indicators · ${c.enrichments || 0} cached answers · ${c.ioc_notes || 0} notes · ${c.cases || 0} cases · ${c.watchlist || 0} watched · ${c.user_lists || 0} list entries`;
+
+  const download = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/ui/backup", { headers: _cacheAuthHeaders() });
+      if (!r.ok) throw new Error(await detailOf(r));
+      const name = (/filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "") || [])[1] || "shadowscope-backup.db";
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      say(`saved ${name} (${(blob.size / 1048576).toFixed(1)} MB) to your downloads`);
+    } catch (e) { say(String(e.message || e), true); }
+    setBusy(false);
+  };
+
+  const upload = (file, dry) => fetch("/api/ui/restore" + (dry ? "?dry_run=true" : ""), {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", ...(dry ? {} : { "X-Confirm": "restore" }), ..._cacheAuthHeaders() },
+    body: file,
+  });
+
+  const choose = async (file) => {
+    if (!file) return;
+    setBusy(true); setMsg(null); setPending(null);
+    try {
+      const r = await upload(file, true);
+      if (!r.ok) throw new Error(await detailOf(r));
+      const j = await r.json();
+      setPending({ file, backup: j.backup, current: j.current });
+    } catch (e) { say("cannot use that file: " + String(e.message || e), true); }
+    setBusy(false);
+  };
+
+  const doRestore = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await upload(pending.file, false);
+      if (!r.ok) throw new Error(await detailOf(r));
+      const j = await r.json();
+      setPending(null);
+      say(`restored: ${line(j.restored)}. The previous database was kept as ${j.previous_saved_as} in the data folder. Reload the page to see the restored data everywhere.`);
+      onRestored && onRestored();
+    } catch (e) { say("restore failed, nothing was replaced: " + String(e.message || e), true); }
+    setBusy(false);
+  };
+
+  return (
+    <section className="cache-panel">
+      <h3>backup &amp; restore</h3>
+      <div className="dim" style={{ marginBottom: 8 }}>
+        one file with everything that is yours: cached answers, score history, verdicts, notes, cases, watchlist, saved filters, block/allow lists.
+        API keys are not included.
+      </div>
+      <div className="cache-form">
+        <button className="pill" onClick={download} disabled={busy}>download backup</button>
+        <input ref={fileRef} type="file" accept=".db,.bak,.sqlite,application/octet-stream" style={{ display: "none" }}
+               onChange={e => { choose(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+        <button className="pill warn" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>restore from file…</button>
+      </div>
+      {pending && (
+        <div style={{ border: "1px solid var(--warn, #f0c674)", padding: 10, marginTop: 10 }}>
+          <div><b>{pending.file.name}</b> is a valid backup{pending.backup.newest ? ` (newest entry ${pending.backup.newest})` : ""}.</div>
+          <div className="small" style={{ marginTop: 6 }}>backup holds: {line(pending.backup.counts)}</div>
+          <div className="small">here now: {line(pending.current)}</div>
+          <div className="small" style={{ marginTop: 6, color: "var(--warn, #f0c674)" }}>
+            Restoring replaces everything here with the backup. The current database is saved first as a .bak file next to it, so this can be undone by hand.
+          </div>
+          <div className="cache-form" style={{ marginTop: 8 }}>
+            <button className="pill bad" onClick={doRestore} disabled={busy}>{busy ? "restoring…" : "replace current data with this backup"}</button>
+            <button className="pill" onClick={() => setPending(null)} disabled={busy}>cancel</button>
+          </div>
+        </div>
+      )}
+      {msg && <div style={{ marginTop: 8, color: msg.bad ? "var(--bad, #ff7474)" : "var(--safe)" }}>// {msg.text}</div>}
+    </section>
+  );
+}
+
 function CacheView() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(null);
@@ -1530,6 +1617,8 @@ function CacheView() {
               destructive — single-source / single-IOC clears confirm once. WIPE ALL requires retyping "{WIPE_PHRASE}" to commit.
             </div>
           </section>
+
+          <BackupPanel onRestored={loadStats} />
         </div>
       )}
       {wipeModalOpen && (

@@ -38,9 +38,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -1396,6 +1396,75 @@ def ui_case_report(
     title, blocks = built
     return {"format": format, "filename": report_mod.filename("case-" + case, format),
             "content": report_mod.render(title, blocks, format)}
+
+
+_RESTORE_MAX_BYTES = 1024 * 1024 * 1024
+
+
+def _scratch_path(tag: str) -> str:
+    """A temp file next to the live database (same volume, cleaned by the caller)."""
+    import uuid
+
+    return f"{database.DB_PATH}.{tag}-{uuid.uuid4().hex[:12]}.tmp"
+
+
+@app.get("/api/ui/backup", dependencies=[Depends(require_token)])
+def ui_backup() -> Response:
+    """Download a consistent copy of the local database.
+
+    Holds cached answers, score history, verdicts, notes, cases, watchlist,
+    saved filters and block/allow lists. API keys (``.env``) are not in it.
+    """
+    from ..core import backup as backup_mod
+
+    tmp = _scratch_path("backup")
+    try:
+        backup_mod.snapshot(tmp)
+        payload = Path(tmp).read_bytes()
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+    name = f"shadowscope-backup-{datetime.now().strftime('%Y%m%d-%H%M')}.db"
+    return Response(content=payload, media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.post("/api/ui/restore", dependencies=[Depends(require_token)])
+async def ui_restore(
+    request: Request,
+    dry_run: bool = Query(False, description="Only inspect the upload; change nothing"),
+    x_confirm: str | None = Header(None),
+) -> dict[str, Any]:
+    """Replace the local database with an uploaded backup (raw request body).
+
+    ``dry_run=true`` validates the file and reports what it holds next to
+    what is here now. The real run needs the header ``X-Confirm: restore``;
+    the current database is saved alongside as ``*.pre-restore-<time>.bak``
+    before anything is replaced.
+    """
+    from ..core import backup as backup_mod
+
+    if not dry_run and x_confirm != "restore":
+        raise HTTPException(status_code=400, detail="send the header 'X-Confirm: restore' to replace the database")
+    tmp = _scratch_path("restore")
+    size = 0
+    try:
+        with open(tmp, "wb") as fh:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > _RESTORE_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="backup file too large")
+                fh.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=422, detail="empty upload")
+        try:
+            if dry_run:
+                info = await asyncio.to_thread(backup_mod.inspect, tmp)
+                return {"dry_run": True, "backup": info, "current": backup_mod.current_summary()}
+            return await asyncio.to_thread(backup_mod.restore, tmp)
+        except backup_mod.BackupError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 class ListEntryRequest(BaseModel):
