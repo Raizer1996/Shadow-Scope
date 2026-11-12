@@ -168,6 +168,19 @@ def init_db():
         )
     ''')
 
+    # Per-source request tally for the quota meter (core/usage.py).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS api_usage (
+            source TEXT NOT NULL,
+            day TEXT NOT NULL,
+            ok INTEGER NOT NULL DEFAULT 0,
+            limited INTEGER NOT NULL DEFAULT 0,
+            failed INTEGER NOT NULL DEFAULT 0,
+            held INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (source, day)
+        )
+    ''')
+
     # The user's own block / allow lists (core/userlists.py).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_lists (

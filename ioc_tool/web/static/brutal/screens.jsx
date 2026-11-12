@@ -1122,6 +1122,57 @@ function DiffHead({ r, fmt, side }) {
 
 // ─────────── Sources Drawer ───────────
 
+function UsageMeter() {
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    let live = true;
+    window.ssApi("GET", "/api/ui/usage").then(r => { if (live) setData(r); }).catch(() => { if (live) setData({ sources: [], failed: true }); });
+    return () => { live = false; };
+  }, []);
+  if (!data) return null;
+  const rows = data.sources.filter(s => s.quota || s.today || s.week || s.month || s.held_today);
+  const tone = (pct) => pct >= 90 ? "var(--crit, #f43f5e)" : pct >= 70 ? "var(--med)" : "var(--safe)";
+  return (
+    <div className="drawer-group">
+      <div className="drawer-group-head">
+        <span>USAGE</span>
+        <span className="dim small">· requests sent by this install · day resets 00:00 UTC</span>
+      </div>
+      {data.failed && <div className="dim small" style={{ padding: "4px 0" }}>// could not load usage</div>}
+      {data.enabled === false && <div className="dim small" style={{ padding: "4px 0" }}>// counting is switched off (SHADOWSCOPE_USAGE=0)</div>}
+      {!data.failed && rows.length === 0 && <div className="dim small" style={{ padding: "4px 0" }}>// nothing sent yet — counts start with the next lookup</div>}
+      {rows.map(s => {
+        const q = s.quota;
+        return (
+          <div key={s.source} style={{ padding: "5px 0", borderBottom: "1px solid var(--line)", fontFamily: "var(--mono)", fontSize: 11.5 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <b style={{ minWidth: "13ch" }}>{s.source}</b>
+              <span>today <b>{s.today}</b></span>
+              <span className="dim">7d {s.week}</span>
+              <span className="dim">month {s.month}</span>
+              {s.limited_today > 0 && <span style={{ color: "var(--crit, #f43f5e)" }} title="the source answered 429 Too Many Requests">⚠ {s.limited_today} refused (429)</span>}
+              {s.failed_today > 0 && <span style={{ color: "var(--med)" }} title="timeouts, connection errors, 5xx or key rejected">{s.failed_today} failed</span>}
+              {s.held_today > 0 && <span className="dim" title="held back by ShadowScope's own rate limiter — never sent, costs no quota">{s.held_today} held back</span>}
+              {q && <span style={{ marginLeft: "auto", color: tone(q.pct) }}>{q.left} left of {q.limit}/{q.period}{q.assumed ? "*" : ""}</span>}
+            </div>
+            {q && (
+              <div style={{ height: 4, background: "var(--line)", marginTop: 3 }} title={`${q.used} of ${q.limit} this ${q.period}`}>
+                <div style={{ height: "100%", width: q.pct + "%", background: tone(q.pct) }} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {rows.some(s => s.quota && s.quota.assumed) && (
+        <div className="dim small" style={{ padding: "6px 0" }}>
+          * assumed free-tier limit. On a different plan? set e.g. SHADOWSCOPE_QUOTAS=virustotal=1000/day,shodan=100/month in .env.
+          Counts only what this install sent — other tools using the same key are not seen.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SourcesDrawer({ onClose }) {
   const [sources, setSources] = React.useState(null);
   const [err, setErr] = React.useState(null);
@@ -1197,6 +1248,7 @@ function SourcesDrawer({ onClose }) {
           </div>
         </div>
         <div className="drawer-body">
+          <UsageMeter />
           {Object.entries(grouped).map(([k, arr]) => arr.length === 0 ? null : (
             <div key={k} className="drawer-group">
               <div className="drawer-group-head">

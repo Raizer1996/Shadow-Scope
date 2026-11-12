@@ -690,6 +690,20 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
 ]
 
 
+@app.get("/api/ui/usage", dependencies=[Depends(require_token)])
+def ui_usage() -> dict[str, Any]:
+    """Requests sent to each source by this install: today, 7 days, this month.
+
+    A local tally (``core/usage.py``), not the provider's own counter. Where
+    a quota is known or set through ``SHADOWSCOPE_QUOTAS`` the row carries
+    ``quota: {limit, period, used, left, pct, assumed}``.
+    """
+    from ..core import usage as usage_mod
+
+    database.init_db()
+    return usage_mod.summary()
+
+
 @app.get("/api/ui/sources", dependencies=[Depends(require_token)])
 def ui_sources() -> dict[str, Any]:
     """Real-time source status — drives the dashboard's OPS / Sources panel.
