@@ -528,6 +528,77 @@ function SearchView({ results, setResults, setActiveIocId, setTab, onEnrich, fmt
   );
 }
 
+// ─────────── Lists (your own blocklist / allowlist) ───────────
+
+function ListColumn({ name, title, blurb, color, rows, onChange, fmt }) {
+  const [pattern, setPattern] = React.useState("");
+  const [note, setNote] = React.useState("");
+  const [err, setErr] = React.useState(null);
+  const add = () => {
+    if (!pattern.trim()) return;
+    window.ssApi("POST", "/api/ui/lists", { list: name, pattern: pattern.trim(), note: note.trim() || null })
+      .then(() => { setPattern(""); setNote(""); setErr(null); onChange(); })
+      .catch(e => setErr(String(e.message || e)));
+  };
+  const remove = (id) => window.ssApi("DELETE", "/api/ui/lists/" + id).then(onChange).catch(e => setErr(String(e.message || e)));
+  return (
+    <div style={{ border: "1px solid var(--line-2)", background: "var(--bg-2)", padding: 12, minWidth: 0 }}>
+      <div className="sec-head"><span className="sec-title" style={{ color }}>{title} · {rows.length}</span></div>
+      <div className="dim small" style={{ margin: "4px 0 8px" }}>{blurb}</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <input className="bt-search" style={{ flex: "2 1 200px", maxWidth: "none" }} value={pattern} maxLength={2100}
+               onChange={e => setPattern(e.target.value)} onKeyDown={e => { if (e.key === "Enter") add(); }}
+               placeholder="IP · 203.0.113.0/24 · evil.example · URL · hash · CVE" />
+        <input className="bt-search" style={{ flex: "1 1 140px", maxWidth: "none" }} value={note} maxLength={300}
+               onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === "Enter") add(); }} placeholder="why (optional)" />
+        <button className="btn-outline" onClick={add} disabled={!pattern.trim()}>+ ADD</button>
+      </div>
+      {err && <div className="small" style={{ color: "var(--bad,#ff7474)", paddingTop: 4 }}>// {err}</div>}
+      {rows.length === 0
+        ? <div className="dim small" style={{ padding: "10px 0" }}>// empty</div>
+        : (
+          <table className="batch-table" style={{ marginTop: 8 }}>
+            <thead><tr><th style={{ width: "8ch" }}>kind</th><th>entry</th><th>why</th><th style={{ width: "17ch" }}>added</th><th style={{ width: "9ch" }}></th></tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id} className="batch-row" style={{ cursor: "default" }}>
+                  <td className="mono dim">{r.kind}</td>
+                  <td className="bt-ioc" title={r.kind === "domain" ? "also covers every subdomain" : ""}>{r.kind === "domain" ? "*." : ""}{fmt(r.pattern)}</td>
+                  <td className="small">{r.note || <span className="dim">—</span>}</td>
+                  <td className="dim small">{r.created}</td>
+                  <td><button className="pill warn" onClick={() => remove(r.id)}>remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+    </div>
+  );
+}
+
+function ListsView({ fmt }) {
+  const [rows, setRows] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  const load = () => window.ssApi("GET", "/api/ui/lists").then(r => { setRows(r); setErr(null); }).catch(e => { setRows([]); setErr(String(e.message || e)); });
+  React.useEffect(() => { load(); }, []);
+  const all = rows || [];
+  return (
+    <div className="batch">
+      <div className="batch-toolbar">
+        <span className="bt-title">YOUR LISTS · {all.length}</span>
+        <span className="dim small">kept on this machine · apply at once, no restart · most specific entry wins, and on a tie the blocklist does</span>
+      </div>
+      {err && <div className="small" style={{ color: "var(--bad,#ff7474)", padding: "8px 12px" }}>// {err}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: 12, marginTop: 10 }}>
+        <ListColumn name="block" title="BLOCKLIST" color="var(--crit, #f43f5e)" fmt={fmt} onChange={load} rows={all.filter(r => r.list === "block")}
+                    blurb="Known bad for you. A match adds a Blocklist source scoring 100, so the indicator reads Critical whatever the public sources say." />
+        <ListColumn name="allow" title="ALLOWLIST" color="var(--safe)" fmt={fmt} onChange={load} rows={all.filter(r => r.list === "allow")}
+                    blurb="Known good or your own. A match skips every lookup (no quota used) and the indicator scores 0." />
+      </div>
+    </div>
+  );
+}
+
 // ─────────── Watch (live stream) ───────────
 
 function WatchlistPanel({ fmt }) {

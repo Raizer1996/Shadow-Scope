@@ -168,6 +168,19 @@ def init_db():
         )
     ''')
 
+    # The user's own block / allow lists (core/userlists.py).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_lists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            list TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            pattern TEXT NOT NULL,
+            note TEXT,
+            created TIMESTAMP NOT NULL,
+            UNIQUE (list, pattern)
+        )
+    ''')
+
     # Saved searches for the dashboard's Search tab: name -> JSON params.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS saved_filters (
@@ -754,6 +767,16 @@ def add_or_update_ioc(value, ioc_type, tags=None):
     conn.commit()
     conn.close()
     return ioc_id
+
+def get_ioc_identity(ioc_id: int) -> tuple[str, str] | None:
+    """``(value, type)`` for an iocs row id, or None."""
+    conn = get_db_connection()
+    try:
+        row = conn.execute('SELECT value, type FROM iocs WHERE id = ?', (ioc_id,)).fetchone()
+    finally:
+        conn.close()
+    return (row["value"], row["type"]) if row else None
+
 
 def get_ioc_id(value):
     conn = get_db_connection()

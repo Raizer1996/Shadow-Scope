@@ -7,6 +7,15 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Your own blocklist and allowlist.** New LISTS tab (`g l`) and
+  `+ BLOCK` / `+ ALLOW` on the Enrich analyst bar. Entries are exact
+  indicators, CIDR ranges, or domains (which cover their subdomains), stored
+  locally and applied without a restart. A blocklist match adds a
+  `Blocklist` source scoring 100 at full weight; an allowlist match skips
+  every lookup and scores 0, like the env allowlist (which is unchanged).
+  The most specific entry wins; on a tie the blocklist does. Cached
+  indicators reflect list changes immediately.
+  `GET/POST /api/ui/lists`, `DELETE /api/ui/lists/{id}`.
 - **Reports.** One indicator (Enrich view → REPORT) or a whole case (Cases
   tab) as Markdown, or as a clean printable page whose button leads to the
   browser's Save as PDF — no PDF library involved. An indicator report

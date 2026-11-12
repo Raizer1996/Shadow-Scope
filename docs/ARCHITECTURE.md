@@ -68,6 +68,7 @@ Per-source failures are **tri-state** (Nov 2026). A module still returns `None` 
 | `ioc_tool/core/parser.py` | Detect IOC type from string |
 | `ioc_tool/core/related.py` | Related indicators for one cached IOC (same case / family / network / domain, hosts named in its data, shared tags). Reads SQLite only |
 | `ioc_tool/core/search.py` | Search over the local cache (indicators, verdicts, notes, cases, tags, indexed fields, raw source text) with structured filters. Reads SQLite only |
+| `ioc_tool/core/userlists.py` | User-managed block / allow lists in SQLite (`user_lists`): exact indicators, CIDRs, domain suffixes. Allow → enrichment short-circuit; block → `Blocklist` source (100, weight 1.0), checked live on cached views |
 | `ioc_tool/core/report.py` | Indicator and case reports: neutral blocks serialised to Markdown and to a printable HTML page. Defangs indicators, escapes source text. Reads SQLite only |
 | `ioc_tool/core/importer.py` | Import from STIX 2.x / CSV / plain text: `parse` (read-only preview) and `apply` (register indicators with case, tags, notes, verdict). No provider calls |
 | `ioc_tool/core/timeline.py` | Chronological events for one cached IOC: source-reported dates plus local history (score changes, verdicts, notes, cases, watchlist). Reads SQLite only |
@@ -271,6 +272,7 @@ All secrets in `.env` (gitignored). Template: `ioc_tool/.env.example` (also ship
 | GET    | `/api/ui/pivot?kind=<kind>&value=<v>[&limit=N&exclude=<ioc>]` | Cache-wide related-IOC lookup. `kind`: `tag` / `malware` / `family` / `registrar` / `ioc` / `any`. Substring scan over persisted JSON; quoted-literal match for known string-field kinds avoids false positives (`"emotet"` won't match `emotetable`). Powers the dashboard's PivotPanel "RELATED" groups. |
 | GET    | `/api/ui/related?ioc=<v>[&limit=N]` | Related indicators for one cached IOC, grouped by what they share (case, malware family, network, registered domain, hosts named in its DNS / rDNS / PDNS data, certificate subdomains, tags, registrar). Cache-only (`core/related.py`); items carry `cached` true/false. Powers the dashboard's RELATED panel. |
 | GET    | `/api/ui/timeline?ioc=<v>` | Every dated fact about one cached IOC, newest first (`core/timeline.py`). Events carry `kind` (source / score / analyst / local), `date_only`, `future`. Cache-only. |
+| GET / POST / DELETE | `/api/ui/lists[/{id}]` | The user's block / allow lists (`core/userlists.py`). POST body `{list: block\|allow, pattern, note?}`; 422 on an unusable or too-wide pattern. UI records carry `listed`. |
 | GET    | `/api/ui/report?ioc=<v>&format=md\|html` | Shareable report on one cached IOC (`core/report.py`): `{format, filename, content}`. `html` is a self-contained page for Print → Save as PDF. Cache-only. |
 | GET    | `/api/ui/cases/{case}/report?format=md\|html` | Same for a case: summary table plus a section per member. |
 | POST   | `/api/ui/import/preview` | Body `{text}` (≤ 2 MB). Detects STIX / CSV / text and returns the indicators with any case, tags, note, verdict and a `cached` flag (`core/importer.py`). Writes nothing. |

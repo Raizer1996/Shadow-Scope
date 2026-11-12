@@ -742,8 +742,10 @@ function AnalystBar({ ioc, setResults }) {
   const [watch, setWatch] = React.useState(ioc.watch || null);
   const [draft, setDraft] = React.useState("");
   const [msg, setMsg] = React.useState(null);
+  const [listed, setListed] = React.useState(ioc.listed || null);
 
   React.useEffect(() => {
+    setListed(ioc.listed || null);
     setVerdict(ioc.verdict || null); setNotes(ioc.notes || []); setWatch(ioc.watch || null);
     setDraft(""); setMsg(null);
   }, [ioc.id]);
@@ -822,6 +824,27 @@ function AnalystBar({ ioc, setResults }) {
                 onClick={() => call(window.ssReport("/api/ui/report?ioc=" + encodeURIComponent(ioc.ioc), "md"), () => {})}>.md</button>
         <button type="button" style={btn(false, "var(--ink-2)")} title="Open a printable page — use its button, then choose Save as PDF"
                 onClick={() => call(window.ssReport("/api/ui/report?ioc=" + encodeURIComponent(ioc.ioc), "html"), () => {})}>PRINT / PDF</button>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="chip-label" title="Your own blocklist / allowlist — manage all entries in the LISTS tab">YOUR LISTS</span>
+        {listed ? (
+          <React.Fragment>
+            <span className="small" style={{ color: listed.list === "block" ? "var(--crit, #f43f5e)" : "var(--safe)", fontWeight: 700 }}>
+              ON YOUR {listed.list === "block" ? "BLOCKLIST" : "ALLOWLIST"}
+            </span>
+            <span className="dim small">via {listed.pattern}{listed.note ? " · " + listed.note : ""}</span>
+            <button type="button" style={btn(false, "var(--ink-2)")} title="Remove that entry (it may cover other indicators too)"
+                    onClick={() => call(window.ssApi("DELETE", "/api/ui/lists/" + listed.id), () => { setListed(null); sync({ listed: null }); })}>REMOVE ENTRY</button>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <button type="button" style={btn(false, "var(--crit, #f43f5e)")} title="Add this exact indicator to your blocklist — it will score 100"
+                    onClick={() => call(window.ssApi("POST", "/api/ui/lists", { list: "block", pattern: ioc.ioc }), r => { setListed(r); sync({ listed: r }); })}>+ BLOCK</button>
+            <button type="button" style={btn(false, "var(--safe)")} title="Add this exact indicator to your allowlist — no more lookups, scores 0"
+                    onClick={() => call(window.ssApi("POST", "/api/ui/lists", { list: "allow", pattern: ioc.ioc }), r => { setListed(r); sync({ listed: r }); })}>+ ALLOW</button>
+          </React.Fragment>
+        )}
+        {listed && <span className="dim small">· score updates on the next enrich or reload</span>}
       </div>
       {msg && <div className="small" style={{ color: "var(--bad, #ff7474)" }}>// {msg}</div>}
     </div>

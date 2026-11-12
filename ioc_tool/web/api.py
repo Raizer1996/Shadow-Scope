@@ -45,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
-from ..core import database, enrich, extractor, output, parser
+from ..core import database, enrich, extractor, output, parser, userlists
 from ..core import defang as defang_mod
 from ..core import llm as llm_mod
 from . import _synthesis, eventbus
@@ -550,6 +550,11 @@ def _to_ui_shape(result: dict[str, Any], prev_score: int | None) -> dict[str, An
             shaped["degraded"] = bool(stored)
             shaped["unavailable"] = stored
             shaped["agreement"]["sources_unavailable"] = len(stored)
+        listed = userlists.match(ioc, ioc_type)
+        shaped["listed"] = (
+            {"id": listed["id"], "list": listed["list"], "pattern": listed["pattern"], "note": listed["note"]}
+            if listed else None
+        )
         shaped["verdict"] = database.get_verdict(ioc_id)
         shaped["notes"] = database.list_notes(ioc_id)
         shaped["watch"] = database.watch_get(ioc_id)
@@ -642,6 +647,14 @@ def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[tuple[s
             data = {}
         modules[display_name] = {"score": row["score"], "data": data}
         scores.append((display_name, row["score"] or 0))  # named → real weight, not the 0.5 default
+    # The user's blocklist is checked live, not read from cache: an entry added
+    # or removed a moment ago must show on already-cached indicators.
+    if modules:
+        ident = database.get_ioc_identity(ioc_id)
+        block = userlists.block_hit(ident[0], ident[1]) if ident else None
+        if block is not None:
+            modules[userlists.BLOCK_SOURCE] = {"score": 100, "data": block}
+            scores.append((userlists.BLOCK_SOURCE, 100))
     return modules, scores
 
 
@@ -1380,6 +1393,35 @@ def ui_case_report(
     title, blocks = built
     return {"format": format, "filename": report_mod.filename("case-" + case, format),
             "content": report_mod.render(title, blocks, format)}
+
+
+class ListEntryRequest(BaseModel):
+    list: str = Field(..., pattern="^(block|allow)$")
+    pattern: str = Field(..., min_length=1, max_length=2100, description="IP, CIDR, domain, URL, hash, CVE or ASN")
+    note: str | None = Field(None, max_length=300)
+
+
+@app.get("/api/ui/lists", dependencies=[Depends(require_token)])
+def ui_lists() -> list[dict[str, Any]]:
+    """Every entry on the user's block and allow lists, newest first."""
+    database.init_db()
+    return userlists.entries()
+
+
+@app.post("/api/ui/lists", dependencies=[Depends(require_token)])
+def ui_list_add(req: ListEntryRequest) -> dict[str, Any]:
+    """Add an entry. A domain also covers its subdomains; CIDRs cover ranges."""
+    database.init_db()
+    try:
+        return userlists.add(req.list, req.pattern, req.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/ui/lists/{entry_id}", dependencies=[Depends(require_token)])
+def ui_list_remove(entry_id: int) -> dict[str, int]:
+    database.init_db()
+    return {"removed": userlists.remove(entry_id)}
 
 
 class ImportPreviewRequest(BaseModel):
