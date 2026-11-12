@@ -86,9 +86,9 @@ def _summary_pairs(f: dict[str, Any]) -> list[tuple[str, str]]:
     if f["watch"]:
         pairs.append(("Watchlist", f"alert when score moves by {f['watch']['threshold']} or more"))
     if f["first_seen"]:
-        pairs.append(("First enriched", f["first_seen"]))
+        pairs.append(("First enriched (local time)", f["first_seen"]))
     if f["last_seen"]:
-        pairs.append(("Last enriched", f["last_seen"]))
+        pairs.append(("Last enriched (local time)", f["last_seen"]))
     return pairs
 
 
@@ -99,10 +99,10 @@ def _ioc_blocks(f: dict[str, Any], ioc_id: int, *, level: int, full: bool) -> li
                        + " on the latest run — the score may be too low."))
     if f["notes"]:
         blocks.append(("h", level + 1, "Notes"))
-        blocks.append(("list", [f"{str(n['created'])[:16]} — {n['body']}" for n in f["notes"]]))
+        blocks.append(("list", [f"{str(n['created'])[:16]} (local time) — {n['body']}" for n in f["notes"]]))
     if f["sources"]:
         blocks.append(("h", level + 1, "Sources"))
-        blocks.append(("table", ["Source", "Score", "Fetched"],
+        blocks.append(("table", ["Source", "Score", "Fetched (local time)"],
                        [[s["source"], "—" if s["score"] is None else str(s["score"]), s["fetched"]] for s in f["sources"]]))
     if not full:
         return blocks

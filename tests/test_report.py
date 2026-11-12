@@ -82,7 +82,7 @@ def test_indicator_html_report_is_a_printable_page(db):
     assert page.startswith("<!doctype html>") and "window.print()" in page and "@media print" in page
     assert "<h1>Indicator report: 203[.]0[.]113[.]10</h1>" in page
     assert "<dt>Score</dt><dd>90 / 100 — Critical</dd>" in page
-    assert "<th>Source</th><th>Score</th><th>Fetched</th>" in page
+    assert "<th>Source</th><th>Score</th><th>Fetched (local time)</th>" in page
 
 
 def test_never_enriched_indicator_still_reports(db):
