@@ -544,8 +544,44 @@ function InputBar({ onEnrich, defang, setDefang, llm, setLlm, enriching }) {
   const [value, setValue] = useState("");
   const taRef = useRef(null);
   const submit = () => { onEnrich(value); };
+
+  // ── Hash a file locally ────────────────────────────────────────────────
+  // The file is read and hashed inside this browser tab (WebCrypto). Only
+  // the resulting SHA-256 is sent anywhere — the same lookup as typing it.
+  const FILE_MAX = 1024 * 1024 * 1024;
+  const [fileInfo, setFileInfo] = useState(null);   // {name, size, sha256, sha1, ms} | {error} | {busy, name}
+  const fileRef = useRef(null);
+  const hex = (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+  const human = (n) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
+  const hashFile = async (file) => {
+    if (!file) return;
+    if (!(window.crypto && window.crypto.subtle)) { setFileInfo({ error: "this browser page cannot hash files (needs http://127.0.0.1 or https)" }); return; }
+    if (file.size > FILE_MAX) { setFileInfo({ error: `${file.name} is ${human(file.size)} — the limit for in-browser hashing is 1 GB. Hash it with: certutil -hashfile <file> SHA256` }); return; }
+    setFileInfo({ busy: true, name: file.name });
+    const t0 = performance.now();
+    try {
+      const buf = await file.arrayBuffer();
+      const [h256, h1] = await Promise.all([crypto.subtle.digest("SHA-256", buf), crypto.subtle.digest("SHA-1", buf)]);
+      const sha256 = hex(h256);
+      setFileInfo({ name: file.name, size: file.size, sha256, sha1: hex(h1), ms: Math.round(performance.now() - t0) });
+      setValue(sha256);
+      onEnrich(sha256);
+    } catch (e) {
+      setFileInfo({ error: "could not read " + file.name + ": " + String(e && e.message || e) });
+    }
+  };
+  const saveFileNote = () => {
+    const body = `file: ${fileInfo.name} (${fileInfo.size} bytes) · sha1 ${fileInfo.sha1}`;
+    window.ssApi("POST", "/api/ui/notes", { ioc: fileInfo.sha256, body })
+      .then(() => setFileInfo(f => ({ ...f, noted: true, noteErr: null })))
+      .catch(e => setFileInfo(f => ({ ...f, noteErr: String(e.message || e) })));
+  };
+
   return (
-    <div className="inputbar">
+    <React.Fragment>
+    <div className="inputbar"
+         onDragOver={(e) => { if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) e.preventDefault(); }}
+         onDrop={(e) => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) { e.preventDefault(); hashFile(f); } }}>
       <div className="prompt">▌</div>
       <textarea
         id="ioc-input"
@@ -561,11 +597,35 @@ function InputBar({ onEnrich, defang, setDefang, llm, setLlm, enriching }) {
       <div className="inputbar-controls">
         <label className="chk"><input type="checkbox" checked={defang} onChange={(e) => setDefang(e.target.checked)} /><span>defang</span></label>
         <label className="chk"><input type="checkbox" checked={llm} onChange={(e) => setLlm(e.target.checked)} /><span>LLM verdict</span></label>
+        <input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => { hashFile(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+        <button className="btn-outline" onClick={() => fileRef.current && fileRef.current.click()} disabled={enriching || (fileInfo && fileInfo.busy)}
+                title="Pick a file (or drop one on this bar). It is hashed inside the browser and never uploaded — only its SHA-256 is looked up.">
+          HASH FILE
+        </button>
         <button className={`enrich-btn ${enriching ? "busy" : ""}`} onClick={submit} disabled={enriching}>
           {enriching ? <><span className="spin" /> ENRICHING…</> : <>ENRICH <span className="dim">⏎</span></>}
         </button>
       </div>
     </div>
+    {fileInfo && (
+      <div className="small" role="status" style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "6px 14px", borderBottom: "1px solid var(--line)", background: "var(--bg-2)", fontFamily: "var(--mono)" }}>
+        {fileInfo.error && <span style={{ color: "var(--bad,#ff7474)" }}>// {fileInfo.error}</span>}
+        {fileInfo.busy && <span>hashing {fileInfo.name} locally…</span>}
+        {fileInfo.sha256 && (
+          <React.Fragment>
+            <span><b>{fileInfo.name}</b> · {human(fileInfo.size)} · hashed here in {fileInfo.ms} ms · <span style={{ color: "var(--safe)" }}>file not uploaded</span></span>
+            <span className="dim">sha256</span><Copyable text={fileInfo.sha256}><code>{fileInfo.sha256}</code></Copyable>
+            <span className="dim">sha1</span><Copyable text={fileInfo.sha1}><code>{fileInfo.sha1}</code></Copyable>
+            {fileInfo.noted
+              ? <span className="dim">file name saved as a note</span>
+              : <button className="pill" disabled={enriching} onClick={saveFileNote} title="Attach the file name and size to this hash as a note (stored locally)">save file name as note</button>}
+            {fileInfo.noteErr && <span style={{ color: "var(--med)" }}>// {fileInfo.noteErr}</span>}
+          </React.Fragment>
+        )}
+        <button className="pill" style={{ marginLeft: "auto" }} onClick={() => setFileInfo(null)}>×</button>
+      </div>
+    )}
+    </React.Fragment>
   );
 }
 
