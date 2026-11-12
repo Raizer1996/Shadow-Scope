@@ -68,6 +68,7 @@ Per-source failures are **tri-state** (Nov 2026). A module still returns `None` 
 | `ioc_tool/core/parser.py` | Detect IOC type from string |
 | `ioc_tool/core/related.py` | Related indicators for one cached IOC (same case / family / network / domain, hosts named in its data, shared tags). Reads SQLite only |
 | `ioc_tool/core/search.py` | Search over the local cache (indicators, verdicts, notes, cases, tags, indexed fields, raw source text) with structured filters. Reads SQLite only |
+| `ioc_tool/core/importer.py` | Import from STIX 2.x / CSV / plain text: `parse` (read-only preview) and `apply` (register indicators with case, tags, notes, verdict). No provider calls |
 | `ioc_tool/core/timeline.py` | Chronological events for one cached IOC: source-reported dates plus local history (score changes, verdicts, notes, cases, watchlist). Reads SQLite only |
 | `ioc_tool/core/defang.py` | Defang/refang IOC strings |
 | `ioc_tool/core/extractor.py` | Extract IOCs from arbitrary text blobs |
@@ -269,6 +270,8 @@ All secrets in `.env` (gitignored). Template: `ioc_tool/.env.example` (also ship
 | GET    | `/api/ui/pivot?kind=<kind>&value=<v>[&limit=N&exclude=<ioc>]` | Cache-wide related-IOC lookup. `kind`: `tag` / `malware` / `family` / `registrar` / `ioc` / `any`. Substring scan over persisted JSON; quoted-literal match for known string-field kinds avoids false positives (`"emotet"` won't match `emotetable`). Powers the dashboard's PivotPanel "RELATED" groups. |
 | GET    | `/api/ui/related?ioc=<v>[&limit=N]` | Related indicators for one cached IOC, grouped by what they share (case, malware family, network, registered domain, hosts named in its DNS / rDNS / PDNS data, certificate subdomains, tags, registrar). Cache-only (`core/related.py`); items carry `cached` true/false. Powers the dashboard's RELATED panel. |
 | GET    | `/api/ui/timeline?ioc=<v>` | Every dated fact about one cached IOC, newest first (`core/timeline.py`). Events carry `kind` (source / score / analyst / local), `date_only`, `future`. Cache-only. |
+| POST   | `/api/ui/import/preview` | Body `{text}` (≤ 2 MB). Detects STIX / CSV / text and returns the indicators with any case, tags, note, verdict and a `cached` flag (`core/importer.py`). Writes nothing. |
+| POST   | `/api/ui/import/apply` | Body `{rows, case?}` (≤ 2000 rows, re-validated). Registers them un-enriched with their details; idempotent; never overwrites a verdict. No provider calls. |
 | GET    | `/api/ui/search?q=&type=&min_score=&max_score=&verdict=&case=&watched=&has_notes=&since_days=&deep=&sort=&limit=&offset=` | Search everything stored locally (`core/search.py`). Words are ANDed; each row lists where it matched. Cache-only. Powers the Search tab. |
 | GET / POST / DELETE | `/api/ui/filters[/{name}]` | Saved searches for the Search tab (`saved_filters` table). |
 | GET    | `/api/ui/cases` | List every case in the workspace with member IOC values, count, derived severity (max member `last_score`), and earliest tag creation as `opened`. Backs the Cases tab. |

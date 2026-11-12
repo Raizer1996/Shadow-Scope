@@ -7,6 +7,16 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Import with details.** The Batch tab's add box gains PREVIEW IMPORT for
+  STIX 2.x JSON (indicator patterns, observables, vulnerabilities; names and
+  descriptions become notes, labels and whatever an indicator `indicates`
+  become tags), CSV with a header (`ioc` / `indicator` / `ip` / `domain` /
+  `url` / `hash` …, optional `case`, `tags`, `note`, `verdict`) and plain
+  text, up to 2 MB / 2000 indicators. The preview shows what was found;
+  then IMPORT ONLY stores everything locally with no lookups, or IMPORT +
+  ENRICH also looks up the first 200. Re-importing a file duplicates
+  nothing and never overwrites an existing verdict.
+  `POST /api/ui/import/preview`, `POST /api/ui/import/apply`.
 - **Timeline per indicator.** The Enrich view gains a TIMELINE block: one
   newest-first list mixing what sources reported (registered, first/last
   seen, listed, certificate issued, CVE published, KEV added, upcoming
