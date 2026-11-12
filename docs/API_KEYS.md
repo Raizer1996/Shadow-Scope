@@ -58,6 +58,13 @@ Missing keys are non-fatal — that source is skipped, the others still run.
 - **Scope**: IP, domain, URL, hash
 - **Env var**: none required — module short-circuits on network errors and skips gracefully.
 
+### YARAify (abuse.ch) — `ABUSECH_AUTH_KEY`
+- **Signup**: the shared abuse.ch Auth-Key (https://auth.abuse.ch/) — same key as URLhaus / ThreatFox / MalwareBazaar
+- **Free tier**: free under abuse.ch's fair-use terms
+- **Used for**: hash → which YARA rules and ClamAV signatures matched the file when it was submitted to YARAify, plus sightings and first/last seen. Lookup only; ShadowScope never submits a file.
+- **Scope**: hash (md5 / sha1 / sha256)
+- **Docs**: https://yaraify.abuse.ch/api/
+
 ### MalwareBazaar (abuse.ch) — `ABUSECH_AUTH_KEY`
 - **Signup**: none — public API at https://mb-api.abuse.ch/api/v1/
 - **Free tier**: free, no rate limit beyond reasonable use (be polite)

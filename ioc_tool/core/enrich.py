@@ -64,6 +64,7 @@ from ..modules import (
     urlscan,
     vt,
     whois_mod,
+    yaraify,
 )
 from ..modules import (
     asn as asn_mod,
@@ -772,6 +773,14 @@ def _build_enrich_tasks(
             _run_source, ioc_id, 'malwarebazaar', 'MalwareBazaar',
             lambda: malwarebazaar.enrich_hash(value),
             score.calculate_malwarebazaar_score,
+        ))
+
+    # --- YARAify — hash only (YARA / ClamAV matches on the file) ---
+    if ioc_type == 'hash':
+        _add('YARAify', asyncio.to_thread(
+            _run_source, ioc_id, 'yaraify', 'YARAify',
+            lambda: yaraify.enrich_hash(value),
+            score.calculate_yaraify_score,
         ))
 
     # --- abuse.ch Feodo Tracker — IP only (botnet C2 blocklist) ---

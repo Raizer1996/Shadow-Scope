@@ -1,3 +1,5 @@
+
+import re
 from datetime import datetime, timezone
 
 # Per-source trust weights for the composite final risk.
@@ -20,6 +22,7 @@ SOURCE_WEIGHTS: dict[str, float] = {
     "Feodo":         1.0,    # abuse.ch botnet C2 IP blocklist
     "SSLBL":         1.0,    # abuse.ch malicious-cert blocklist
     "MalwareBazaar": 0.95,
+    "YARAify":       0.85,   # content signatures (YARA / ClamAV) on the file itself
     "URLhaus":       0.95,
     # Tier 2 — well-resourced reputation
     "VirusTotal":    0.9,
@@ -178,6 +181,44 @@ def calculate_malwarebazaar_score(data: dict | None) -> int:
     if not data:
         return 0
     return 95
+
+
+_YARA_MALWARE_NAME = re.compile(
+    r"^(malware|ransom|ransomware|apt|trojan|backdoor|stealer|rat|loader|botnet|"
+    r"(windows|linux|macos|multi)_(trojan|ransomware|backdoor|infostealer|rootkit|wiper|cryptominer|exploit))[_.]",
+    re.IGNORECASE,
+)
+
+
+def calculate_yaraify_score(data: dict | None) -> int:
+    """YARAify: what matched the file's content.
+
+    Being *known* to YARAify proves nothing — anyone can submit any file, and
+    generic rules (``pe_imphash``, ``with_urls``) fire on clean software. So
+    the score follows the kind of match, strongest first:
+
+    - a Malpedia family rule (``win_emotet_auto``)            -> 90
+    - a ClamAV signature that is not ``PUA.``                 -> 85
+    - a YARA rule named as malware (``MALWARE_…``, ``Windows_Trojan_…``) -> 80
+    - only ``PUA.`` ClamAV signatures                         -> 40
+    - only other YARA rules                                   -> 20
+    - known file, nothing matched / no data                   -> 0
+    """
+    if not data:
+        return 0
+    if data.get("families"):
+        return 90
+    signatures = [s for s in (data.get("clamav") or []) if isinstance(s, str)]
+    if any(not s.upper().startswith("PUA.") for s in signatures):
+        return 85
+    names = [r.get("rule_name", "") for r in (data.get("yara_rules") or []) if isinstance(r, dict)]
+    if any(_YARA_MALWARE_NAME.match(n) for n in names):
+        return 80
+    if signatures:
+        return 40
+    if names:
+        return 20
+    return 0
 
 
 def calculate_greynoise_score(data: dict | None) -> int:

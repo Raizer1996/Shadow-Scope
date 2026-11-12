@@ -390,6 +390,14 @@ def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
         if threat:
             tag_part = f" · tag={tags[0]}" if tags else ""
             return f"threat={threat}{tag_part}"
+    elif source == "YARAify":
+        parts = []
+        if data.get("families"):
+            parts.append("family " + ", ".join(data["families"][:2]))
+        if data.get("clamav"):
+            parts.append(f"ClamAV {data['clamav'][0]}" + (f" +{len(data['clamav']) - 1}" if len(data["clamav"]) > 1 else ""))
+        parts.append(f"{int(data.get('yara_rule_count') or 0)} YARA rules")
+        return " · ".join(parts)
     elif source == "ThreatFox":
         malware = data.get("malware")
         confidence = data.get("confidence_level")
@@ -618,6 +626,7 @@ _CACHED_SOURCES: tuple[tuple[str, str], ...] = (
     ("urlscan",       "URLscan"),
     ("pulsedive",     "Pulsedive"),
     ("malwarebazaar", "MalwareBazaar"),
+    ("yaraify",       "YARAify"),
     ("feodo",         "Feodo"),
     ("sslbl",         "SSLBL"),
     ("crtsh",         "crt.sh"),
@@ -677,6 +686,7 @@ _SOURCE_REGISTRY: list[dict[str, Any]] = [
     {"id": "URLhaus",       "env": "ABUSECH_AUTH_KEY",                        "types": ["url", "domain", "ip"]},
     {"id": "ThreatFox",     "env": "ABUSECH_AUTH_KEY",                        "types": ["ip", "domain", "url", "hash"]},
     {"id": "MalwareBazaar", "env": "ABUSECH_AUTH_KEY",                        "types": ["hash"]},
+    {"id": "YARAify",       "env": "ABUSECH_AUTH_KEY",                        "types": ["hash"]},
     {"id": "Feodo",         "env": None,                        "types": ["ip"]},
     {"id": "SSLBL",         "env": None,                        "types": ["hash"]},
     {"id": "WHOIS",         "env": None,                        "types": ["domain"]},
@@ -1961,6 +1971,7 @@ def list_sources() -> dict[str, bool]:
         "urlhaus": bool(os.getenv("ABUSECH_AUTH_KEY")),
         "threatfox": bool(os.getenv("ABUSECH_AUTH_KEY")),
         "malwarebazaar": bool(os.getenv("ABUSECH_AUTH_KEY")),
+        "yaraify": bool(os.getenv("ABUSECH_AUTH_KEY")),
         "tor": True,
         "whois": True,
     }
