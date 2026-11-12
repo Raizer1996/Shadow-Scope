@@ -285,6 +285,7 @@ function EnrichView({ ioc, fmt, llm, results, setResults, setActiveIocId, disabl
       <WhoisTimeline ioc={ioc} fmt={fmt} />
       <IocTimeline ioc={ioc} />
       <CrtshBlock ioc={ioc} fmt={fmt} />
+      <ScreenshotBlock ioc={ioc} fmt={fmt} />
 
       <div className={`enrich-split ${wide ? "solo" : ""}`}>
         {!wide && sourcesBlock}

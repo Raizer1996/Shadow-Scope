@@ -68,6 +68,7 @@ Per-source failures are **tri-state** (Nov 2026). A module still returns `None` 
 | `ioc_tool/core/parser.py` | Detect IOC type from string |
 | `ioc_tool/core/related.py` | Related indicators for one cached IOC (same case / family / network / domain, hosts named in its data, shared tags). Reads SQLite only |
 | `ioc_tool/core/search.py` | Search over the local cache (indicators, verdicts, notes, cases, tags, indexed fields, raw source text) with structured filters. Reads SQLite only |
+| `ioc_tool/core/screenshots.py` | urlscan.io screenshots on demand: lists scans from the cached answer, fetches `urlscan.io/screenshots/<uuid>.png` through `core.http` for ids that belong to the indicator, PNG/size checks, disk cache |
 | `ioc_tool/core/usage.py` | Quota meter: per-source, per-UTC-day tally of requests sent through `core.http` (`api_usage`), optional quotas (`SHADOWSCOPE_QUOTAS`). Recording never raises and never creates a database |
 | `ioc_tool/core/backup.py` | Consistent snapshot of the SQLite database (online backup API), validation of a candidate backup, and restore that first saves the live file as `*.pre-restore-<time>.bak` |
 | `ioc_tool/core/userlists.py` | User-managed block / allow lists in SQLite (`user_lists`): exact indicators, CIDRs, domain suffixes. Allow → enrichment short-circuit; block → `Blocklist` source (100, weight 1.0), checked live on cached views |
@@ -276,6 +277,8 @@ All secrets in `.env` (gitignored). Template: `ioc_tool/.env.example` (also ship
 | GET    | `/api/ui/pivot?kind=<kind>&value=<v>[&limit=N&exclude=<ioc>]` | Cache-wide related-IOC lookup. `kind`: `tag` / `malware` / `family` / `registrar` / `ioc` / `any`. Substring scan over persisted JSON; quoted-literal match for known string-field kinds avoids false positives (`"emotet"` won't match `emotetable`). Powers the dashboard's PivotPanel "RELATED" groups. |
 | GET    | `/api/ui/related?ioc=<v>[&limit=N]` | Related indicators for one cached IOC, grouped by what they share (case, malware family, network, registered domain, hosts named in its DNS / rDNS / PDNS data, certificate subdomains, tags, registrar). Cache-only (`core/related.py`); items carry `cached` true/false. Powers the dashboard's RELATED panel. |
 | GET    | `/api/ui/timeline?ioc=<v>` | Every dated fact about one cached IOC, newest first (`core/timeline.py`). Events carry `kind` (source / score / analyst / local), `date_only`, `future`. Cache-only. |
+| GET    | `/api/ui/screenshots?ioc=<v>` | Past urlscan.io scans with a screenshot, from the cached answer. Cache-only. |
+| GET    | `/api/ui/screenshot?ioc=<v>&uuid=<id>` | `image/png` for one of those scans, fetched server-side and cached on disk. 404 unless the id is listed for that indicator; 502 if urlscan.io returns no PNG. |
 | GET    | `/api/ui/usage` | Requests this install sent per source: today / 7 days / month, 429s, failures, locally held, and `quota` where known (`core/usage.py`). |
 | GET    | `/api/ui/backup` | Download a consistent copy of the local database (`core/backup.py`). No secrets: API keys live in `.env`. |
 | POST   | `/api/ui/restore[?dry_run=true]` | Raw body = a backup file (≤ 1 GB). `dry_run` only validates and reports counts; the real run needs `X-Confirm: restore` and saves the current database as `*.pre-restore-<time>.bak` first. 422 for anything that is not a healthy ShadowScope database. |
