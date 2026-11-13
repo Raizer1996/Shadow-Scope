@@ -313,12 +313,14 @@ const _SPIDER_RELEVANT_BY_TYPE = {
   domain: new Set(["VirusTotal", "OTX", "Pulsedive", "ThreatFox",
                    "URLhaus", "Heuristics", "WHOIS", "URLscan"]),
   url:    new Set(["VirusTotal", "OTX", "Pulsedive", "ThreatFox",
-                   "URLhaus", "URLscan"]),
+                   "URLhaus", "URLscan", "URL"]),
   hash:   new Set(["VirusTotal", "MalwareBazaar", "ThreatFox", "OTX",
-                   "SSLBL"]),
+                   "SSLBL", "YARAify"]),
   cve:    new Set(["NVD", "EPSS", "KEV"]),
   asn:    new Set(["ASN"]),
-  email:  new Set(["OTX"]),
+  // An address is judged by its own structure plus its domain's sources.
+  email:  new Set(["Email", "VirusTotal", "OTX", "Pulsedive", "ThreatFox",
+                   "URLhaus", "Heuristics", "WHOIS", "URLscan"]),
 };
 
 
