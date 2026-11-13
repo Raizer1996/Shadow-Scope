@@ -321,6 +321,8 @@ if ($AutoStart) {
     $runValue = "`"$pythonw`" " + ($superviseArgs -join ' ')
     Invoke-Step "Start at logon: $RunKey\$RunName" {
         if (-not (Test-Path $pythonw)) { throw "pythonw.exe not found in the venv ($pythonw)" }
+        # A fresh profile (new account, CI runner) may not have the Run key yet.
+        if (-not (Test-Path $RunKey)) { New-Item -Path $RunKey -Force | Out-Null }
         Set-ItemProperty -Path $RunKey -Name $RunName -Value $runValue
         # Replace a supervisor from a previous run, then start the new one now (no reboot needed).
         Stop-VenvProcesses
