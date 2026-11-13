@@ -30,6 +30,18 @@ def _dummy_abusech_key():
         os.environ["ABUSECH_AUTH_KEY"] = prev
 
 
+@pytest.fixture(autouse=True)
+def _no_usage_counting(monkeypatch):
+    """Keep mocked HTTP calls out of the quota meter.
+
+    ``core.usage`` tallies every request into the active database. Most tests
+    mock the transport without isolating ``DB_PATH``, so left on they would
+    write fake counts into a developer's real cache. Tests of the meter
+    itself re-enable it (``monkeypatch.delenv("SHADOWSCOPE_USAGE")``).
+    """
+    monkeypatch.setenv("SHADOWSCOPE_USAGE", "0")
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _disable_rate_limits():
     """Flag every known source as rate-limit-disabled for the test run."""

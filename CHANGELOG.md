@@ -7,6 +7,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Quota meter.** Every request sent through `core.http` is tallied per
+  source and UTC day (`api_usage` table): answered, refused with 429,
+  failed, or held back by the local rate limiter (never sent). The Sources
+  drawer shows today / 7 days / month per source and, where a limit is
+  known, how much is left. Assumed free-tier limits ship for VirusTotal,
+  AbuseIPDB, IPinfo and Censys; state your own with
+  `SHADOWSCOPE_QUOTAS=virustotal=1000/day,shodan=100/month`. Counting can
+  be switched off with `SHADOWSCOPE_USAGE=0`. `GET /api/ui/usage`.
 - **MCP analyst tools.** `shadowscope-mcp` gains ten tools that work on the
   local database only and never call a provider: `search_cache`,
   `related_indicators`, `ioc_timeline`, `report` (Markdown for an indicator

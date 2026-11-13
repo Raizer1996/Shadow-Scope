@@ -96,6 +96,21 @@ def _classify_response(source_key: str, response: requests.Response) -> None:
         mark_failure(source_key, f"auth_error_{code}")
 
 
+def _count(source_key: str, outcome: str) -> None:
+    """Tally one attempt for the quota meter. Never raises."""
+    try:
+        from . import usage
+
+        usage.record(source_key, outcome)
+    except Exception:  # noqa: BLE001 - the meter must never break a lookup
+        return
+
+
+def _count_response(source_key: str, response: requests.Response) -> None:
+    code = response.status_code
+    _count(source_key, "limited" if code == 429 else "failed" if code >= 500 or code in (401, 403) else "ok")
+
+
 def _mark_rate_limited(source_key: str) -> None:
     """Record that ``source_key`` was rate-limited in the active ledger."""
     ledger = rate_limited_ctx.get()
@@ -145,6 +160,7 @@ def request(
         # failover hook.
         _mark_rate_limited(source_key)
         mark_failure(source_key, "rate_limited")
+        _count(source_key, "held")
         return None
     if timeout is None:
         timeout = _DEFAULT_TIMEOUT_S
@@ -152,10 +168,13 @@ def request(
         response = requests.request(method, url, timeout=timeout, **kwargs)
     except requests.Timeout:
         mark_failure(source_key, "timeout")
+        _count(source_key, "failed")
         return None
     except requests.RequestException:
         mark_failure(source_key, "connection_error")
+        _count(source_key, "failed")
         return None
+    _count_response(source_key, response)
     if response.status_code != 429:
         _classify_response(source_key, response)
         return response
@@ -185,15 +204,19 @@ def request(
         # "soft-fail to None" contract callers rely on.
         _mark_rate_limited(source_key)
         mark_failure(source_key, "rate_limited")
+        _count(source_key, "held")
         return None
     try:
         retry_response = requests.request(method, url, timeout=timeout, **kwargs)
     except requests.Timeout:
         mark_failure(source_key, "timeout")
+        _count(source_key, "failed")
         return None
     except requests.RequestException:
         mark_failure(source_key, "connection_error")
+        _count(source_key, "failed")
         return None
+    _count_response(source_key, retry_response)
     if retry_response.status_code == 429:
         # Even the retry got throttled — flag the source so the
         # orchestrator can transparently fall back to a sibling provider.
