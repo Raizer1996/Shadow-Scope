@@ -7,6 +7,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Backup and restore.** Cache tab → *backup & restore*. `download backup`
+  saves one consistent SQLite file (cached answers, score history, verdicts,
+  notes, cases, watchlist, saved filters, block/allow lists — never API
+  keys). `restore from file…` first validates the file and shows what it
+  holds next to what is here now; confirming replaces the database after
+  saving the current one as `ioc.db.pre-restore-<time>.bak` (newest three
+  kept). Older-schema backups are migrated. `GET /api/ui/backup`,
+  `POST /api/ui/restore` (`dry_run`, `X-Confirm: restore`).
 - **Hash a file locally.** `HASH FILE` on the input bar (or drop a file on
   it) computes SHA-256 and SHA-1 inside the browser with WebCrypto and
   enriches the SHA-256. The file itself never leaves the machine — only

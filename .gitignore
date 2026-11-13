@@ -60,3 +60,7 @@ windows_malware_test_sample.*
 # Stray
 IOC Analyzer
 audit/
+
+# Backup / restore leftovers hold user data — never commit them
+ioc_tool/data/*.bak
+ioc_tool/data/*.tmp
