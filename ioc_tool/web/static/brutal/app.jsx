@@ -151,6 +151,7 @@ function App() {
           if (e2.key === "d") setTab("diff");
           if (e2.key === "k") setTab("cache");
           if (e2.key === "f") { e2.preventDefault(); setTab("search"); }
+          if (e2.key === "l") setTab("lists");
           if (e2.key === "s") setSourcesOpen(v => !v);
           window.removeEventListener("keydown", second);
         };
@@ -335,6 +336,7 @@ function App() {
         {tab === "cases"  && <CasesView results={results} fmt={fmt} setActiveIocId={setActiveIocId} setTab={setTab} />}
         {tab === "diff"   && <DiffView results={results} diffPair={diffPair} setDiffPair={setDiffPair} fmt={fmt} />}
         {tab === "cache"  && <CacheView />}
+        {tab === "lists"  && <ListsView fmt={fmt} />}
         {tab === "search" && <SearchView results={results} setResults={setResults} setActiveIocId={setActiveIocId} setTab={setTab} onEnrich={onEnrich} fmt={fmt} />}
       </main>
 
@@ -464,6 +466,8 @@ function TopBar({ tab, setTab, setSourcesOpen, setHelpOpen }) {
       help: "Live alert stream — re-enrich daily and surface deltas. Tied to the `shadowscope watch` CLI; backend wiring lands next." },
     { id: "cases",  label: "CASES",  kbd: "g c",
       help: "Investigation cases — group IOCs by campaign (tag via `shadowscope tag <ioc> --case=name`). Empty until you tag IOCs." },
+    { id: "lists",  label: "LISTS",  kbd: "g l",
+      help: "Your own blocklist and allowlist: exact indicators, CIDR ranges, domains with their subdomains. Blocked = scores 100; allowed = no lookups, scores 0." },
     { id: "diff",   label: "DIFF",   kbd: "g d",
       help: "Side-by-side compare two IOCs' per-source scores. Spots shared infrastructure across a campaign." },
     { id: "cache",  label: "CACHE",  kbd: "g k",

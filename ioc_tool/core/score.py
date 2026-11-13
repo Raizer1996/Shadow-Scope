@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 SOURCE_WEIGHTS: dict[str, float] = {
     # Tier 1 — ground truth
     "KEV":           1.0,    # CISA Known Exploited Vulnerabilities
+    "Blocklist":     1.0,    # the user's own blocklist (core/userlists.py)
     "Feodo":         1.0,    # abuse.ch botnet C2 IP blocklist
     "SSLBL":         1.0,    # abuse.ch malicious-cert blocklist
     "MalwareBazaar": 0.95,

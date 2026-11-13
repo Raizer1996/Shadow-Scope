@@ -68,7 +68,7 @@ from ..modules import (
 from ..modules import (
     asn as asn_mod,
 )
-from . import allowlist, database, heuristics, http, parser, score
+from . import allowlist, database, heuristics, http, parser, score, userlists
 
 # Per-call ``--no-cache`` toggle — propagates from enrich_ioc{,_async}
 # into _run_source via a ContextVar so we don't have to thread the flag
@@ -579,7 +579,7 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     # / trusted IOCs. Saves API quota on bulk enrichment of corp ranges.
     # The result still flows through the same shape (modules dict) so output
     # adapters (CSV/STIX/MD) treat it uniformly.
-    allow_hit = allowlist.is_allowlisted(value, ioc_type)
+    allow_hit = allowlist.is_allowlisted(value, ioc_type) or userlists.allow_hit(value, ioc_type)
     if allow_hit is not None:
         return {
             'ioc': value,
@@ -902,6 +902,14 @@ def _finalize_enrich(
     ):
         _apply_vt_otx_failover(value, ioc_type, ioc_id, results, scores, planned_sources)
 
+    # The user's own blocklist is a source like any other: 100 at full weight.
+    # Never persisted as an enrichment row — cached views re-check the list
+    # live, so removing an entry takes effect at once.
+    block = userlists.block_hit(value, ioc_type)
+    if block is not None:
+        results[userlists.BLOCK_SOURCE] = {'score': 100, 'data': block}
+        scores.append((userlists.BLOCK_SOURCE, 100))
+
     # Local heuristics — pure functions on data we already have. Bundled
     # under a single 'Heuristics' module entry so they surface in the output
     # without changing the per-source schema.
@@ -994,7 +1002,7 @@ async def enrich_ioc_stream(
     try:
         value = parser.normalize_value(value, ioc_type)
 
-        allow_hit = allowlist.is_allowlisted(value, ioc_type)
+        allow_hit = allowlist.is_allowlisted(value, ioc_type) or userlists.allow_hit(value, ioc_type)
         if allow_hit is not None:
             shaped = {
                 'ioc': value,
