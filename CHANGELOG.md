@@ -7,6 +7,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **YARAify source (hashes).** abuse.ch YARAify is looked up for every hash
+  with the existing `ABUSECH_AUTH_KEY`: which YARA rules and ClamAV
+  signatures matched the file, sightings, first/last seen. The answer is
+  summarised before caching. Scored by the kind of match (Malpedia family
+  rule 90, real ClamAV signature 85, malware-named YARA rule 80, PUA only
+  40, generic rules only 20, nothing 0), weight 0.85. A Malpedia family
+  rule also yields a `family` that links the file to other indicators of
+  that family. Lookup only — no file is ever submitted.
 - **Quota meter.** Every request sent through `core.http` is tallied per
   source and UTC day (`api_usage` table): answered, refused with 429,
   failed, or held back by the local rate limiter (never sent). The Sources

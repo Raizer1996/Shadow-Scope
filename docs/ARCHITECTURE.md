@@ -92,6 +92,7 @@ Per-source failures are **tri-state** (Nov 2026). A module still returns `None` 
 | `ioc_tool/modules/urlhaus.py` | abuse.ch URLhaus malicious URL / host lookup (no API key) |
 | `ioc_tool/modules/threatfox.py` | abuse.ch ThreatFox IOC lookup (ip/domain/url/hash, no API key) |
 | `ioc_tool/modules/malwarebazaar.py` | abuse.ch MalwareBazaar hash lookup (sample + family, no API key) |
+| `ioc_tool/modules/yaraify.py` | abuse.ch YARAify hash lookup — YARA rules + ClamAV signatures that matched the file (summarised; lookup only) |
 | `ioc_tool/modules/greynoise.py` | GreyNoise community classification — noise vs targeted |
 | `ioc_tool/modules/otx.py` | AlienVault OTX pulse lookup — community / threat-actor reports |
 | `ioc_tool/modules/urlscan.py` | URLscan.io historical scan search (IP / domain / URL — screenshots + verdicts) |
@@ -141,6 +142,7 @@ Per-source raw scores → weighted → **strongest signal + corroboration** → 
 | URLhaus    | `95` if online hit, `70` if offline hit, `80` otherwise hit, `0` if no data |
 | ThreatFox  | hit & `confidence_level >= 75 → 95`, `>= 50 → 80`, other hit → `60`, no data → `0` |
 | MalwareBazaar | `95` on any hit (sample known to abuse.ch), `0` if no data |
+| YARAify    | Malpedia family rule → `90`; non-`PUA.` ClamAV signature → `85`; YARA rule named as malware → `80`; only `PUA.` signatures → `40`; only generic YARA rules → `20`; known but nothing matched → `0` |
 | GreyNoise  | `malicious=90`, `benign/riot=0`, `unknown=0`, none=`0` |
 | OTX        | gated on strength: `reputation < -2` or a named adversary → `90`; `reputation < 0` with ≥3 pulses → `75`, ≥1 pulse → `50`; pulse count alone caps at `35` (≥10), `25` (≥3), `10` (≥1); curator `false_positive` → `0` |
 | URLscan    | any result with malicious verdict → `90`; history exists, no malicious verdict → `30`; `total == 0` or no data → `0` |

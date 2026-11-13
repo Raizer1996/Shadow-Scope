@@ -150,6 +150,7 @@ _DEFAULT_BUCKETS: dict[str, tuple[float, float]] = {
     # Sandbox / submission APIs — caps per their published free tiers.
     "hybrid_analysis": (5, 60),    # public-key tier ~200 / hour
     "malwarebazaar": (30, 60),     # abuse.ch — generous
+    "yaraify":       (30, 60),     # abuse.ch — same fair-use terms
     "filescan_io":  (5, 60),       # community tier
     "joe_sandbox":  (4, 60),       # Joe Cloud free is very tight
     # Outbound webhook receivers (SIEM / ticketing / IR platforms). Most are

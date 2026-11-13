@@ -24,6 +24,7 @@
   - **URLhaus** — abuse.ch malicious URL database (free abuse.ch Auth-Key)
   - **ThreatFox (abuse.ch)** — fresh community-shared IOCs (free abuse.ch Auth-Key)
   - **MalwareBazaar (abuse.ch)** — hash → malware family + sample metadata (free abuse.ch Auth-Key)
+  - **YARAify (abuse.ch)** — hash → matching YARA rules + ClamAV signatures (same Auth-Key; lookup only)
   - **GreyNoise** — classifies internet background noise vs targeted activity (kills SOC false positives)
   - **AlienVault OTX** — community pulse / threat-actor reports (free key)
   - **URLscan.io** — historical scan search, screenshots + verdicts (free key, optional)

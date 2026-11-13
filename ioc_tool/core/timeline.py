@@ -38,6 +38,8 @@ _EXTERNAL: tuple[tuple[str, str, str, str | None], ...] = (
     ("urlhaus", "date_added", "Listed on URLhaus", "threat"),
     ("malwarebazaar", "first_seen", "First seen on MalwareBazaar", "signature"),
     ("malwarebazaar", "last_seen", "Last seen on MalwareBazaar", None),
+    ("yaraify", "first_seen", "First submitted to YARAify", "family"),
+    ("yaraify", "last_seen", "Last submitted to YARAify", None),
     ("pulsedive", "stamp_added", "Added to Pulsedive", None),
     ("pulsedive", "stamp_seen", "Last seen by Pulsedive", None),
     ("greynoise", "last_seen", "Last seen scanning the internet (GreyNoise)", "classification"),
