@@ -105,7 +105,7 @@ Per-source failures are **tri-state** (Nov 2026). A module still returns `None` 
 | `ioc_tool/data/ioc.db` | SQLite cache (gitignored) |
 | `ioc_tool/data/tor_nodes.txt` | Tor exit-node IP list (gitignored cache) |
 | `ioc_tool/data/cisa_kev.json` | CISA KEV catalog snapshot (gitignored cache, refreshed daily) |
-| `ioc_tool/mcp_server.py` | MCP server (`shadowscope-mcp`, stdio) — in-process tools `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` for agents such as Claude Code. Needs the `mcp` extra. |
+| `ioc_tool/mcp_server.py` | MCP server (`shadowscope-mcp`, stdio) — in-process tools `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` for agents such as Claude Code. Needs the `mcp` extra. Analyst tools (local database only, no provider calls): `search_cache`, `related_indicators`, `ioc_timeline`, `report`, `set_verdict`, `add_note`, `list_cases`, `assign_case`, `watchlist`, `user_list` |
 | `ioc_tool/web/__init__.py` | REST API package marker |
 | `scripts/install-windows.ps1` | Per-user Windows installer (venv + launcher + user PATH + `.env`), `-DryRun` / `-Uninstall [-Purge]`; `install-windows.cmd` wraps it for cmd.exe / double-click |
 | `ioc_tool/web/api.py` | FastAPI app + routes — thin HTTP layer over `enrich_ioc_async` |

@@ -7,6 +7,13 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **MCP analyst tools.** `shadowscope-mcp` gains ten tools that work on the
+  local database only and never call a provider: `search_cache`,
+  `related_indicators`, `ioc_timeline`, `report` (Markdown for an indicator
+  or a case), `set_verdict`, `add_note`, `list_cases`, `assign_case`,
+  `watchlist` (list / add / remove) and `user_list` (list / add / remove /
+  check on the block and allow lists). Re-checking the watchlist stays in
+  the dashboard because it spends API quota.
 - **Backup and restore.** Cache tab → *backup & restore*. `download backup`
   saves one consistent SQLite file (cached answers, score history, verdicts,
   notes, cases, watchlist, saved filters, block/allow lists — never API
