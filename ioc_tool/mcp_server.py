@@ -24,6 +24,7 @@ import os
 import sys
 from typing import Any
 
+from ioc_tool import __version__
 from ioc_tool.core import (
     database,
     defang,
@@ -54,7 +55,7 @@ _MAX_TEXT = 256_000
 
 server = MCPServer(
     name="shadowscope",
-    version="1.0.0",
+    version=__version__,
     instructions=(
         "IOC enrichment + composite risk scoring (0-100: Safe/Low/Medium/High/"
         "Critical) from VirusTotal, AbuseIPDB, OTX, GreyNoise, abuse.ch feeds, "

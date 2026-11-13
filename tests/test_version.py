@@ -27,3 +27,12 @@ def test_ui_shell_injects_version():
     html = client.get("/ui").text
     assert f'window.SHADOWSCOPE_VERSION = "{ioc_tool.__version__}"' in html
     assert "v0.9.2" not in html
+
+
+def test_mcp_server_reports_the_package_version():
+    import pytest
+
+    pytest.importorskip("mcp")
+    from ioc_tool import mcp_server
+
+    assert mcp_server.server.version == ioc_tool.__version__
