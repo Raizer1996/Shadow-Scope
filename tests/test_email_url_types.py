@@ -108,6 +108,10 @@ def test_email_lookalike_domain_uses_the_typosquat_check(monkeypatch):
 
 def test_email_detection_and_normalisation():
     assert parser.detect_type("Someone@Example.ORG") == "email"
+    for address in ("billing+invoices@corp.example", "first.last@sub.corp.example", "o'brien@corp.example", "a_b-c%d@corp.example"):
+        assert parser.detect_type(address) == "email", address
+    for not_address in ("user@localhost", "user@corp.x", "@corp.example", "user name@corp.example", "https://user@corp.example/"):
+        assert parser.detect_type(not_address) != "email", not_address
     assert parser.normalize_value("Someone@Example[.]ORG", "email") == "someone@example.org"
 
 

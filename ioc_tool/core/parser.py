@@ -60,7 +60,9 @@ def detect_type(value):
         return 'hash' # SHA256
 
     # Email
-    if re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', value):
+    # Local part: letters, digits and the punctuation real mailboxes use
+    # (sub-address tags like billing+invoices@ are common in phishing reports).
+    if re.match(r"^[\w.+%'-]+@[\w.-]+\.\w{2,}$", value):
         return 'email'
 
     # URL (Simple check)
