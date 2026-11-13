@@ -143,12 +143,46 @@ interactive menu, or pass a subcommand for a one-shot operation.
 
 > Paste defanged IOCs (`1[.]2[.]3[.]4`, `hxxp://evil[.]com`, `user[at]example[.]com`) — they're auto-refanged on input. Use `--defang` to defang results on output so reports are safe to share.
 
+**Run the dashboard at every logon (Windows)**
+
+```powershell
+scripts\install-windows.ps1 -AutoStart                 # start at logon, restart if it stops
+scripts\install-windows.ps1 -AutoStart -AutoUpdateHours 6   # also keep a git checkout up to date
+```
+
+One per-user registry value (`HKCU\...\Run\ShadowScope`) runs `pythonw -m ioc_tool.main supervise`: no admin
+rights, no console window, no Task Scheduler. Log: `<InstallDir>\logs\supervisor.log`. Auto-update is off unless
+asked for; it only fast-forwards a clean checkout and rolls back if the reinstall fails. While Claude has the MCP
+server open Windows keeps `shadowscope-mcp.exe` locked, so that update waits until Claude is closed.
+On other systems run `shadowscope supervise` from your own service manager.
+
 **MCP server (Claude Code / any MCP client)**
 
 ```bash
 pip install "shadowscope[mcp]"
 claude mcp add --scope user shadowscope -- shadowscope-mcp
 ```
+
+On Windows the installer does both parts: `scripts\install-windows.ps1 -WithMcp` installs the extra, puts
+`shadowscope-mcp.exe` in `<InstallDir>\bin` and prints the registration command.
+
+No `claude` CLI (Claude desktop app only)? Add the server by hand to `~/.claude.json`
+(`%USERPROFILE%\.claude.json`) and restart Claude — use the full path to the launcher:
+
+```json
+{
+  "mcpServers": {
+    "shadowscope": {
+      "command": "C:\\Users\\<you>\\AppData\\Local\\ShadowScope\\bin\\shadowscope-mcp.exe",
+      "args": []
+    }
+  }
+}
+```
+
+The MCP server reads the **same** `.env` and cache as the CLI and the dashboard (`ioc_tool/.env` in a checkout,
+the per-user home when installed, `SHADOWSCOPE_HOME` overrides). If `list_sources` shows keyed sources as not
+configured, check that file — a repeated key is reported in `_env_warnings`.
 
 Exposes `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` plus the local-only analyst tools `search_cache`, `related_indicators`, `ioc_timeline`, `report`, `set_verdict`, `add_note`, `list_cases`, `assign_case`, `watchlist`, `user_list` over stdio, running the same pipeline and cache as the CLI (no REST server required).
 

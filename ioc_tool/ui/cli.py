@@ -2007,6 +2007,20 @@ def build_parser() -> argparse.ArgumentParser:
         help='Enable auto-reload (dev mode)',
     )
 
+    # supervise — keep `serve` running (and optionally updated) from an autostart entry
+    p_sup = subparsers.add_parser(
+        'supervise',
+        help='Keep the dashboard running in the background; restart it if it stops (see --update-hours)',
+    )
+    p_sup.add_argument('--host', default='127.0.0.1', help='Bind address (default: 127.0.0.1)')
+    p_sup.add_argument('--port', type=int, default=8765, help='Port (default: 8765)')
+    p_sup.add_argument(
+        '--update-hours', type=float, default=0,
+        help='Check the --source git checkout for updates every N hours and install them (default: 0 = never)',
+    )
+    p_sup.add_argument('--source', default=None, help='Git checkout ShadowScope was installed from (needed for updates)')
+    p_sup.add_argument('--extras', default='', help='pip extras to keep installed on update, e.g. "mcp"')
+
     return parser_arg
 
 
@@ -2075,6 +2089,12 @@ def main() -> None:
         handle_show(args)
     elif args.command == 'serve':
         handle_serve(args)
+    elif args.command == 'supervise':
+        from ..core import supervisor
+
+        sys.exit(supervisor.supervise(
+            args.host, args.port, update_hours=args.update_hours, source=args.source, extras=args.extras,
+        ))
     elif args.command == 'tag':
         handle_tag(args)
     elif args.command == 'cases':

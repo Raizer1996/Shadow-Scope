@@ -776,7 +776,11 @@ def ui_sources() -> dict[str, Any]:
             "ioc_types": src["types"],
         })
 
+    from ..core import envfile
+
+    env_warnings = envfile.warnings()
     return {
+        "env_warnings": env_warnings,
         "sources": sources,
         "total": len(sources),
         "ok": sum(1 for s in sources if s["status"] in ("ok", "local")),

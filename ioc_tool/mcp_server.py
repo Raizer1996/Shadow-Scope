@@ -24,16 +24,16 @@ import os
 import sys
 from typing import Any
 
-from dotenv import load_dotenv
-
 from ioc_tool import __version__
 from ioc_tool.core import (
     database,
     defang,
     enrich,
+    envfile,
     extractor,
     llm,
     parser,
+    paths,
     related,
     score,
     search,
@@ -265,6 +265,9 @@ def list_sources() -> dict[str, Any]:
             "env": env,
             "types": src["types"],
         }
+    problems = envfile.warnings()
+    if problems:
+        out["_env_warnings"] = problems  # key names and line numbers only, never values
     return out
 
 
@@ -509,8 +512,16 @@ def user_list(
 
 
 def _bootstrap() -> None:
-    """Load ``ioc_tool/.env`` (same file the CLI uses) and make sure the DB schema exists."""
-    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+    """Load the same ``.env`` the CLI uses and make sure the DB schema exists.
+
+    ``paths.env_file()`` is the package folder in a source checkout and the
+    per-user home (``%LOCALAPPDATA%\\ShadowScope`` / ``SHADOWSCOPE_HOME``) when
+    installed. Looking only beside the package left an installed MCP server
+    with no API keys.
+    """
+    for problem in envfile.load():
+        print(f"shadowscope-mcp: {problem}", file=sys.stderr)
+    paths.ensure_data_dir()
     workspace = os.getenv("SHADOWSCOPE_WORKSPACE")
     if workspace:
         database.set_workspace(workspace)

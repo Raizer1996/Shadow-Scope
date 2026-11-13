@@ -9,6 +9,19 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Autostart: `shadowscope supervise` and `install-windows.ps1 -AutoStart`.**
+  `supervise` starts the dashboard, restarts it when it stops (2 s → 60 s
+  back-off), logs to `<home>\\logs\\supervisor.log` and runs once per user.
+  `-AutoStart` registers it at logon through one per-user `HKCU\\…\\Run`
+  value running `pythonw` — no admin rights, no window, no Task Scheduler
+  and no PowerShell logon script, which locked-down PCs often block.
+  Optional, **off by default**: `-AutoUpdateHours N` /
+  `--update-hours N --source <checkout>` fast-forwards a clean git checkout
+  and reinstalls; a failed install rolls the checkout back.
+- **`install-windows.ps1 -WithMcp`** installs the MCP extra, puts
+  `shadowscope-mcp.exe` in `<InstallDir>in` and prints both the
+  `claude mcp add` command and a ready-to-paste `~/.claude.json` block for
+  machines that only have the Claude desktop app.
 - **E-mail addresses are an indicator type.** An address gets a local
   `Email` module (free mailbox provider, disposable-address service, role
   mailbox, `+tag`, look-alike / IDN domain, machine-generated mailbox name)
@@ -145,6 +158,21 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **MCP server found no API keys when installed** (pip / Windows installer):
+  it looked for `.env` beside the package instead of in the per-user home.
+  CLI, REST and MCP entry points now load it through one helper
+  (`core/envfile.py`).
+- **Windows installer reported "Python 3.10+ not found" under Windows
+  PowerShell 5.1** although a valid Python was present: 5.1 strips embedded
+  double quotes from native-command arguments, which turned the version
+  probe into a syntax error. The probe no longer needs quotes, Python 3.14
+  is tried, and a failure lists every candidate with the reason. CI now
+  runs the installer under 5.1 as well as PowerShell 7.
+- **A repeated key in `.env` silently switched a source off** when the last
+  occurrence was the template's empty line. The last non-empty value is
+  used and the duplicate is reported (key name and line numbers only) on
+  stderr, in MCP `list_sources` (`_env_warnings`) and in the dashboard's
+  Sources drawer. The template now keeps every key in one block.
 - **Rate limits starved small batches.** URLhaus and ThreatFox were
   configured as daily list downloads (4 / hour) although they are per-IOC
   query APIs, and URLscan, IPQS, OTX, Pulsedive, PDNS and MalwareBazaar were
