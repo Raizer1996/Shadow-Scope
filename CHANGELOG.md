@@ -7,6 +7,23 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **E-mail addresses are an indicator type.** An address gets a local
+  `Email` module (free mailbox provider, disposable-address service, role
+  mailbox, `+tag`, look-alike / IDN domain, machine-generated mailbox name)
+  and, unless it sits on a free provider, the reputation of its **domain**:
+  the domain is enriched and cached as its own indicator and its sources
+  are folded into the address's result (`via_domain`). Addresses work in
+  the Batch paste box, import, MCP tools and the block/allow lists (an
+  address also matches an entry for its domain), and the Related panel
+  links addresses and domains both ways.
+- **URL structure.** Every URL gets a local `URL` module: host, registered
+  domain, port, path, file extension, parameter names, and flags for
+  credentials before the host, raw-IP host, executable / macro / archive
+  download, punycode, a redirect parameter carrying another URL,
+  non-standard port, link shortener, deep sub-domains, login wording, very
+  long or encoded paths, plain http. Scores are capped at 70, weight 0.5 —
+  structure can raise suspicion, not prove anything. The Related panel
+  gains **SAME PATH, OTHER HOST** (the same kit or gate on another site).
 - **Page screenshots.** For IPs, domains and URLs with urlscan.io history,
   the Enrich view lists the past scans and shows the screenshot urlscan
   took in its sandbox — on request, one at a time. The image is fetched by

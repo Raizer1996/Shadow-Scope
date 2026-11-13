@@ -151,7 +151,7 @@ def test_apply_registers_metadata_without_enriching_and_is_idempotent(db, monkey
 
 def test_apply_revalidates_rows_from_the_client(db):
     r = client.post("/api/ui/import/apply", json={"rows": [
-        {"ioc": "definitely not an indicator"}, {"ioc": "someone@example.com"}, {"ioc": "198[.]51[.]100[.]5", "verdict": "pwned"},
+        {"ioc": "definitely not an indicator"}, {"ioc": "C:/Users/x/evil"}, {"ioc": "198[.]51[.]100[.]5", "verdict": "pwned"},
     ]})
     assert r.json() == {"imported": 1, "new": 1, "cases": 0, "tags": 0, "notes": 0, "verdicts": 0, "rejected": 2}
     assert _db.get_ioc_id("198.51.100.5") is not None

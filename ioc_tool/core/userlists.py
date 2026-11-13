@@ -27,7 +27,7 @@ from . import defang as defang_mod
 
 LISTS = ("block", "allow")
 BLOCK_SOURCE = "Blocklist"
-_EXACT_KINDS = ("ip", "url", "hash", "cve", "asn")
+_EXACT_KINDS = ("ip", "url", "hash", "cve", "asn", "email")
 _NOTE_MAX = 300
 
 
@@ -54,9 +54,9 @@ def normalize(raw: str) -> tuple[str, str]:
     if ioc_type == "domain":
         return "domain", text.lower().rstrip(".")
     if wildcard or ioc_type not in _EXACT_KINDS:
-        raise ValueError("not an IP, CIDR, domain, URL, hash, CVE or ASN")
+        raise ValueError("not an IP, CIDR, domain, URL, e-mail address, hash, CVE or ASN")
     value = parser.normalize_value(text, ioc_type)
-    return ioc_type, value.lower() if ioc_type in ("hash", "url") else value
+    return ioc_type, value.lower() if ioc_type in ("hash", "url", "email") else value
 
 
 def add(list_name: str, raw: str, note: str | None = None) -> dict[str, Any]:
@@ -149,6 +149,8 @@ def match(value: str, ioc_type: str) -> dict[str, Any] | None:
         host = _host(value)
         if host:
             candidates.append((host, "ip" if parser.detect_type(host) == "ip" else "domain"))
+    elif ioc_type == "email" and "@" in value:
+        candidates.append((value.rsplit("@", 1)[1].lower(), "domain"))
     best: tuple[int, int, dict[str, Any], str] | None = None
     for rank, (cand, cand_type) in enumerate(candidates):
         for entry in rows:

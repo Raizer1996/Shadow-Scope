@@ -48,7 +48,7 @@ except ImportError as exc:  # pragma: no cover - import guard
         "shadowscope-mcp needs the 'mcp' package (>=2.3): pip install 'shadowscope[mcp]'"
     ) from exc
 
-_SUPPORTED_TYPES = ("ip", "domain", "url", "hash", "cve", "asn")
+_SUPPORTED_TYPES = ("ip", "domain", "url", "hash", "cve", "asn", "email")
 _MAX_BULK = 50
 _MAX_TEXT = 256_000
 

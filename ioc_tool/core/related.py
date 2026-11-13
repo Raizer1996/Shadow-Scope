@@ -59,6 +59,13 @@ def _url_host(url: str) -> str:
         return ""
 
 
+def _url_path(url: str) -> str:
+    try:
+        return urlsplit(url if "//" in url else "//" + url).path.lower().rstrip("/")
+    except ValueError:
+        return ""
+
+
 def _clean_host(raw: Any) -> tuple[str, str] | None:
     """Normalise a hostname/IP candidate. Returns ``(value, type)`` or None."""
     if not isinstance(raw, str):
@@ -204,6 +211,8 @@ def _named_hosts(value: str, ioc_type: str, payloads: dict[str, dict]) -> tuple[
         host = _url_host(value)
         if host:
             add(seen, host, "url host")
+    if ioc_type == "email" and "@" in value:
+        add(seen, value.rsplit("@", 1)[1], "address domain")
     for name in certs:
         seen.pop(name, None)
     return seen, certs
@@ -261,21 +270,38 @@ def related_for(ioc_id: int, value: str, ioc_type: str, *, limit: int = 12) -> l
             groups.append(_group("network", "SAME NETWORK", str(net), hits, limit))
 
     # --- same registered domain / hosted here ----------------------------
-    host = value if ioc_type in ("domain", "ip") else _url_host(value) if ioc_type == "url" else ""
+    host = (value if ioc_type in ("domain", "ip") else _url_host(value) if ioc_type == "url"
+            else value.rsplit("@", 1)[1] if ioc_type == "email" and "@" in value else "")
     if host:
         anchor = host if parser.detect_type(host) == "ip" else registered_domain(host)
         like = "%" + anchor.replace("%", "").replace("_", r"\_") + "%"
         hits = []
         for r in _query(
             "SELECT id, value, type, last_score FROM iocs "
-            "WHERE type IN ('domain', 'url') AND id != ? AND LOWER(value) LIKE ? ESCAPE '\\' LIMIT 500",
+            "WHERE type IN ('domain', 'url', 'email') AND id != ? AND LOWER(value) LIKE ? ESCAPE '\\' LIMIT 500",
             [ioc_id, like],
         ):
-            other = r["value"].lower() if r["type"] == "domain" else _url_host(r["value"])
+            other = (r["value"].lower() if r["type"] == "domain"
+                     else r["value"].rsplit("@", 1)[-1].lower() if r["type"] == "email" else _url_host(r["value"]))
             if other == anchor or other.endswith("." + anchor):
                 hits.append(_item(r))
         title = "HOSTED ON THIS IP" if anchor == host and ioc_type == "ip" else "SAME DOMAIN"
         groups.append(_group("domain", title, anchor, hits, limit))
+
+    # --- same URL path on other hosts (phishing kits, shared gates) ------
+    if ioc_type == "url":
+        path = _url_path(value)
+        if len(path) >= 8 and path.count("/") + path.count(".") >= 2:
+            like = "%" + path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            hits = [
+                _item(r) for r in _query(
+                    "SELECT id, value, type, last_score FROM iocs "
+                    "WHERE type = 'url' AND id != ? AND LOWER(value) LIKE ? ESCAPE '\\' LIMIT 300",
+                    [ioc_id, like],
+                )
+                if _url_path(r["value"]) == path and _url_host(r["value"]) != _url_host(value)
+            ]
+            groups.append(_group("path", "SAME PATH, OTHER HOST", path, hits, limit))
 
     # --- hosts named in this IOC's own data ------------------------------
     seen, certs = _named_hosts(value, ioc_type, payloads)

@@ -40,6 +40,8 @@ SOURCE_WEIGHTS: dict[str, float] = {
     # Tier 4 — single-signal / heuristic
     "Pulsedive":     0.5,
     "Heuristics":    0.5,
+    "URL":           0.5,    # structure of the URL itself (core/urlinfo.py)
+    "Email":         0.5,    # structure of the address itself (core/urlinfo.py)
     "AbstractAPI":   0.4,
 }
 
@@ -219,6 +221,14 @@ def calculate_yaraify_score(data: dict | None) -> int:
     if names:
         return 20
     return 0
+
+
+def calculate_structure_score(data: dict | None) -> int:
+    """URL / Email structure modules carry their own 0-70 ``score``."""
+    try:
+        return max(0, min(100, int((data or {}).get("score") or 0)))
+    except (TypeError, ValueError):
+        return 0
 
 
 def calculate_greynoise_score(data: dict | None) -> int:

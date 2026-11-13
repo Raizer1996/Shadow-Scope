@@ -68,6 +68,7 @@ Per-source failures are **tri-state** (Nov 2026). A module still returns `None` 
 | `ioc_tool/core/parser.py` | Detect IOC type from string |
 | `ioc_tool/core/related.py` | Related indicators for one cached IOC (same case / family / network / domain, hosts named in its data, shared tags). Reads SQLite only |
 | `ioc_tool/core/search.py` | Search over the local cache (indicators, verdicts, notes, cases, tags, indexed fields, raw source text) with structured filters. Reads SQLite only |
+| `ioc_tool/core/urlinfo.py` | Local structure analysis, no network: `analyse_url` (host / port / path / extension / parameters + flags) and `analyse_email` (free / disposable provider, role mailbox, look-alike domain). Persisted as the `URL` and `Email` modules |
 | `ioc_tool/core/screenshots.py` | urlscan.io screenshots on demand: lists scans from the cached answer, fetches `urlscan.io/screenshots/<uuid>.png` through `core.http` for ids that belong to the indicator, PNG/size checks, disk cache |
 | `ioc_tool/core/usage.py` | Quota meter: per-source, per-UTC-day tally of requests sent through `core.http` (`api_usage`), optional quotas (`SHADOWSCOPE_QUOTAS`). Recording never raises and never creates a database |
 | `ioc_tool/core/backup.py` | Consistent snapshot of the SQLite database (online backup API), validation of a candidate backup, and restore that first saves the live file as `*.pre-restore-<time>.bak` |
@@ -144,6 +145,7 @@ Per-source raw scores → weighted → **strongest signal + corroboration** → 
 | ThreatFox  | hit & `confidence_level >= 75 → 95`, `>= 50 → 80`, other hit → `60`, no data → `0` |
 | MalwareBazaar | `95` on any hit (sample known to abuse.ch), `0` if no data |
 | YARAify    | Malpedia family rule → `90`; non-`PUA.` ClamAV signature → `85`; YARA rule named as malware → `80`; only `PUA.` signatures → `40`; only generic YARA rules → `20`; known but nothing matched → `0` |
+| URL / Email | structure flags from `core/urlinfo.py`: strongest flag + 5 per extra flag, capped at `70` (weight `0.5`). An e-mail address not on a free mailbox provider also carries its domain's sources; context-only sources never feed that composite |
 | GreyNoise  | `malicious=90`, `benign/riot=0`, `unknown=0`, none=`0` |
 | OTX        | gated on strength: `reputation < -2` or a named adversary → `90`; `reputation < 0` with ≥3 pulses → `75`, ≥1 pulse → `50`; pulse count alone caps at `35` (≥10), `25` (≥3), `10` (≥1); curator `false_positive` → `0` |
 | URLscan    | any result with malicious verdict → `90`; history exists, no malicious verdict → `30`; `total == 0` or no data → `0` |
