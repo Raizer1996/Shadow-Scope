@@ -150,6 +150,27 @@ pip install "shadowscope[mcp]"
 claude mcp add --scope user shadowscope -- shadowscope-mcp
 ```
 
+On Windows the installer does both parts: `scripts\install-windows.ps1 -WithMcp` installs the extra, puts
+`shadowscope-mcp.exe` in `<InstallDir>\bin` and prints the registration command.
+
+No `claude` CLI (Claude desktop app only)? Add the server by hand to `~/.claude.json`
+(`%USERPROFILE%\.claude.json`) and restart Claude — use the full path to the launcher:
+
+```json
+{
+  "mcpServers": {
+    "shadowscope": {
+      "command": "C:\\Users\\<you>\\AppData\\Local\\ShadowScope\\bin\\shadowscope-mcp.exe",
+      "args": []
+    }
+  }
+}
+```
+
+The MCP server reads the **same** `.env` and cache as the CLI and the dashboard (`ioc_tool/.env` in a checkout,
+the per-user home when installed, `SHADOWSCOPE_HOME` overrides). If `list_sources` shows keyed sources as not
+configured, check that file — a repeated key is reported in `_env_warnings`.
+
 Exposes `enrich_ioc`, `enrich_many`, `extract_and_enrich`, `show_cached`, `list_sources`, `cache_stats` plus the local-only analyst tools `search_cache`, `related_indicators`, `ioc_timeline`, `report`, `set_verdict`, `add_note`, `list_cases`, `assign_case`, `watchlist`, `user_list` over stdio, running the same pipeline and cache as the CLI (no REST server required).
 
 **Interactive mode**

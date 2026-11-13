@@ -71,9 +71,17 @@ jobs:
           ./scripts/install-windows.ps1 -DryRun
           if (Test-Path "$env:LOCALAPPDATA\ShadowScope") { throw "dry-run created files" }
 
+      - name: Dry run under Windows PowerShell 5.1 (Python auto-detect)
+        # pwsh (PowerShell 7) passes embedded quotes to native programs correctly and
+        # hid a 5.1-only bug that made the installer report "Python not found".
+        shell: powershell
+        run: |
+          ./scripts/install-windows.ps1 -DryRun -WithMcp
+          if (Test-Path "$env:LOCALAPPDATA\ShadowScope") { throw "dry-run created files" }
+
       - name: Install from checkout
         shell: pwsh
-        run: ./scripts/install-windows.ps1
+        run: ./scripts/install-windows.ps1 -WithMcp
 
       - name: Installed CLI + dashboard assets work
         shell: pwsh
@@ -83,6 +91,7 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "shadowscope --help failed" }
           if (-not (Test-Path "$home_\.env")) { throw ".env not created" }
+          if (-not (Test-Path "$home_\bin\shadowscope-mcp.exe")) { throw "-WithMcp did not install the MCP launcher" }
           if (Select-String -Path "$home_\.env" -Pattern '=your_.*_here' -Quiet) { throw ".env kept placeholder values" }
           # PowerShell 5.1-style UTF-16 IOC list must parse (allowlisted so no network)
           "10.0.0.1" | Out-File -Encoding unicode iocs.txt

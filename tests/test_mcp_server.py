@@ -204,3 +204,35 @@ def test_user_list_tool(_seeded):
     assert "error" in mcp_server.user_list("remove")
     assert mcp_server.user_list("remove", entry_id=added["id"]) == {"removed": 1}
     assert "error" in mcp_server.user_list("explode")
+
+
+# ---------------------------------------------------------------------------
+# .env location — an installed MCP server must read the per-user home
+# ---------------------------------------------------------------------------
+
+def test_bootstrap_loads_env_from_shadowscope_home(monkeypatch, tmp_path, capsys):
+    import os
+
+    home = tmp_path / "home"
+    home.mkdir()
+    # Key pasted above the template's own empty line: the reported failure mode.
+    (home / ".env").write_text("VT_API_KEY=vt-test-key\nABUSECH_AUTH_KEY=abuse-test-key\nABUSECH_AUTH_KEY=\n", encoding="utf-8")
+    monkeypatch.setenv("SHADOWSCOPE_HOME", str(home))
+    for key in ("VT_API_KEY", "ABUSECH_AUTH_KEY", "SHADOWSCOPE_WORKSPACE"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "ioc.db"))
+    try:
+        mcp_server._bootstrap()
+        sources = mcp_server.list_sources()
+        assert sources["VirusTotal"]["configured"] is True
+        assert sources["MalwareBazaar"]["configured"] is True and sources["URLhaus"]["configured"] is True
+        assert sources["Shodan"]["configured"] is False
+        # The duplicate is reported by name and line, never by value, to the tool and to stderr.
+        assert len(sources["_env_warnings"]) == 1 and "ABUSECH_AUTH_KEY" in sources["_env_warnings"][0]
+        err = capsys.readouterr().err
+        assert "shadowscope-mcp: ABUSECH_AUTH_KEY" in err and "abuse-test-key" not in err
+    finally:
+        for key in ("VT_API_KEY", "ABUSECH_AUTH_KEY"):
+            os.environ.pop(key, None)
+        mcp_server.envfile.load(str(tmp_path / "none.env"))  # reset recorded warnings
+    assert "_env_warnings" not in mcp_server.list_sources()

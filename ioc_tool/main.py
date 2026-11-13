@@ -2,9 +2,7 @@ import contextlib
 import os
 import sys
 
-from dotenv import load_dotenv
-
-from ioc_tool.core import paths
+from ioc_tool.core import envfile, paths
 from ioc_tool.ui import cli
 
 
@@ -28,7 +26,8 @@ def main():
     # dir when installed — see core/paths.py)
     # utf-8-sig: Notepad's UTF-8-with-BOM would otherwise glue U+FEFF onto
     # the first key name and silently drop it.
-    load_dotenv(paths.env_file(), encoding="utf-8-sig")
+    for problem in envfile.load():
+        print(f"[!] {problem}", file=sys.stderr)
     paths.ensure_data_dir()
 
     # Run CLI
