@@ -43,7 +43,7 @@ def test_normalize(raw, expected):
     assert userlists.normalize(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["", "   ", "not an indicator", "0.0.0.0/0", "10.0.0.0/7", "*.203.0.113.10", "a@b.example"])
+@pytest.mark.parametrize("raw", ["", "   ", "not an indicator", "0.0.0.0/0", "10.0.0.0/7", "*.203.0.113.10", "*.a@b.example", "a@b"])
 def test_normalize_rejects(raw):
     with pytest.raises(ValueError):
         userlists.normalize(raw)

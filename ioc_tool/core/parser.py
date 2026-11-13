@@ -23,6 +23,8 @@ def normalize_value(value, ioc_type):
     if ioc_type == 'asn':
         digits = re.sub(r'(?i)^as(n)?', '', value.strip())
         return f"AS{digits.lstrip('0') or '0'}"
+    if ioc_type == 'email':
+        return refang(value.strip()).lower()
     return refang(value.strip())
 
 

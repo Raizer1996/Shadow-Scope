@@ -69,7 +69,7 @@ from ..modules import (
 from ..modules import (
     asn as asn_mod,
 )
-from . import allowlist, database, heuristics, http, parser, score, userlists
+from . import allowlist, database, heuristics, http, parser, score, urlinfo, userlists
 
 # Per-call ``--no-cache`` toggle — propagates from enrich_ioc{,_async}
 # into _run_source via a ContextVar so we don't have to thread the flag
@@ -570,6 +570,52 @@ async def enrich_ioc_async(
             no_cache_ctx.reset(no_cache_token)
 
 
+# Sources that describe rather than judge: their incidental scores must not
+# feed a composite recomputed outside ``_run_source``'s ``contributes`` flag.
+_CONTEXT_MODULES = frozenset({"Shodan", "IPinfo", "Censys", "rDNS", "PDNS", "ASN", "crt.sh", "Allowlist"})
+
+
+async def _with_email_domain(result: dict, ioc_id: int) -> dict:
+    """Fold the reputation of an e-mail address's domain into its result.
+
+    No source takes an e-mail address, but nearly everything known about a
+    sender is known about its domain. Addresses on free mailbox providers
+    are left alone: gmail.com's reputation says nothing about one mailbox.
+    The domain is enriched (and cached) as an indicator in its own right;
+    its modules are then copied in, the address's own ``Email`` module kept.
+    """
+    info = (result.get('modules', {}).get('Email') or {}).get('data') or {}
+    domain = info.get('domain')
+    if not domain or not info.get('enrich_domain'):
+        return result
+    try:
+        dom = await _enrich_ioc_inner(domain, 'domain')
+    except Exception:  # noqa: BLE001 - the address's own analysis still stands
+        return result
+    modules = dict(result.get('modules') or {})
+    for name, entry in (dom.get('modules') or {}).items():
+        modules.setdefault(name, entry)
+    scores = [
+        (name, int(entry.get('score') or 0)) for name, entry in modules.items()
+        if isinstance(entry, dict) and name not in _CONTEXT_MODULES
+    ]
+    final_score = score.calculate_final_risk(scores)
+    unavailable = {**(dom.get('unavailable') or {}), **(result.get('unavailable') or {})}
+    if not dom.get('degraded') and not result.get('degraded'):
+        with contextlib.suppress(Exception):
+            database.update_last_score(ioc_id, final_score, score.SCORE_VERSION)
+    with contextlib.suppress(Exception):
+        database.set_last_unavailable(ioc_id, unavailable)
+    return {
+        **result,
+        'modules': modules,
+        'final_score': final_score,
+        'via_domain': domain,
+        'degraded': bool(unavailable),
+        'unavailable': unavailable,
+    }
+
+
 async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
     # Canonicalise the value for types that require it (currently just
     # CVE → uppercased) so the DB cache key, the per-source lookups,
@@ -597,6 +643,10 @@ async def _enrich_ioc_inner(value: str, ioc_type: str) -> dict:
         *(coro for _, coro in tasks), return_exceptions=True,
     )
     results, scores, unavailable = _collect_raw_results(raw_results)
+    if ioc_type == 'email':
+        return await _with_email_domain(_finalize_enrich(
+            value, ioc_type, ioc_id, results, scores, planned_sources, unavailable=unavailable,
+        ), ioc_id)
     return _finalize_enrich(
         value, ioc_type, ioc_id, results, scores, planned_sources, unavailable=unavailable,
     )
@@ -773,6 +823,20 @@ def _build_enrich_tasks(
             _run_source, ioc_id, 'malwarebazaar', 'MalwareBazaar',
             lambda: malwarebazaar.enrich_hash(value),
             score.calculate_malwarebazaar_score,
+        ))
+
+    # --- Local structure analysis — URL and e-mail (no network) ---
+    if ioc_type == 'url':
+        _add('URL', asyncio.to_thread(
+            _run_source, ioc_id, 'urlinfo', 'URL',
+            lambda: urlinfo.analyse_url(value),
+            score.calculate_structure_score,
+        ))
+    if ioc_type == 'email':
+        _add('Email', asyncio.to_thread(
+            _run_source, ioc_id, 'email', 'Email',
+            lambda: urlinfo.analyse_email(value),
+            score.calculate_structure_score,
         ))
 
     # --- YARAify — hash only (YARA / ClamAV matches on the file) ---
@@ -1081,6 +1145,8 @@ async def enrich_ioc_stream(
         shaped = _finalize_enrich(
             value, ioc_type, ioc_id, results, scores, planned_sources, unavailable=unavailable,
         )
+        if ioc_type == 'email':
+            shaped = await _with_email_domain(shaped, ioc_id)
         yield {'event': 'final', 'result': shaped}
     finally:
         http.rate_limited_ctx.reset(ledger_token)

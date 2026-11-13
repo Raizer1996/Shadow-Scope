@@ -220,7 +220,7 @@ async def _enrich_one(ioc: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=400,
             detail=f"Unable to detect IOC type for value: {ioc!r}. "
-                   "Supported types: ip, domain, url, hash, email.",
+                   "Supported types: ip, domain, url, hash, cve, asn, email.",
         )
     return await enrich.enrich_ioc_async(refanged, ioc_type)
 
@@ -369,6 +369,14 @@ def health() -> HealthResponse:
 def _ui_detail(source: str, score: int, data: dict[str, Any]) -> str:
     """Return a terse per-source detail summary for the dashboard table."""
     data = data or {}
+    if source in ("URL", "Email"):
+        scored = [f for f in (data.get("flags") or []) if isinstance(f, dict) and f.get("points")]
+        hot = [f["label"] for f in sorted(scored, key=lambda f: -int(f["points"]))]  # strongest first
+        if source == "URL":
+            lead = f"{data.get('host', '?')}{data.get('path') or ''}"[:60]
+        else:
+            lead = "free mailbox provider" if data.get("free_provider") else f"domain {data.get('domain', '?')}"
+        return f"{lead} · {hot[0]}" + (f" +{len(hot) - 1}" if len(hot) > 1 else "") if hot else f"{lead} · nothing unusual in its structure"
     if source == "Blocklist":
         note = f" · {data['note']}" if data.get("note") else ""
         return f"on your blocklist via {data.get('match', '?')}{note}"
@@ -627,6 +635,8 @@ _CACHED_SOURCES: tuple[tuple[str, str], ...] = (
     ("pulsedive",     "Pulsedive"),
     ("malwarebazaar", "MalwareBazaar"),
     ("yaraify",       "YARAify"),
+    ("urlinfo",       "URL"),
+    ("email",         "Email"),
     ("feodo",         "Feodo"),
     ("sslbl",         "SSLBL"),
     ("crtsh",         "crt.sh"),
@@ -661,6 +671,17 @@ def _build_modules_from_cache(ioc_id: int) -> tuple[dict[str, Any], list[tuple[s
         scores.append((display_name, row["score"] or 0))  # named → real weight, not the 0.5 default
     # The user's blocklist is checked live, not read from cache: an entry added
     # or removed a moment ago must show on already-cached indicators.
+    # An e-mail address is shown with its domain's cached sources folded in,
+    # mirroring what enrichment returns (core.enrich._with_email_domain).
+    email_info = (modules.get("Email") or {}).get("data") or {}
+    if email_info.get("enrich_domain") and email_info.get("domain"):
+        domain_id = database.get_ioc_id(email_info["domain"])
+        if domain_id is not None and domain_id != ioc_id:
+            dom_modules, dom_scores = _build_modules_from_cache(domain_id)
+            for name, entry in dom_modules.items():
+                if name not in modules:
+                    modules[name] = entry
+                    scores.extend(item for item in dom_scores if item[0] == name)
     if modules:
         ident = database.get_ioc_identity(ioc_id)
         block = userlists.block_hit(ident[0], ident[1]) if ident else None
@@ -896,7 +917,7 @@ async def ui_enrich_stream(
 
 
 _UI_EXTRACT_MAX = 200
-_UI_EXTRACT_TYPES = ("ip", "domain", "url", "hash", "cve", "asn")
+_UI_EXTRACT_TYPES = ("ip", "domain", "url", "hash", "cve", "asn", "email")
 
 
 @app.post("/api/ui/extract", dependencies=[Depends(require_token)])

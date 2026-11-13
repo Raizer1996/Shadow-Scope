@@ -27,7 +27,7 @@ from typing import Any
 from . import database, extractor, parser
 from . import defang as defang_mod
 
-TYPES = ("ip", "domain", "url", "hash", "cve", "asn")
+TYPES = ("ip", "domain", "url", "hash", "cve", "asn", "email")
 MAX_ROWS = 2000
 MAX_TAGS = 12
 _NOTE_MAX = 2000
