@@ -25,6 +25,15 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Autostart: `shadowscope supervise` and `install-windows.ps1 -AutoStart`.**
+  `supervise` starts the dashboard, restarts it when it stops (2 s → 60 s
+  back-off), logs to `<home>\\logs\\supervisor.log` and runs once per user.
+  `-AutoStart` registers it at logon through one per-user `HKCU\\…\\Run`
+  value running `pythonw` — no admin rights, no window, no Task Scheduler
+  and no PowerShell logon script, which locked-down PCs often block.
+  Optional, **off by default**: `-AutoUpdateHours N` /
+  `--update-hours N --source <checkout>` fast-forwards a clean git checkout
+  and reinstalls; a failed install rolls the checkout back.
 - **`install-windows.ps1 -WithMcp`** installs the MCP extra, puts
   `shadowscope-mcp.exe` in `<InstallDir>in` and prints both the
   `claude mcp add` command and a ready-to-paste `~/.claude.json` block for
