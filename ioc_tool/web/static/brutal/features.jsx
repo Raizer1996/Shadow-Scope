@@ -972,6 +972,84 @@ function IocTimeline({ ioc }) {
   );
 }
 
+// ─────────── Page screenshot (urlscan.io, loaded on request) ───────────
+
+function ScreenshotBlock({ ioc, fmt }) {
+  const [scans, setScans] = React.useState(null);
+  const [shot, setShot] = React.useState(null);   // {uuid, url} | {uuid, busy} | {uuid, error}
+  const urlRef = React.useRef(null);
+  const drop = () => { if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null; } };
+
+  React.useEffect(() => {
+    let live = true;
+    drop(); setShot(null); setScans(null);
+    if (!["ip", "domain", "url"].includes(ioc.type) || !ioc.modules.URLscan) return undefined;
+    window.ssApi("GET", "/api/ui/screenshots?ioc=" + encodeURIComponent(ioc.ioc))
+      .then(r => { if (live) setScans(r.scans || []); })
+      .catch(() => { if (live) setScans([]); });
+    return () => { live = false; drop(); };
+  }, [ioc.id, ioc.enriched_at]);
+
+  if (!scans || scans.length === 0) return null;
+
+  const load = async (s) => {
+    drop(); setShot({ uuid: s.uuid, busy: true });
+    try {
+      const headers = {};
+      try { const tok = sessionStorage.getItem("ss_api_token"); if (tok) headers["Authorization"] = "Bearer " + tok; } catch (e) {}
+      const r = await fetch("/api/ui/screenshot?ioc=" + encodeURIComponent(ioc.ioc) + "&uuid=" + s.uuid, { headers });
+      if (!r.ok) {
+        let detail = "HTTP " + r.status;
+        try { const j = await r.json(); if (j && typeof j.detail === "string") detail = j.detail; } catch (e) {}
+        throw new Error(detail);
+      }
+      urlRef.current = URL.createObjectURL(await r.blob());
+      setShot({ uuid: s.uuid, url: urlRef.current });
+      setScans(list => list.map(x => (x.uuid === s.uuid ? { ...x, cached: true } : x)));
+    } catch (e) { setShot({ uuid: s.uuid, error: String(e.message || e) }); }
+  };
+
+  const active = shot && scans.find(s => s.uuid === shot.uuid);
+  return (
+    <section className="whois-block">
+      <div className="sec-head">
+        <span className="sec-title glitch" data-text="PAGE SCREENSHOT">PAGE SCREENSHOT</span>
+        <span className="sec-meta">{scans.length} past scans on urlscan.io</span>
+        <span className="sec-meta dim">taken in urlscan's sandbox — loading one never touches the site itself</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) minmax(0, 2fr)", gap: 14, alignItems: "start" }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 11.5 }}>
+          {scans.map(s => (
+            <button key={s.uuid} className="pivot-row" style={{ gridTemplateColumns: "13ch 1fr auto", width: "100%", marginBottom: 4, borderColor: shot && shot.uuid === s.uuid ? "var(--accent)" : undefined }}
+                    title={(s.url ? fmt(s.url) : "") + (s.title ? " — " + s.title : "")} onClick={() => load(s)}>
+              <span className="dim">{s.time ? s.time.slice(0, 10) + " " + s.time.slice(11, 16) : "—"}</span>
+              <span className="pr-ioc">{s.title || (s.url ? fmt(s.url) : "untitled")}{s.status && s.status !== "200" ? ` · HTTP ${s.status}` : ""}</span>
+              <span className="pr-arrow">{s.cached ? "show ▸" : "load ▸"}</span>
+            </button>
+          ))}
+          <div className="dim small" style={{ paddingTop: 4 }}>
+            "load" makes one request from this machine to urlscan.io; the image is then kept locally.
+          </div>
+        </div>
+        <div style={{ minHeight: 120, border: "1px solid var(--line-2)", background: "var(--bg)", display: "grid", placeItems: "center", padding: 6 }}>
+          {!shot && <span className="dim small">// pick a scan to see what the page looked like</span>}
+          {shot && shot.busy && <span className="small">loading…</span>}
+          {shot && shot.error && <span className="small" style={{ color: "var(--bad,#ff7474)" }}>// {shot.error}</span>}
+          {shot && shot.url && (
+            <div style={{ width: "100%" }}>
+              <a href={shot.url} target="_blank" rel="noopener noreferrer" title="open full size in a new tab">
+                <img src={shot.url} alt={"screenshot of " + (active && active.url ? fmt(active.url) : "the scanned page")}
+                     style={{ display: "block", width: "100%", maxHeight: 520, objectFit: "contain", objectPosition: "top", background: "#fff" }} />
+              </a>
+              {active && <div className="dim small" style={{ paddingTop: 4, overflowWrap: "anywhere" }}>{active.url ? fmt(active.url) : ""}{active.time ? " · scanned " + active.time.slice(0, 16).replace("T", " ") + " UTC" : ""}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ─────────── Drill-down chip ───────────
 
 function DrillChip({ kind, value, onPivot, inline }) {

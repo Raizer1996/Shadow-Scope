@@ -7,6 +7,14 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Page screenshots.** For IPs, domains and URLs with urlscan.io history,
+  the Enrich view lists the past scans and shows the screenshot urlscan
+  took in its sandbox — on request, one at a time. The image is fetched by
+  the local server through `core.http` (rate-limited, counted by the quota
+  meter), never by the browser, and cached in `data/screenshots/` (newest
+  200). Only scan ids listed in that indicator's own cached answer can be
+  requested, so the endpoint is not a general proxy.
+  `GET /api/ui/screenshots`, `GET /api/ui/screenshot`.
 - **YARAify source (hashes).** abuse.ch YARAify is looked up for every hash
   with the existing `ABUSECH_AUTH_KEY`: which YARA rules and ClamAV
   signatures matched the file, sightings, first/last seen. The answer is

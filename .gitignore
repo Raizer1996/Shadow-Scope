@@ -64,3 +64,5 @@ audit/
 # Backup / restore leftovers hold user data — never commit them
 ioc_tool/data/*.bak
 ioc_tool/data/*.tmp
+# urlscan.io screenshots cached on demand
+ioc_tool/data/screenshots/

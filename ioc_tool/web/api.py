@@ -1491,6 +1491,38 @@ async def ui_restore(
         Path(tmp).unlink(missing_ok=True)
 
 
+@app.get("/api/ui/screenshots", dependencies=[Depends(require_token)])
+def ui_screenshots(
+    ioc: str = Query(..., min_length=1, description="Cached IP, domain or URL"),
+) -> dict[str, Any]:
+    """Past urlscan.io scans of this indicator that have a screenshot. Cache-only."""
+    from ..core import screenshots
+
+    ioc_id, value = _require_ioc_id(ioc)
+    return {"ioc": value, "scans": screenshots.list_scans(ioc_id)}
+
+
+@app.get("/api/ui/screenshot", dependencies=[Depends(require_token)])
+async def ui_screenshot(
+    ioc: str = Query(..., min_length=1),
+    uuid: str = Query(..., min_length=36, max_length=36, description="A scan id from /api/ui/screenshots"),
+) -> Response:
+    """One urlscan.io screenshot, fetched by the server and cached on disk.
+
+    The scan id must be one listed for this indicator, so this cannot be
+    used to fetch arbitrary URLs. 502 when urlscan.io does not return a PNG.
+    """
+    from ..core import screenshots
+
+    ioc_id, _ = _require_ioc_id(ioc)
+    if uuid not in {s["uuid"] for s in screenshots.list_scans(ioc_id, limit=200)}:
+        raise HTTPException(status_code=404, detail="no such scan for this indicator")
+    body = await asyncio.to_thread(screenshots.fetch, uuid)
+    if body is None:
+        raise HTTPException(status_code=502, detail="urlscan.io did not return a screenshot (gone, or rate-limited)")
+    return Response(content=body, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+
+
 class ListEntryRequest(BaseModel):
     list: str = Field(..., pattern="^(block|allow)$")
     pattern: str = Field(..., min_length=1, max_length=2100, description="IP, CIDR, domain, URL, hash, CVE or ASN")
