@@ -7,6 +7,11 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Hash a file locally.** `HASH FILE` on the input bar (or drop a file on
+  it) computes SHA-256 and SHA-1 inside the browser with WebCrypto and
+  enriches the SHA-256. The file itself never leaves the machine — only
+  the hash is looked up, exactly as if it had been typed. Up to 1 GB. The
+  file name and size can be saved as a note on the hash.
 - **Your own blocklist and allowlist.** New LISTS tab (`g l`) and
   `+ BLOCK` / `+ ALLOW` on the Enrich analyst bar. Entries are exact
   indicators, CIDR ranges, or domains (which cover their subdomains), stored
