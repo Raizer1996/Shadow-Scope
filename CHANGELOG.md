@@ -5,6 +5,31 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP server found no API keys when installed** (pip / Windows installer):
+  it looked for `.env` beside the package instead of in the per-user home.
+  CLI, REST and MCP entry points now load it through one helper
+  (`core/envfile.py`).
+- **Windows installer reported "Python 3.10+ not found" under Windows
+  PowerShell 5.1** although a valid Python was present: 5.1 strips embedded
+  double quotes from native-command arguments, which turned the version
+  probe into a syntax error. The probe no longer needs quotes, Python 3.14
+  is tried, and a failure lists every candidate with the reason. CI now
+  runs the installer under 5.1 as well as PowerShell 7.
+- **A repeated key in `.env` silently switched a source off** when the last
+  occurrence was the template's empty line. The last non-empty value is
+  used and the duplicate is reported (key name and line numbers only) on
+  stderr, in MCP `list_sources` (`_env_warnings`) and in the dashboard's
+  Sources drawer. The template now keeps every key in one block.
+
+### Added
+
+- **`install-windows.ps1 -WithMcp`** installs the MCP extra, puts
+  `shadowscope-mcp.exe` in `<InstallDir>in` and prints both the
+  `claude mcp add` command and a ready-to-paste `~/.claude.json` block for
+  machines that only have the Claude desktop app.
+
 ### Added
 
 - **E-mail addresses are an indicator type.** An address gets a local

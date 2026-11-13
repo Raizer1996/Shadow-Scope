@@ -1250,6 +1250,12 @@ function SourcesDrawer({ onClose }) {
           </div>
         </div>
         <div className="drawer-body">
+          {(sources.env_warnings || []).length > 0 && (
+            <div style={{ margin: "8px 16px", padding: 8, border: "1px solid var(--warn, #f0c674)", color: "var(--warn, #f0c674)", fontFamily: "var(--mono)", fontSize: 11.5 }}>
+              <b>.env needs attention</b>
+              {sources.env_warnings.map((w, i) => <div key={i} style={{ marginTop: 4 }}>// {w}</div>)}
+            </div>
+          )}
           <UsageMeter />
           {Object.entries(grouped).map(([k, arr]) => arr.length === 0 ? null : (
             <div key={k} className="drawer-group">
