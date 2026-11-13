@@ -33,6 +33,17 @@
     Also install the MCP server (the "mcp" extra), copy shadowscope-mcp.exe
     into <InstallDir>\bin and print the block to register it with Claude.
 
+.PARAMETER AutoStart
+    Start the dashboard at every logon and keep it running. Adds one per-user
+    registry value (HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ShadowScope)
+    that launches "pythonw -m ioc_tool.main supervise" - no admin rights, no
+    window, no Task Scheduler, no PowerShell script at logon. Removed by -Uninstall.
+
+.PARAMETER AutoUpdateHours
+    With -AutoStart, and only when installing from a git checkout: every N hours
+    fast-forward that checkout and reinstall if it is behind its upstream.
+    Off by default (0). A checkout with local changes is never touched.
+
 .PARAMETER NoPath
     Do not add <InstallDir>\bin to the user PATH.
 
@@ -66,6 +77,8 @@ param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'ShadowScope'),
     [string]$Python,
     [switch]$WithMcp,
+    [switch]$AutoStart,
+    [double]$AutoUpdateHours = 0,
     [switch]$NoPath,
     [switch]$Uninstall,
     [switch]$Purge,
@@ -85,6 +98,16 @@ $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 $BinDir = Join-Path $InstallDir 'bin'
 $EnvFile = Join-Path $InstallDir '.env'
 $DataDir = Join-Path $InstallDir 'data'
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$RunName = 'ShadowScope'
+
+function Stop-VenvProcesses {
+    # A running dashboard / supervisor keeps files in the venv locked.
+    $prefix = $VenvDir.TrimEnd('\') + '\'
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
 
 function Write-Step([string]$Message) {
     $prefix = if ($DryRun) { '[dry-run]' } else { '[*]' }
@@ -177,6 +200,10 @@ function Get-PipSpec([string]$Spec) {
 # Uninstall
 # --------------------------------------------------------------------------
 if ($Uninstall) {
+    if (Get-ItemProperty -Path $RunKey -Name $RunName -ErrorAction SilentlyContinue) {
+        Invoke-Step "Remove autostart entry ($RunKey\$RunName)" { Remove-ItemProperty -Path $RunKey -Name $RunName }
+    }
+    if (Test-Path $VenvDir) { Invoke-Step 'Stop ShadowScope processes started from this install' { Stop-VenvProcesses } }
     if (Test-Path $VenvDir) { Invoke-Step "Remove $VenvDir" { Remove-Item -Recurse -Force $VenvDir } }
     if (Test-Path $BinDir)  { Invoke-Step "Remove $BinDir"  { Remove-Item -Recurse -Force $BinDir } }
 
@@ -278,6 +305,30 @@ if (-not $NoPath) {
     if (-not (Test-PathEntry $env:Path $BinDir)) { $env:Path = "$env:Path;$BinDir" }
 }
 
+if ($AutoStart) {
+    $pythonw = Join-Path $VenvDir 'Scripts\pythonw.exe'
+    $superviseArgs = @('-m', 'ioc_tool.main', 'supervise')
+    $checkout = Resolve-Source
+    if ($AutoUpdateHours -gt 0) {
+        if (Test-Path (Join-Path $checkout '.git')) {
+            $hours = $AutoUpdateHours.ToString([Globalization.CultureInfo]::InvariantCulture)
+            $superviseArgs += @('--update-hours', $hours, '--source', "`"$checkout`"")
+            if ($WithMcp) { $superviseArgs += @('--extras', 'mcp') }
+        } else {
+            Write-Host "[!] -AutoUpdateHours ignored: $checkout is not a git checkout. Re-run this script to upgrade." -ForegroundColor Yellow
+        }
+    }
+    $runValue = "`"$pythonw`" " + ($superviseArgs -join ' ')
+    Invoke-Step "Start at logon: $RunKey\$RunName" {
+        if (-not (Test-Path $pythonw)) { throw "pythonw.exe not found in the venv ($pythonw)" }
+        Set-ItemProperty -Path $RunKey -Name $RunName -Value $runValue
+        # Replace a supervisor from a previous run, then start the new one now (no reboot needed).
+        Stop-VenvProcesses
+        $startArgs = @($superviseArgs | ForEach-Object { $_ })
+        Start-Process -FilePath $pythonw -ArgumentList $startArgs -WindowStyle Hidden
+    }
+}
+
 if (-not $DryRun) {
     Write-Step 'Smoke test: shadowscope --help'
     Invoke-Native (Join-Path $BinDir 'shadowscope.exe') @('--help') | Out-Null
@@ -289,6 +340,12 @@ Write-Host "  1. Add API keys:  notepad `"$EnvFile`""
 Write-Host '  2. Open a NEW terminal, then:  shadowscope enrich 8.8.8.8'
 Write-Host '     Dashboard:                  shadowscope serve   ->  http://127.0.0.1:8765/ui'
 Write-Host "  Upgrade: re-run this script.  Remove: $($MyInvocation.MyCommand.Name) -Uninstall"
+if ($AutoStart) {
+    Write-Host ''
+    Write-Host 'Autostart enabled:' -ForegroundColor Green
+    Write-Host '  The dashboard now starts at logon and restarts itself if it stops:  http://127.0.0.1:8765/ui'
+    Write-Host "  Log: $InstallDir\logs\supervisor.log    Turn off: $($MyInvocation.MyCommand.Name) -Uninstall, or delete the '$RunName' value under $RunKey"
+}
 if ($WithMcp) {
     $mcpPath = Join-Path $BinDir 'shadowscope-mcp.exe'
     # Hand-built: ConvertTo-Json in Windows PowerShell 5.1 indents this into an unreadable sprawl.

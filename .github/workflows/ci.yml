@@ -76,12 +76,23 @@ jobs:
         # hid a 5.1-only bug that made the installer report "Python not found".
         shell: powershell
         run: |
-          ./scripts/install-windows.ps1 -DryRun -WithMcp
+          ./scripts/install-windows.ps1 -DryRun -WithMcp -AutoStart -AutoUpdateHours 6
           if (Test-Path "$env:LOCALAPPDATA\ShadowScope") { throw "dry-run created files" }
 
       - name: Install from checkout
         shell: pwsh
-        run: ./scripts/install-windows.ps1 -WithMcp
+        run: ./scripts/install-windows.ps1 -WithMcp -AutoStart
+
+      - name: Autostart entry exists and the supervised dashboard answers
+        shell: pwsh
+        run: |
+          $run = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run').ShadowScope
+          if ($run -notmatch 'pythonw\.exe" -m ioc_tool\.main supervise') { throw "unexpected Run value: $run" }
+          $ok = $false
+          foreach ($i in 1..30) {
+            try { if ((Invoke-RestMethod http://127.0.0.1:8765/health -TimeoutSec 2).status -eq 'ok') { $ok = $true; break } } catch { Start-Sleep 1 }
+          }
+          if (-not $ok) { Get-Content "$env:LOCALAPPDATA\ShadowScope\logs\supervisor.log" -ErrorAction SilentlyContinue; throw "dashboard did not come up under the supervisor" }
 
       - name: Installed CLI + dashboard assets work
         shell: pwsh
@@ -121,6 +132,7 @@ jobs:
         run: |
           ./scripts/install-windows.ps1 -Uninstall
           if (Test-Path "$env:LOCALAPPDATA\ShadowScope\venv") { throw "venv not removed" }
+          if ((Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).PSObject.Properties.Name -contains 'ShadowScope') { throw "autostart entry survived -Uninstall" }
           if (-not (Test-Path "$env:LOCALAPPDATA\ShadowScope\.env")) { throw ".env removed without -Purge" }
           ./scripts/install-windows.ps1 -Uninstall -Purge
           if (Test-Path "$env:LOCALAPPDATA\ShadowScope\.env") { throw ".env survived -Purge" }

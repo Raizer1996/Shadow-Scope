@@ -99,7 +99,7 @@ def test_cli_parser_builds_with_all_subcommands():
         a for a in parser._actions if getattr(a, 'dest', None) == 'command'
     )
     assert set(subparsers_action.choices.keys()) == {
-        'enrich', 'analyze', 'shodan', 'show', 'serve',
+        'enrich', 'analyze', 'shodan', 'show', 'serve', 'supervise',
         'tag', 'cases', 'watch', 'history', 'diff', 'workspaces',
         'cache',
     }

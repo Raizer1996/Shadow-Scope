@@ -143,6 +143,19 @@ interactive menu, or pass a subcommand for a one-shot operation.
 
 > Paste defanged IOCs (`1[.]2[.]3[.]4`, `hxxp://evil[.]com`, `user[at]example[.]com`) — they're auto-refanged on input. Use `--defang` to defang results on output so reports are safe to share.
 
+**Run the dashboard at every logon (Windows)**
+
+```powershell
+scripts\install-windows.ps1 -AutoStart                 # start at logon, restart if it stops
+scripts\install-windows.ps1 -AutoStart -AutoUpdateHours 6   # also keep a git checkout up to date
+```
+
+One per-user registry value (`HKCU\...\Run\ShadowScope`) runs `pythonw -m ioc_tool.main supervise`: no admin
+rights, no console window, no Task Scheduler. Log: `<InstallDir>\logs\supervisor.log`. Auto-update is off unless
+asked for; it only fast-forwards a clean checkout and rolls back if the reinstall fails. While Claude has the MCP
+server open Windows keeps `shadowscope-mcp.exe` locked, so that update waits until Claude is closed.
+On other systems run `shadowscope supervise` from your own service manager.
+
 **MCP server (Claude Code / any MCP client)**
 
 ```bash
