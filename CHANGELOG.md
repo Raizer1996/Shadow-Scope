@@ -5,6 +5,8 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-11-13
+
 ### Added
 
 - **E-mail addresses are an indicator type.** An address gets a local
