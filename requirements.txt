@@ -2,5 +2,5 @@ requests==2.34.2
 rich==15.0.0
 python-dotenv==1.2.4
 python-whois==0.9.6
-fastapi==0.162.2
+fastapi==0.162.5
 uvicorn[standard]==0.54.0
